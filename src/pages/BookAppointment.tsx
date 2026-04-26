@@ -28,6 +28,19 @@ const generateDates = () => {
   return dates;
 };
 
+// Convert 24-hour to 12-hour format for display
+const formatTimeRange = (timeRange: number[]) => {
+  const convertHour = (h: number) => {
+    if (h === 0) return { hour: 12, ampm: "AM" };
+    if (h === 12) return { hour: 12, ampm: "PM" };
+    if (h > 12) return { hour: h - 12, ampm: "PM" };
+    return { hour: h, ampm: "AM" };
+  };
+  const start = convertHour(timeRange[0]);
+  const end = convertHour(timeRange[1]);
+  return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
+};
+
 const BookAppointment = () => {
   const { clinicId, doctorId } = useParams<{ clinicId: string; doctorId: string }>();
   const navigate = useNavigate();
@@ -94,7 +107,7 @@ const BookAppointment = () => {
         clinic: clinic.name,
         doctor: selectedDoctor?.name,
         date: dates.find((d) => d.value === selectedDate)?.label,
-        timeRange: selectedTimeSlot ? `${selectedTimeSlot.time_range[0]}:00 - ${selectedTimeSlot.time_range[1]}:00` : "",
+        timeRange: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
         address: clinic.address,
         token: `T-${Math.floor(100 + Math.random() * 900)}`,
       },
@@ -119,27 +132,37 @@ const BookAppointment = () => {
     try {
       const patientData = localStorage.getItem("patientData");
       const patient = patientData ? JSON.parse(patientData) : null;
-      
+
+      const selectedSlot = timeSlots[selectedSlotIndex || 0];
+      const timeRange = selectedSlot?.time_range || [9, 10];
+      const time = `${timeRange[0]}:00`;
+
       const response = await fetch("http://localhost:8000/auth/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clinic_id: clinicId,
-          doctor_id: selectedDoctor?.id,
+          doctor_name: selectedDoctor?.name || selectedDoctor?.id,
           patient_id: patient?.id,
           patient_name: patient?.name,
           patient_email: patient?.email,
           patient_phone: patient?.phone,
           date: selectedDate,
-          time_slot_index: selectedSlotIndex,
+          time: time,
+          slot_id: (selectedSlotIndex || 0) + 1, // 1-based slot ID
         }),
       });
-      
+
       if (response.ok) {
         handleConfirm();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Booking failed:", errorData);
+        alert(errorData.detail || "Failed to book appointment");
       }
     } catch (error) {
       console.error("Error booking appointment:", error);
+      alert("Failed to book appointment. Please try again.");
     }
   };
 
@@ -233,7 +256,7 @@ const BookAppointment = () => {
                     }`}
                   >
                     <p className={`font-semibold ${selectedSlotIndex === index ? "text-primary" : "text-foreground"}`}>
-                      {slot.slot_name} • {slot.time_range[0]}:00 - {slot.time_range[1]}:00
+                      {slot.slot_name} • {formatTimeRange(slot.time_range)}
                     </p>
                   </button>
                 ))}
@@ -247,7 +270,7 @@ const BookAppointment = () => {
           <section className="space-y-3">
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
               <p className="text-sm text-primary font-medium">
-                Selected: {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${selectedTimeSlot.time_range[0]}:00 - ${selectedTimeSlot.time_range[1]}:00`}
+                Selected: {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`}
               </p>
             </div>
             <h2 className="text-lg font-semibold text-foreground">Select a Doctor</h2>
@@ -262,7 +285,7 @@ const BookAppointment = () => {
           <section>
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
               <p className="text-sm text-primary font-medium">
-                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${selectedTimeSlot.time_range[0]}:00 - ${selectedTimeSlot.time_range[1]}:00`} • {selectedDoctor?.name}
+                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`} • {selectedDoctor?.name}
               </p>
             </div>
             <h2 className="mb-4 text-lg font-semibold text-foreground">
@@ -294,7 +317,7 @@ const BookAppointment = () => {
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between"><dt className="text-muted-foreground">Clinic</dt><dd className="font-medium text-foreground">{clinic.name}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Doctor</dt><dd className="font-medium text-foreground">{selectedDoctor?.name}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Time</dt><dd className="font-medium text-foreground">{selectedTimeSlot && `${selectedTimeSlot.slot_name} ${selectedTimeSlot.time_range[0]}:00 - ${selectedTimeSlot.time_range[1]}:00`}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Time</dt><dd className="font-medium text-foreground">{selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Date</dt><dd className="font-medium text-foreground">{dates.find((d) => d.value === selectedDate)?.label}</dd></div>
             </dl>
             <p className="mt-4 rounded-lg bg-accent/10 px-4 py-2 text-sm text-accent">

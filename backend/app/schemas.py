@@ -19,6 +19,8 @@ class ClinicSignup(BaseModel):
     section: Optional[str] = None  # Section/Block
     city: Optional[str] = None  # City
     pincode: Optional[str] = None  # Pincode
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
     # Doctor details
     doctor_name: Optional[str] = ""  # Doctor name
     specialization: Optional[str] = ""  # Specialization

@@ -33,13 +33,11 @@ const AdminLogin = () => {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Store secure admin session
-        const token = btoa(`${username}:${Date.now()}:${Math.random().toString(36).substring(7)}`);
-        localStorage.setItem("admin_token", token);
-        localStorage.setItem("admin_logged_in", "true");
-        localStorage.setItem("admin_username", username);
-        localStorage.setItem("admin_id", data.admin_id || "admin-001");
-        localStorage.setItem("admin_session_time", Date.now().toString());
+        sessionStorage.setItem("admin_token", data.access_token);
+        sessionStorage.setItem("admin_logged_in", "true");
+        sessionStorage.setItem("admin_username", username);
+        sessionStorage.setItem("admin_id", data.admin_id || "admin-001");
+        sessionStorage.setItem("admin_session_time", Date.now().toString());
         
         toast.success("Login successful!");
         navigate(from, { replace: true });
@@ -47,23 +45,7 @@ const AdminLogin = () => {
         setError(data.detail || "Invalid username or password");
       }
     } catch (err) {
-      // Fallback to hardcoded credentials if backend is unreachable
-      const ADMIN_USERNAME = "admin1";
-      const ADMIN_PASSWORD = "Diganthadmin1";
-
-      if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-        const token = btoa(`${username}:${Date.now()}:${Math.random().toString(36).substring(7)}`);
-        localStorage.setItem("admin_token", token);
-        localStorage.setItem("admin_logged_in", "true");
-        localStorage.setItem("admin_username", username);
-        localStorage.setItem("admin_id", "admin-001");
-        localStorage.setItem("admin_session_time", Date.now().toString());
-        
-        toast.success("Login successful!");
-        navigate(from, { replace: true });
-      } else {
-        setError("Invalid username or password");
-      }
+      setError("Admin service unavailable. Please try again.");
     }
 
     setLoading(false);

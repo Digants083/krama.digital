@@ -4,7 +4,7 @@ const Footer = () => (
       <div>
         <p className="font-display text-2xl font-semibold text-primary">Krama</p>
         <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-          A calmer clinic experience for patients and a cleaner queue workflow for staff.
+          Smart queue management connecting patients and clinics for seamless healthcare.
         </p>
       </div>
 

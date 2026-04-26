@@ -102,6 +102,11 @@ const ClinicSignup = () => {
 
   // Send OTP to email
   const handleSendOTP = async () => {
+    if (!form.doctor_name) {
+      setError("Please enter doctor name");
+      return;
+    }
+
     if (!form.email) {
       setError("Please enter your email address");
       return;
@@ -449,7 +454,7 @@ const ClinicSignup = () => {
                 </div>
 
                 {/* Password Fields */}
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-4">
                   <div className="space-y-1.5">
                     <Label htmlFor="password">Password *</Label>
                     <div className="relative">
@@ -467,9 +472,9 @@ const ClinicSignup = () => {
 
                   {/* Password Requirements */}
                   {form.password && (
-                    <div className="rounded-lg border p-3 text-sm">
-                      <p className="font-medium mb-2">Password Requirements:</p>
-                      <div className="grid grid-cols-2 gap-1">
+                    <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4 text-sm">
+                      <p className="mb-3 font-semibold text-foreground">Password Requirements</p>
+                      <div className="grid gap-2 sm:grid-cols-2">
                         <Requirement met={passwordValid.length} label="At least 8 characters" />
                         <Requirement met={passwordValid.uppercase} label="One uppercase (A-Z)" />
                         <Requirement met={passwordValid.lowercase} label="One lowercase (a-z)" />
@@ -493,28 +498,6 @@ const ClinicSignup = () => {
                       />
                     </div>
                   </div>
-
-                  {/* OTP Input - shown after OTP is sent */}
-                  {showOTPInput && (
-                    <div className="space-y-1.5 border-t pt-4 mt-4">
-                      <Label htmlFor="otp">Enter OTP sent to your email *</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          id="otp"
-                          type="text"
-                          placeholder="Enter 6-digit OTP"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                          className="pl-9"
-                          maxLength={6}
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        OTP sent to {form.email}. Check your inbox.
-                      </p>
-                    </div>
-                  )}
                 </div>
 
                 <Button type="button" onClick={handleNext} className="w-full">
@@ -588,12 +571,12 @@ const ClinicSignup = () => {
                   {showOTPInput ? (
                     <Button 
                       type="button" 
-                      className="flex-1" 
-                      disabled={loading || otpLoading}
-                      onClick={handleVerifyAndRegister}
+                      className="flex-1"
+                      variant="outline"
+                      disabled
                     >
-                      {loading ? "Verifying..." : "Verify OTP & Register"}
-                      <ArrowRight className="ml-1 h-4 w-4" />
+                      OTP Sent to Email
+                      <Mail className="ml-1 h-4 w-4" />
                     </Button>
                   ) : (
                     <Button 
@@ -607,6 +590,50 @@ const ClinicSignup = () => {
                     </Button>
                   )}
                 </div>
+
+                {showOTPInput && (
+                  <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-4">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Email verification required</p>
+                      <p className="text-xs text-muted-foreground">
+                        We sent a 6-digit OTP to {form.email}. Enter it below to continue the clinic registration request.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="otp">OTP *</Label>
+                      <Input
+                        id="otp"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Enter 6-digit OTP"
+                        value={otp}
+                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        maxLength={6}
+                      />
+                    </div>
+
+                    <div className="flex gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex-1"
+                        disabled={otpLoading}
+                        onClick={handleSendOTP}
+                      >
+                        {otpLoading ? "Sending OTP..." : "Resend OTP"}
+                      </Button>
+                      <Button
+                        type="button"
+                        className="flex-1"
+                        disabled={loading || otp.length !== 6}
+                        onClick={handleVerifyAndRegister}
+                      >
+                        {loading ? "Verifying..." : "Verify OTP"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </form>

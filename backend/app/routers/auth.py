@@ -13,10 +13,11 @@ from sqlalchemy import select, delete
 from app.database.db import get_db
 from app.database.models import (
     Clinic, Patient, OTPVerification, Appointment, CompletedAppointment,
-    Review, ReviewReaction, ClinicImage, QRAppointment, PendingClinicRegistration
+    Review, ReviewReaction, ClinicImage, QRAppointment, PendingClinicRegistration,
+    RejectedClinic, ClinicTimeSlot
 )
-from app.services.geocoding_service import get_coordinates_from_structured_address
 from app.services.email_service import send_clinic_registration_received_email
+from app.services.geocoding_service import get_coordinates_from_address, get_coordinates_from_structured_address
 from app.schemas import (
     ClinicSignup, ClinicLogin, PatientSignup, PatientLogin,
     ChangePasswordRequest, ChangePhoneRequest, DeleteAccountRequest, DeleteClinicRequest,
@@ -77,13 +78,22 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
         # Check if email exists in approved clinics
         result = await db.execute(select(Clinic).where(Clinic.email == clinic_data.email))
         existing_clinic = result.scalar_one_or_none()
-        
+
         if existing_clinic:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered with an approved clinic"
+                detail="You already have an account. Please login instead."
             )
-        
+
+        result = await db.execute(select(RejectedClinic).where(RejectedClinic.email == clinic_data.email))
+        rejected_clinic = result.scalar_one_or_none()
+
+        if rejected_clinic:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Your clinic registration has been rejected. Please contact support before registering again."
+            )
+
         # Check if email exists in pending registrations
         result = await db.execute(
             select(PendingClinicRegistration)
@@ -91,13 +101,13 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
             .where(PendingClinicRegistration.status == "pending")
         )
         existing_pending = result.scalar_one_or_none()
-        
+
         if existing_pending:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A registration request with this email is already pending approval"
             )
-        
+
         # Validate password strength (same as patient signup)
         valid, error_msg = validate_password_strength(clinic_data.password)
         if not valid:
@@ -105,28 +115,12 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error_msg
             )
-        
+
         hashed_password = hash_password(clinic_data.password)
-        
+
         # Generate unique clinic ID
         clinic_id = generate_clinic_id()
-        
-        # Get precise latitude and longitude from structured address
-        # Use structured components if available, otherwise fall back to full address
-        if clinic_data.street_address and clinic_data.road and clinic_data.city and clinic_data.pincode:
-            latitude, longitude = get_coordinates_from_structured_address(
-                street=clinic_data.street_address,
-                road=clinic_data.road,
-                layout=clinic_data.layout,
-                section=clinic_data.section,
-                city=clinic_data.city,
-                pincode=clinic_data.pincode
-            )
-        else:
-            # Fallback to simple address geocoding
-            from app.services.geocoding_service import get_coordinates_from_address
-            latitude, longitude = get_coordinates_from_address(clinic_data.address)
-        
+
         # Create pending registration with all address components and doctor details
         new_pending_registration = PendingClinicRegistration(
             clinic_id=clinic_id,
@@ -142,8 +136,8 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
             city=clinic_data.city or "",
             pincode=clinic_data.pincode or "",
             address=clinic_data.address,
-            latitude=latitude,
-            longitude=longitude,
+            latitude=clinic_data.latitude,
+            longitude=clinic_data.longitude,
             # Doctor details
             doctor_name=clinic_data.doctor_name if clinic_data.doctor_name else "",
             specialization=clinic_data.specialization,
@@ -151,17 +145,17 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
             qualifications=clinic_data.qualifications,
             status="pending"
         )
-        
+
         db.add(new_pending_registration)
         await db.commit()
         await db.refresh(new_pending_registration)
-        
+
         # Send registration received email
         email_sent = send_clinic_registration_received_email(
             clinic_data.email,
             clinic_data.clinic_name
         )
-        
+
         return AuthResponse(
             message="Registration received. Your application is under review. You will receive a response within 24 hours.",
             clinic_id=clinic_id,
@@ -197,6 +191,8 @@ class ClinicSignupOTPRequest(BaseModel):
     specialization: Optional[str] = None
     experience: Optional[str] = None
     qualifications: Optional[str] = None
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
 
 
 class ClinicVerifySignupRequest(BaseModel):
@@ -217,6 +213,8 @@ class ClinicVerifySignupRequest(BaseModel):
     specialization: Optional[str] = None
     experience: Optional[str] = None
     qualifications: Optional[str] = None
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
 
 
 @router.post("/clinic/send-signup-otp", response_model=OTPResponse)
@@ -239,7 +237,14 @@ async def clinic_send_signup_otp(
         logger.warning(f"Email already registered as approved clinic: {email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered with an approved clinic"
+            detail="You already have an account. Please login instead."
+        )
+
+    result = await db.execute(select(RejectedClinic).where(RejectedClinic.email == email))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your clinic registration has been rejected. Please contact support before registering again."
         )
     
     # Check if email exists in pending registrations
@@ -262,23 +267,52 @@ async def clinic_send_signup_otp(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
         )
-    
-    # Send OTP
-    logger.info(f"Sending OTP to {email}")
-    success, message = await OTPService.send_otp(db, email)
-    logger.info(f"OTP send result for {email}: success={success}, message={message}")
-    
+
+    # Replace any stale pending OTP before creating a fresh one for clinic signup.
+    otp_result = await db.execute(
+        select(OTPVerification).where(OTPVerification.email == email)
+    )
+    existing_otp = otp_result.scalar_one_or_none()
+
+    if existing_otp and not existing_otp.is_verified:
+        await db.delete(existing_otp)
+        await db.commit()
+
+    hashed_password = hash_password(request.password)
+
+    otp_code, success = await OTPService.create_otp_with_user_data(
+        db,
+        email,
+        name=request.clinic_name,
+        password=hashed_password,
+        phone=request.phone
+    )
+
     if not success:
-        logger.error(f"Failed to send OTP to {email}: {message}")
+        logger.error(f"OTP creation rate limited for {email}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=message
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Please wait before requesting a new OTP"
         )
-    
+
+    from app.services.email_service import send_otp as send_otp_email
+
+    logger.info(f"Sending OTP to {email}")
+    email_sent = send_otp_email(email, otp_code)
+
+    if not email_sent:
+        await OTPService.delete_otp(db, email)
+        logger.error(f"Failed to send OTP email to {email}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send OTP email"
+        )
+
     return {
         "success": True,
         "message": "OTP sent to your email. Please verify to complete registration.",
-        "email": email
+        "email": email,
+        "expires_in": 300
     }
 
 
@@ -293,8 +327,8 @@ async def clinic_verify_signup(
     import traceback
     email = request.email.strip().lower()
     
-    # Verify OTP
-    is_valid, message = await OTPService.verify_otp(db, email, request.otp)
+    # Verify OTP (without creating patient account)
+    is_valid, message = await OTPService.verify_otp_only(db, email, request.otp)
     
     if not is_valid:
         raise HTTPException(
@@ -308,7 +342,14 @@ async def clinic_verify_signup(
         if result.scalar_one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered with an approved clinic"
+                detail="You already have an account. Please login instead."
+            )
+
+        result = await db.execute(select(RejectedClinic).where(RejectedClinic.email == email))
+        if result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Your clinic registration has been rejected. Please contact support before registering again."
             )
         
         result = await db.execute(
@@ -327,21 +368,7 @@ async def clinic_verify_signup(
         
         # Generate unique clinic ID
         clinic_id = generate_clinic_id()
-        
-        # Get coordinates
-        if request.street_address and request.road and request.city and request.pincode:
-            latitude, longitude = get_coordinates_from_structured_address(
-                street=request.street_address,
-                road=request.road,
-                layout=request.layout,
-                section=request.section,
-                city=request.city,
-                pincode=request.pincode
-            )
-        else:
-            from app.services.geocoding_service import get_coordinates_from_address
-            latitude, longitude = get_coordinates_from_address(request.address)
-        
+
         # Create pending registration
         new_pending_registration = PendingClinicRegistration(
             clinic_id=clinic_id,
@@ -357,8 +384,8 @@ async def clinic_verify_signup(
             city=request.city or "",
             pincode=request.pincode or "",
             address=request.address,
-            latitude=latitude,
-            longitude=longitude,
+            latitude=request.latitude,
+            longitude=request.longitude,
             doctor_name=request.doctor_name or "",
             specialization=request.specialization,
             experience=request.experience,
@@ -401,12 +428,22 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
     clinic = result.scalar_one_or_none()
     
     if clinic:
+        # A clinic needs to pin their location if they haven't done it yet
+        # OR if for some reason the coordinates are missing.
+        first_login = not clinic.has_pinned_location or not clinic.latitude or not clinic.longitude
+
         if not verify_password(login_data.password, clinic.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
-        return AuthResponse(message="Login successful", user_type="clinic", clinic_id=clinic.clinic_id)
+        return AuthResponse(
+            message="Login successful",
+            user_type="clinic",
+            clinic_id=clinic.clinic_id,
+            first_login=first_login,
+            address=clinic.address # Provide address for the frontend to center the map
+        )
     
     # Check if there's a pending registration with this email
     result = await db.execute(
@@ -563,10 +600,26 @@ async def get_clinic_data(
         "email": clinic.email,
         "phone": clinic.phone,
         "address": clinic.address,
+        "street_address": clinic.street_address,
+        "road": clinic.road,
+        "layout": clinic.layout,
+        "section": clinic.section,
+        "city": clinic.city,
+        "pincode": clinic.pincode,
+        "latitude": clinic.latitude,
+        "longitude": clinic.longitude,
         "image_urls": clinic.image_urls or [],
         "doctor_name": clinic.doctor_name,
         "available": clinic.available,
-        "created_at": clinic.created_at
+        "created_at": clinic.created_at,
+        "full_formatted_address": ", ".join(filter(None, [
+            clinic.street_address,
+            clinic.road,
+            clinic.layout,
+            clinic.section,
+            clinic.city,
+            clinic.pincode
+        ])) or clinic.address or ""
     }
 
 # List All Clinics Endpoint
@@ -574,13 +627,31 @@ async def get_clinic_data(
 async def list_clinics(db: AsyncSession = Depends(get_db)):
     """
     List all clinics for patient to browse.
-    Only shows clinics that are available (available=true).
+    Only shows clinics that are active for patient discovery.
     """
-    result = await db.execute(select(Clinic).where(Clinic.available == True))
+    result = await db.execute(
+        select(Clinic).where(Clinic.is_active == True)
+    )
     clinics = result.scalars().all()
+
+    clinics_updated = False
     
     clinic_list = []
     for clinic in clinics:
+        if not clinic.latitude or not clinic.longitude:
+            latitude, longitude = get_coordinates_from_structured_address(
+                clinic.street_address or "",
+                clinic.road or "",
+                clinic.layout,
+                clinic.section,
+                clinic.city or "",
+                clinic.pincode or ""
+            )
+            if latitude and longitude:
+                clinic.latitude = latitude
+                clinic.longitude = longitude
+                clinics_updated = True
+
         # Use actual category as specialization, or default to "general"
         specializations = [clinic.category.lower()] if clinic.category else ["general"]
         
@@ -600,7 +671,12 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
             "email": clinic.email,
             "phone": clinic.phone,
             "address": clinic.address,
+            "street_address": clinic.street_address,
+            "road": clinic.road,
+            "layout": clinic.layout,
+            "section": clinic.section,
             "city": clinic.city or "",
+            "pincode": clinic.pincode,
             "category": clinic.category or "",
             "doctor_name": clinic.doctor_name or "",
             "specialization": clinic.specialization or "",
@@ -613,6 +689,9 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
             "is_active": clinic.is_active or False,
             "available": clinic.available or False
         })
+
+    if clinics_updated:
+        await db.commit()
     
     return {"clinics": clinic_list}
 
@@ -673,6 +752,14 @@ async def update_clinic_profile(
     clinic_id = request.get("clinic_id")
     address = request.get("address")
     image_urls = request.get("image_urls")
+    street_address = request.get("street_address")
+    road = request.get("road")
+    layout = request.get("layout")
+    section = request.get("section")
+    city = request.get("city")
+    pincode = request.get("pincode")
+    latitude = request.get("latitude")
+    longitude = request.get("longitude")
     
     if not clinic_id:
         raise HTTPException(
@@ -692,18 +779,130 @@ async def update_clinic_profile(
     # Update address if provided
     if address is not None:
         clinic.address = address
+
+    if street_address is not None:
+        clinic.street_address = street_address
+    if road is not None:
+        clinic.road = road
+    if layout is not None:
+        clinic.layout = layout
+    if section is not None:
+        clinic.section = section
+    if city is not None:
+        clinic.city = city
+    if pincode is not None:
+        clinic.pincode = pincode
+    if latitude is not None:
+        clinic.latitude = latitude
+    if longitude is not None:
+        clinic.longitude = longitude
     
     # Update image URLs if provided (max 5 images)
     if image_urls is not None:
         # Ensure only 5 images max
         clinic.image_urls = image_urls[:5] if len(image_urls) > 5 else image_urls
+
+    address_changed = any(
+        value is not None
+        for value in [address, street_address, road, layout, section, city, pincode]
+    )
+
+    # Build full formatted address from structured fields
+    full_parts = []
+    if clinic.street_address:
+        full_parts.append(clinic.street_address)
+    if clinic.road:
+        full_parts.append(clinic.road)
+    if clinic.layout:
+        full_parts.append(clinic.layout)
+    if clinic.section:
+        full_parts.append(clinic.section)
+    if clinic.city:
+        full_parts.append(clinic.city)
+    if clinic.pincode:
+        full_parts.append(clinic.pincode)
+    
+    full_formatted_address = ", ".join(full_parts) if full_parts else clinic.address
+    clinic.address = full_formatted_address
+    
+    if address_changed:
+        # Geocode the address to get fresh coordinates
+        lat, lon = get_coordinates_from_structured_address(
+            clinic.street_address or "",
+            clinic.road or "",
+            clinic.layout,
+            clinic.section,
+            clinic.city or "",
+            clinic.pincode or ""
+        )
+        # Only update if we actually found something
+        if lat and lon:
+            clinic.latitude = lat
+            clinic.longitude = lon
     
     await db.commit()
     
     return {
         "message": "Profile updated successfully",
         "address": clinic.address,
-        "image_urls": clinic.image_urls or []
+        "full_formatted_address": full_formatted_address,
+        "street_address": clinic.street_address,
+        "road": clinic.road,
+        "layout": clinic.layout,
+        "section": clinic.section,
+        "city": clinic.city,
+        "pincode": clinic.pincode,
+        "image_urls": clinic.image_urls or [],
+        "latitude": clinic.latitude,
+        "longitude": clinic.longitude
+    }
+
+@router.put("/clinic/update-location")
+async def update_clinic_location(
+    request: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update clinic location with pinned coordinates (no geocoding)"""
+    clinic_id = request.get("clinic_id")
+    latitude = request.get("latitude")
+    longitude = request.get("longitude")
+    address = request.get("address")
+    
+    if not clinic_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="clinic_id is required"
+        )
+    
+    if not latitude or not longitude:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="latitude and longitude are required"
+        )
+    
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    
+    if not clinic:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Clinic not found"
+        )
+    
+    clinic.latitude = latitude
+    clinic.longitude = longitude
+    clinic.has_pinned_location = True
+    
+    if address:
+        clinic.address = address
+    
+    await db.commit()
+    
+    return {
+        "message": "Location updated successfully",
+        "latitude": clinic.latitude,
+        "longitude": clinic.longitude,
+        "has_pinned_location": clinic.has_pinned_location
     }
 
 @router.post("/clinic/upload-image")
@@ -1031,6 +1230,46 @@ async def patient_delete_account(
     
     return {"message": "Account deleted successfully"}
 
+@router.post("/clinic/pin-location")
+async def pin_clinic_location(
+    request: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update clinic's exact location and mark as pinned.
+    Expects clinic_id, latitude, and longitude.
+    """
+    clinic_id = request.get("clinic_id")
+    lat = request.get("latitude")
+    lon = request.get("longitude")
+
+    if not all([clinic_id, lat, lon]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="clinic_id, latitude, and longitude are required"
+        )
+
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+    clinic = result.scalar_one_or_none()
+
+    if not clinic:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Clinic not found"
+        )
+
+    clinic.latitude = str(lat)
+    clinic.longitude = str(lon)
+    clinic.has_pinned_location = True
+
+    await db.commit()
+
+    return {
+        "message": "Location pinned successfully",
+        "latitude": clinic.latitude,
+        "longitude": clinic.longitude
+    }
+
 # ============= OTP VERIFICATION ENDPOINTS =============
 
 @router.post("/register/send-otp", response_model=OTPResponse)
@@ -1219,206 +1458,188 @@ async def create_appointment(
     Create a new appointment with auto-incrementing token number.
     Stop booking X minutes before clinic end time.
     """
-    from datetime import datetime, timedelta
-    
-    clinic_id = request.get("clinic_id")
-    patient_id = request.get("patient_id")
-    patient_name = request.get("patient_name")
-    patient_email = request.get("patient_email")
-    patient_phone = request.get("patient_phone", "")
-    doctor_name = request.get("doctor_name", "")
-    date = request.get("date")
-    time = request.get("time")
-    
-    # Validate required fields
-    if not all([clinic_id, patient_id, patient_name, patient_email, date, time]):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing required fields"
-        )
-    
-    # Get clinic details
-    result = await db.execute(
-        select(Clinic).where(Clinic.clinic_id == clinic_id)
-    )
-    clinic = result.scalar_one_or_none()
-    
-    if not clinic:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Clinic not found"
-        )
-    
-    # Check if booking is still allowed (cutoff time)
-    if clinic.end is not None:
-        now = datetime.now()
-        cutoff_minutes = clinic.booking_cutoff_minutes or 15
+    try:
+        from datetime import datetime, timedelta
         
-        # Create today's end time datetime
-        end_hour = clinic.end
-        end_time_today = now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
-        cutoff_time = end_time_today - timedelta(minutes=cutoff_minutes)
+        clinic_id = request.get("clinic_id")
+        patient_id = request.get("patient_id")
+        patient_name = request.get("patient_name")
+        patient_email = request.get("patient_email")
+        patient_phone = request.get("patient_phone", "")
+        doctor_name = request.get("doctor_name", "")
+        date = request.get("date")
+        time = request.get("time")
+        slot_id = request.get("slot_id")
         
-        # If current time is past cutoff, reject booking
-        if now >= cutoff_time:
+        if not all([clinic_id, patient_id, patient_name, patient_email, date, time]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Booking closed — doctor will not be available before end time. Last booking at {cutoff_time.strftime('%H:%M')}."
+                detail="Missing required fields"
             )
-    
-    # Check if patient already has an appointment for this clinic on this date
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.clinic_id == clinic_id,
-            Appointment.patient_email == patient_email,
-            Appointment.date == date
+        
+        result = await db.execute(
+            select(Clinic).where(Clinic.clinic_id == clinic_id)
         )
-    )
-    existing_appointment = result.scalar_one_or_none()
-    
-    if existing_appointment:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You already have an appointment booked for this clinic on this date"
-        )
-
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.clinic_id == clinic_id,
-            Appointment.date == date,
-            Appointment.status.in_(["booked", "serving"])
-        )
-    )
-    active_online = len(result.scalars().all())
-
-    result = await db.execute(
-        select(QRAppointment).where(
-            QRAppointment.clinic_id == clinic_id,
-            QRAppointment.date == date,
-            QRAppointment.status.in_(["booked", "serving"])
-        )
-    )
-    active_walkin = len(result.scalars().all())
-
-    is_first_active_patient = (active_online + active_walkin) == 0
-    
-    # Get next token number for this clinic AND date (start from T-0 for each date)
-    # Count from BOTH tables (online appointments + QR walk-ins) for unified numbering
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.clinic_id == clinic_id,
-            Appointment.date == date
-        )
-    )
-    online_count = len(result.scalars().all())
-
-    result = await db.execute(
-        select(QRAppointment).where(
-            QRAppointment.clinic_id == clinic_id,
-            QRAppointment.date == date
-        )
-    )
-    qr_count = len(result.scalars().all())
-
-    # Get highest token number from all three tables (active + completed)
-    max_token = -1
-    
-    # Check online appointments
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.clinic_id == clinic_id,
-            Appointment.date == date
-        )
-    )
-    for apt in result.scalars().all():
-        if apt.appointment_token:
-            try:
-                token_num = int(apt.appointment_token.replace("T-", ""))
-                if token_num > max_token:
-                    max_token = token_num
-            except:
-                pass
-    
-    # Check QR appointments
-    result = await db.execute(
-        select(QRAppointment).where(
-            QRAppointment.clinic_id == clinic_id,
-            QRAppointment.date == date
-        )
-    )
-    for apt in result.scalars().all():
-        if apt.appointment_token:
-            try:
-                token_num = int(apt.appointment_token.replace("T-", ""))
-                if token_num > max_token:
-                    max_token = token_num
-            except:
-                pass
-    
-    # Check completed appointments for today
-    result = await db.execute(
-        select(CompletedAppointment).where(
-            CompletedAppointment.clinic_id == clinic_id,
-            CompletedAppointment.date == date
-        )
-    )
-    for apt in result.scalars().all():
-        if apt.appointment_token:
-            try:
-                token_num = int(apt.appointment_token.replace("T-", ""))
-                if token_num > max_token:
-                    max_token = token_num
-            except:
-                pass
-
-    # Next token is highest + 1
-    next_token_number = max_token + 1
-    appointment_token = f"T-{next_token_number}"
-    
-    # Create appointment
-    new_appointment = Appointment(
-        appointment_token=appointment_token,
-        clinic_id=clinic_id,
-        patient_id=patient_id,
-        patient_name=patient_name,
-        patient_email=patient_email,
-        patient_phone=patient_phone or "Not provided",
-        doctor_name=doctor_name,
-        date=date,
-        time=time,
-        status="booked"
-    )
-    
-    db.add(new_appointment)
-    await db.commit()
-    await db.refresh(new_appointment)
-
-    if is_first_active_patient:
-        from app.services.email_service import send_queue_alert
-
-        email_to = (patient_email or "").strip()
-        if email_to:
-            email_sent = send_queue_alert(
-                email_to,
-                patient_name,
-                clinic.clinic_name if clinic else clinic_id,
-                "immediate",
+        clinic = result.scalar_one_or_none()
+        
+        if not clinic:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clinic not found"
             )
-            if email_sent:
-                new_appointment.notification_stage = "immediate"
-                await db.commit()
-    
-    return {
-        "message": "Appointment booked successfully",
-        "appointment_id": new_appointment.id,
-        "token": appointment_token,
-        "patient_name": patient_name,
-        "patient_phone": patient_phone,
-        "patient_email": patient_email,
-        "clinic_id": clinic_id,
-        "date": date,
-        "time": time
-    }
+        
+        if clinic.end is not None:
+            now = datetime.now()
+            cutoff_minutes = clinic.booking_cutoff_minutes or 15
+            end_hour = clinic.end
+            end_time_today = now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
+            cutoff_time = end_time_today - timedelta(minutes=cutoff_minutes)
+            if now >= cutoff_time:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Booking closed — doctor will not be available before end time. Last booking at {cutoff_time.strftime('%H:%M')}."
+                )
+        
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.patient_email == patient_email,
+                Appointment.date == date
+            )
+        )
+        existing_appointment = result.scalar_one_or_none()
+        
+        if existing_appointment:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You already have an appointment booked for this clinic on this date"
+            )
+
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.date == date,
+                Appointment.status.in_(["booked", "serving"])
+            )
+        )
+        active_online = len(result.scalars().all())
+
+        result = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.clinic_id == clinic_id,
+                QRAppointment.date == date,
+                QRAppointment.status.in_(["booked", "serving"])
+            )
+        )
+        active_walkin = len(result.scalars().all())
+
+        is_first_active_patient = (active_online + active_walkin) == 0
+        
+        max_token = -1
+        
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.date == date,
+                Appointment.slot_id == slot_id
+            )
+        )
+        for apt in result.scalars().all():
+            if apt.appointment_token:
+                try:
+                    token_num = int(apt.appointment_token.replace("T-", ""))
+                    if token_num > max_token:
+                        max_token = token_num
+                except Exception:
+                    pass
+        
+        result = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.clinic_id == clinic_id,
+                QRAppointment.date == date,
+                QRAppointment.slot_id == slot_id
+            )
+        )
+        for apt in result.scalars().all():
+            if apt.appointment_token:
+                try:
+                    token_num = int(apt.appointment_token.replace("T-", ""))
+                    if token_num > max_token:
+                        max_token = token_num
+                except Exception:
+                    pass
+        
+        result = await db.execute(
+            select(CompletedAppointment).where(
+                CompletedAppointment.clinic_id == clinic_id,
+                CompletedAppointment.date == date
+            )
+        )
+        for apt in result.scalars().all():
+            if apt.appointment_token:
+                try:
+                    token_num = int(apt.appointment_token.replace("T-", ""))
+                    if token_num > max_token:
+                        max_token = token_num
+                except Exception:
+                    pass
+
+        next_token_number = max_token + 1
+        appointment_token = f"T-{next_token_number}"
+        
+        new_appointment = Appointment(
+            appointment_token=appointment_token,
+            clinic_id=clinic_id,
+            patient_id=patient_id,
+            patient_name=patient_name,
+            patient_email=patient_email,
+            patient_phone=patient_phone or "Not provided",
+            doctor_name=doctor_name,
+            date=date,
+            time=time,
+            status="booked",
+            slot_id=slot_id
+        )
+        
+        db.add(new_appointment)
+        await db.commit()
+        await db.refresh(new_appointment)
+
+        # New notification logic:
+        # - First patient: no immediate email (will get 10-min pre-slot email via scheduled task)
+        # - Second patient: gets "reach_auto" email immediately on booking
+        if not is_first_active_patient:
+            # This is the second patient - send "reach automatically" email
+            from app.services.email_service import send_queue_alert
+
+            email_to = (patient_email or "").strip()
+            if email_to:
+                email_sent = send_queue_alert(
+                    email_to,
+                    patient_name,
+                    clinic.clinic_name if clinic else clinic_id,
+                    "reach_auto",
+                )
+                if email_sent:
+                    new_appointment.notification_stage = "reach_auto"
+                    await db.commit()
+        
+        return {
+            "message": "Appointment booked successfully",
+            "appointment_id": new_appointment.id,
+            "token": appointment_token,
+            "slot_id": slot_id,
+            "patient_name": patient_name,
+            "patient_phone": patient_phone,
+            "patient_email": patient_email,
+            "clinic_id": clinic_id,
+            "date": date,
+            "time": time
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create appointment: {str(e)}")
 
 @router.get("/appointments/clinic/{clinic_id}")
 async def get_clinic_appointments(
@@ -1449,7 +1670,12 @@ async def get_clinic_appointments(
             "created_at": apt.created_at
         })
     
-    return {"appointments": appointment_list, "total": len(appointment_list)}
+    return {
+        "appointments": appointment_list,
+        "total": len(appointment_list),
+        "active_slot_id": active_slot_id,
+        "viewing_slot_id": viewing_slot_id,
+    }
 
 @router.get("/appointments/patient/{patient_id}")
 async def get_patient_appointments(
@@ -1486,41 +1712,44 @@ async def get_patient_appointments_by_email(
     """
     Get all appointments for a specific patient by email.
     """
-    from app.database.models import Clinic
-    
-    result = await db.execute(
-        select(Appointment).where(Appointment.patient_email == email).order_by(Appointment.id)
-    )
-    appointments = result.scalars().all()
-    
-    appointment_list = []
-    for apt in appointments:
-        clinic_name = apt.clinic_id
-        clinic_result = await db.execute(
-            select(Clinic).where(Clinic.clinic_id == apt.clinic_id)
+    try:
+        from app.database.models import Clinic
+        
+        result = await db.execute(
+            select(Appointment).where(Appointment.patient_email == email).order_by(Appointment.id)
         )
-        clinic = clinic_result.scalar_one_or_none()
-        if clinic:
-            clinic_name = clinic.clinic_name
-            
-        appointment_list.append({
-            "id": apt.id,
-            "appointment_token": apt.appointment_token,
-            "clinic_id": apt.clinic_id,
-            "clinic_name": clinic_name,
-            "address": clinic.address if clinic else "",
-            "patient_id": apt.patient_id,
-            "patient_name": apt.patient_name,
-            "patient_email": apt.patient_email,
-            "patient_phone": apt.patient_phone,
-            "doctor_name": apt.doctor_name,
-            "date": apt.date,
-            "time": apt.time,
-            "status": apt.status,
-            "created_at": apt.created_at
-        })
-    
-    return {"appointments": appointment_list, "total": len(appointment_list)}
+        appointments = result.scalars().all()
+        
+        appointment_list = []
+        for apt in appointments:
+            clinic_name = apt.clinic_id
+            clinic_result = await db.execute(
+                select(Clinic).where(Clinic.clinic_id == apt.clinic_id)
+            )
+            clinic = clinic_result.scalar_one_or_none()
+            if clinic:
+                clinic_name = clinic.clinic_name
+                
+            appointment_list.append({
+                "id": apt.id,
+                "appointment_token": apt.appointment_token,
+                "clinic_id": apt.clinic_id,
+                "clinic_name": clinic_name,
+                "address": clinic.address if clinic else "",
+                "patient_id": apt.patient_id,
+                "patient_name": apt.patient_name,
+                "patient_email": apt.patient_email,
+                "patient_phone": apt.patient_phone,
+                "doctor_name": apt.doctor_name,
+                "date": apt.date,
+                "time": apt.time,
+                "status": apt.status,
+                "created_at": apt.created_at
+            })
+        
+        return {"appointments": appointment_list, "total": len(appointment_list)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch appointments: {str(e)}")
 
 @router.get("/clinic/appointments")
 async def get_clinic_appointments(
@@ -1572,22 +1801,90 @@ async def get_today_appointments(
     Returns combined list ordered by creation time.
     """
     from datetime import datetime
+    import json
+
+    def _parse_slot_record(slot_record: ClinicTimeSlot | None):
+        if not slot_record:
+            return None, [], []
+
+        slots = slot_record.slots
+        if isinstance(slots, str):
+            slots = json.loads(slots)
+        slots = list(slots or [])
+
+        slot_array = slot_record.slot or []
+        if isinstance(slot_array, str):
+            slot_array = json.loads(slot_array) if slot_array else []
+        slot_array = list(slot_array or [])
+
+        return slot_record, slots, slot_array
+
+    def _current_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> int | None:
+        for idx, slot in enumerate(slots or []):
+            # Check if slot is open using the is_open field from slots JSON
+            if not slot.get("is_open"):
+                continue
+
+            start, end = slot.get("time_range", [0, 0])
+            if start <= current_time_decimal < end:
+                return idx
+        return None
+
+    def _next_open_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> int | None:
+        candidates: list[tuple[float, int]] = []
+        for idx, slot in enumerate(slots or []):
+            # Check if slot is open using the is_open field from slots JSON
+            if not slot.get("is_open"):
+                continue
+
+            start, _end = slot.get("time_range", [0, 0])
+            if start > current_time_decimal:
+                candidates.append((start, idx))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
+
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # Fetch online appointments from appointments table
+    slot_result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    slot_record = slot_result.scalar_one_or_none()
+    _record, slots, slot_array = _parse_slot_record(slot_record)
+
+    now = datetime.now()
+    current_time_decimal = now.hour + now.minute / 60.0
+
+    active_slot_index = _current_slot_index(slots, slot_array, current_time_decimal)
+    active_slot_id = (active_slot_index + 1) if active_slot_index is not None else None
+    viewing_slot_id = active_slot_id
+
+    # If between slots (no active slot), show the next open slot list (so clinic can see who's booked next)
+    if viewing_slot_id is None:
+        next_index = _next_open_slot_index(slots, slot_array, current_time_decimal)
+        viewing_slot_id = (next_index + 1) if next_index is not None else None
+
+    if viewing_slot_id is None:
+        return {"appointments": [], "total": 0, "active_slot_id": None, "viewing_slot_id": None}
+
+    # Fetch online appointments only for the viewing slot
     result = await db.execute(
         select(Appointment).where(
             Appointment.clinic_id == clinic_id,
-            Appointment.date == today
+            Appointment.date == today,
+            Appointment.slot_id == viewing_slot_id
         ).order_by(Appointment.id)
     )
     online_appointments = result.scalars().all()
 
-    # Fetch QR walk-in appointments from qr_appointments table
+    # Fetch QR walk-in appointments only for the viewing slot
     result = await db.execute(
         select(QRAppointment).where(
             QRAppointment.clinic_id == clinic_id,
-            QRAppointment.date == today
+            QRAppointment.date == today,
+            QRAppointment.slot_id == viewing_slot_id
         ).order_by(QRAppointment.id)
     )
     qr_appointments = result.scalars().all()
@@ -1601,6 +1898,7 @@ async def get_today_appointments(
             "id": apt.id,
             "token": apt.appointment_token,
             "clinic_id": apt.clinic_id,
+            "slot_id": getattr(apt, "slot_id", None),
             "patient_id": apt.patient_id,
             "patient_name": apt.patient_name,
             "patient_email": apt.patient_email,
@@ -1619,6 +1917,7 @@ async def get_today_appointments(
             "id": apt.id,
             "token": apt.appointment_token,
             "clinic_id": apt.clinic_id,
+            "slot_id": getattr(apt, "slot_id", None),
             "patient_id": f"qr-{apt.id}",  # QR appointments don't have patient_id
             "patient_name": apt.patient_name,
             "patient_email": "",  # QR appointments don't have email

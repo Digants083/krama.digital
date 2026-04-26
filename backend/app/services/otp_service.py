@@ -2,7 +2,7 @@ import secrets
 import hashlib
 import random
 import string
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import logging
 
@@ -14,6 +14,15 @@ from app.database.models import OTPVerification, Patient
 from app.services.email_service import send_otp as send_otp_email
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_for(dt: Optional[datetime] = None) -> datetime:
+    """
+    Return a UTC "now" matching the timezone-awareness of the compared datetime.
+    """
+    if dt is not None and dt.tzinfo is not None:
+        return datetime.now(timezone.utc)
+    return datetime.utcnow()
 
 
 def generate_patient_id():
@@ -82,7 +91,7 @@ class OTPService:
         # Check rate limiting
         if existing_otp and not existing_otp.is_verified:
             # Check if within cooldown period
-            time_since_creation = datetime.utcnow() - existing_otp.created_at
+            time_since_creation = _utc_now_for(existing_otp.created_at) - existing_otp.created_at
             if time_since_creation < timedelta(minutes=OTPService.RESEND_COOLDOWN_MINUTES):
                 remaining_time = OTPService.RESEND_COOLDOWN_MINUTES - time_since_creation.seconds // 60
                 logger.warning(f"OTP resend rate limited for {email}. Try again in {remaining_time} minutes.")
@@ -95,7 +104,9 @@ class OTPService:
         # Generate new OTP
         otp_code = OTPService.generate_otp()
         hashed_otp = OTPService.hash_otp(otp_code)
-        expires_at = datetime.utcnow() + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES)
+        expires_at = _utc_now_for(existing_otp.created_at if existing_otp else None) + timedelta(
+            minutes=OTPService.OTP_EXPIRY_MINUTES
+        )
         
         # Store in database with user data
         otp_record = OTPVerification(
@@ -178,7 +189,7 @@ class OTPService:
             return False, "OTP already verified."
         
         # Check expiry
-        if datetime.utcnow() > otp_record.expires_at:
+        if _utc_now_for(otp_record.expires_at) > otp_record.expires_at:
             await db.delete(otp_record)
             await db.commit()
             return False, "OTP has expired. Please request a new OTP."
@@ -219,6 +230,48 @@ class OTPService:
                 await db.rollback()
                 logger.error(f"Error creating patient account: {e}")
                 return False, "Failed to create account. Please try again."
+        
+        remaining_attempts = OTPService.MAX_ATTEMPTS - otp_record.attempt_count
+        return False, f"Invalid OTP. {remaining_attempts} attempts remaining."
+    
+    @staticmethod
+    async def verify_otp_only(db: AsyncSession, email: str, provided_otp: str) -> Tuple[bool, str]:
+        """
+        Verify OTP code without creating any account.
+        Used for clinic verification where account creation is handled separately.
+        
+        Args:
+            db: Database session
+            email: User email
+            provided_otp: OTP code to verify
+            
+        Returns:
+            tuple: (success, message)
+        """
+        result = await db.execute(
+            select(OTPVerification).where(OTPVerification.email == email)
+        )
+        otp_record = result.scalar_one_or_none()
+        
+        if not otp_record:
+            return False, "No OTP found. Please request a new OTP."
+        
+        if otp_record.is_verified:
+            return False, "OTP already verified."
+        
+        if _utc_now_for(otp_record.expires_at) > otp_record.expires_at:
+            return False, "OTP has expired. Please request a new OTP."
+        
+        otp_record.attempt_count += 1
+        await db.commit()
+        
+        if otp_record.attempt_count > OTPService.MAX_ATTEMPTS:
+            await db.delete(otp_record)
+            await db.commit()
+            return False, "Too many failed attempts. Please request a new OTP."
+        
+        if OTPService.verify_otp_hash(otp_record.otp_code, provided_otp):
+            return True, "OTP verified successfully."
         
         remaining_attempts = OTPService.MAX_ATTEMPTS - otp_record.attempt_count
         return False, f"Invalid OTP. {remaining_attempts} attempts remaining."

@@ -48,6 +48,8 @@ type QueueContextType = {
   skippedCount: number;
   totalToday: number;
   currentServing: CurrentServing | null;
+  activeSlotId: number | null;
+  viewingSlotId: number | null;
   nextPatient: () => Promise<void>;
   completePatient: () => Promise<void>;
   skipPatient: () => Promise<void>;
@@ -76,6 +78,8 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
   const [skippedCount, setSkippedCount] = useState(0);
   const [totalToday, setTotalToday] = useState(0);
   const [currentServing, setCurrentServing] = useState<CurrentServing | null>(null);
+  const [activeSlotId, setActiveSlotId] = useState<number | null>(null);
+  const [viewingSlotId, setViewingSlotId] = useState<number | null>(null);
 
   const fetchQueueForClinic = useCallback(async (clinicId: string) => {
     try {
@@ -83,6 +87,10 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
       if (response.ok) {
         const data = await response.json();
         const appointments = data.appointments || [];
+
+        setActiveSlotId(typeof data.active_slot_id === "number" ? data.active_slot_id : null);
+        setViewingSlotId(typeof data.viewing_slot_id === "number" ? data.viewing_slot_id : null);
+
         const servingAppointment = appointments.find((apt: any) => apt.status === "serving");
         const waitingAppointments = appointments.filter((apt: any) => apt.status !== "serving");
 
@@ -309,6 +317,8 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         skippedCount,
         totalToday,
         currentServing,
+        activeSlotId,
+        viewingSlotId,
         nextPatient,
         completePatient,
         skipPatient,

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Phone, Lock, Trash2, User, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download } from "lucide-react";
+import { ArrowLeft, Phone, Lock, Trash2, User, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, MapPinned } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 
 const ClinicProfile = () => {
   const navigate = useNavigate();
@@ -31,6 +32,15 @@ const ClinicProfile = () => {
 
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+  // Structured address fields
+  const [streetAddress, setStreetAddress] = useState("");
+  const [road, setRoad] = useState("");
+  const [layout, setLayout] = useState("");
+  const [section, setSection] = useState("");
+  const [city, setCity] = useState("");
+  const [pincode, setPincode] = useState("");
+  const [locationCoords, setLocationCoords] = useState<{ latitude: string; longitude: string } | null>(null);
+  const [locating, setLocating] = useState(false);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -38,6 +48,7 @@ const ClinicProfile = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showQrDialog, setShowQrDialog] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
 
   useEffect(() => {
     if (message) {
@@ -60,8 +71,24 @@ const ClinicProfile = () => {
           const data = await response.json();
           setDbProfile(data);
           setPhone(data.phone || "");
-          setAddress(data.address || "");
+          setAddress(data.full_formatted_address || data.address || "");
+          // Load structured address fields
+          setStreetAddress(data.street_address || "");
+          setRoad(data.road || "");
+          setLayout(data.layout || "");
+          setSection(data.section || "");
+          setCity(data.city || "");
+          setPincode(data.pincode || "");
+          setLocationCoords(
+            data.latitude && data.longitude
+              ? { latitude: data.latitude, longitude: data.longitude }
+              : null
+          );
           setImageUrls(data.image_urls || []);
+          // Auto-show location modal if coordinates are missing
+          if (!data.latitude || !data.longitude) {
+            setShowLocationModal(true);
+          }
         } else {
           setMessage({ text: "Failed to fetch clinic data", type: "error" });
         }
@@ -195,23 +222,46 @@ const ClinicProfile = () => {
     }
 
     try {
+      // Only update address and images - NOT coordinates
+      // Coordinates are handled separately via handleSaveLocation
       const response = await fetch("http://localhost:8000/auth/clinic/update-profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clinic_id: loggedInClinicId,
-          address,
+          address: address || dbProfile?.address,
+          // Structured address fields
+          street_address: streetAddress || dbProfile?.street_address,
+          road: road || dbProfile?.road,
+          layout: layout || dbProfile?.layout,
+          section: section || dbProfile?.section,
+          city: city || dbProfile?.city,
+          pincode: pincode || dbProfile?.pincode,
           image_urls: imageUrls,
         }),
       });
 
       if (response.ok) {
-        setMessage({ text: "Profile updated successfully!", type: "success" });
+        setMessage({
+          text: "Address updated! ⚠️ Please update your map location to match the new address.",
+          type: "success"
+        });
+        // Auto-open location picker after 2 seconds to encourage coordinate update
+        setTimeout(() => {
+          setShowLocationModal(true);
+        }, 2000);
         const dataResponse = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${loggedInClinicId}`);
         if (dataResponse.ok) {
           const data = await dataResponse.json();
           setDbProfile(data);
-          setAddress(data.address || "");
+          setAddress(data.full_formatted_address || data.address || "");
+          // Refresh structured address fields
+          setStreetAddress(data.street_address || "");
+          setRoad(data.road || "");
+          setLayout(data.layout || "");
+          setSection(data.section || "");
+          setCity(data.city || "");
+          setPincode(data.pincode || "");
           setImageUrls(data.image_urls || []);
         }
       } else {
@@ -221,6 +271,74 @@ const ClinicProfile = () => {
     } catch (error) {
       setMessage({ text: "Network error. Please try again.", type: "error" });
     }
+  };
+
+  const handleSaveLocation = async (lat: string, lng: string, savedAddress: string) => {
+    if (!loggedInClinicId) return;
+
+    try {
+      const response = await fetch("http://localhost:8000/auth/clinic/update-location", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clinic_id: loggedInClinicId,
+          latitude: lat,
+          longitude: lng,
+          address: savedAddress || dbProfile?.address,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMessage({
+          text: "Location coordinates saved successfully!",
+          type: "success"
+        });
+        // Refresh clinic data
+        const dataResponse = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${loggedInClinicId}`);
+        if (dataResponse.ok) {
+          const clinicData = await dataResponse.json();
+          setDbProfile(clinicData);
+          setLocationCoords(
+            clinicData.latitude && clinicData.longitude
+              ? { latitude: clinicData.latitude, longitude: clinicData.longitude }
+              : null
+          );
+        }
+      } else {
+        const error = await response.json();
+        setMessage({ text: error.detail || "Failed to save location", type: "error" });
+      }
+    } catch (error) {
+      setMessage({ text: "Network error. Please try again.", type: "error" });
+    }
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setMessage({ text: "Geolocation is not supported on this device.", type: "error" });
+      return;
+    }
+
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude.toFixed(7);
+        const lng = position.coords.longitude.toFixed(7);
+        // Directly save the coordinates
+        void handleSaveLocation(lat, lng, dbProfile?.address || "");
+        setLocating(false);
+      },
+      () => {
+        setMessage({ text: "Unable to fetch current location. Please allow location access.", type: "error" });
+        setLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      }
+    );
   };
 
   const handleChangePassword = async () => {
@@ -506,7 +624,7 @@ const ClinicProfile = () => {
             <div className="mt-8 grid gap-4 md:grid-cols-3">
               <ProfileStat label="Clinic ID" value={dbProfile.clinic_id} mono />
               <ProfileStat label="Phone" value={dbProfile.phone} />
-              <ProfileStat label="Address" value={dbProfile.address || "Not set"} />
+              <ProfileStat label="Address" value={dbProfile.full_formatted_address || dbProfile.address || "Not set"} />
             </div>
           )}
         </section>
@@ -525,14 +643,107 @@ const ClinicProfile = () => {
           <ProfileCard icon={MapPin} title="Change Address" description="Update clinic location">
             <div className="rounded-2xl bg-secondary p-4 text-sm text-foreground">
               <p className="text-muted-foreground">Current Address</p>
-              <p className="mt-1 font-medium">{dbProfile?.address || "Not set"}</p>
+              <p className="mt-1 font-medium">{dbProfile?.full_formatted_address || dbProfile?.address || "Not set"}</p>
+              {locationCoords ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Coordinates: {locationCoords.latitude}, {locationCoords.longitude}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-amber-600 font-medium">
+                  ⚠️ Location not pinned. Please pin your location on the map.
+                </p>
+              )}
             </div>
-            <div>
-              <Label htmlFor="address">New Address</Label>
-              <Input id="address" placeholder="Enter full address" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-2" />
+
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">Clinic Address Details</p>
+
+              <div>
+                <Label htmlFor="street_address" className="text-xs">Street / Building Number *</Label>
+                <Input
+                  id="street_address"
+                  placeholder="#123, ABC Building"
+                  value={streetAddress}
+                  onChange={(e) => setStreetAddress(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="road" className="text-xs">Road / Street Name *</Label>
+                <Input
+                  id="road"
+                  placeholder="Main Road, MG Road"
+                  value={road}
+                  onChange={(e) => setRoad(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="layout" className="text-xs">Layout / Area (Optional)</Label>
+                  <Input
+                    id="layout"
+                    placeholder="Vidyaranyapura"
+                    value={layout}
+                    onChange={(e) => setLayout(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="section" className="text-xs">Section / Block (Optional)</Label>
+                  <Input
+                    id="section"
+                    placeholder="A Block, 1st Stage"
+                    value={section}
+                    onChange={(e) => setSection(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="city" className="text-xs">City *</Label>
+                  <Input
+                    id="city"
+                    placeholder="Bangalore"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="pincode" className="text-xs">Pincode *</Label>
+                  <Input
+                    id="pincode"
+                    placeholder="560001"
+                    value={pincode}
+                    onChange={(e) => setPincode(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+              </div>
             </div>
-            <Button onClick={handleUpdateProfile} disabled={!address} className="w-full">
+
+            <Button
+              onClick={handleUpdateProfile}
+              disabled={!streetAddress || !road || !city || !pincode}
+              className="w-full"
+            >
               Update Address
+            </Button>
+
+            <div className="border-t border-border my-2"></div>
+            {dbProfile?.address && !locationCoords && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800 mb-2">
+                <span className="font-semibold">⚠️ Action needed:</span> You have an address but no map location. Please pin your coordinates.
+              </div>
+            )}
+            <Button onClick={() => setShowLocationModal(true)} variant={dbProfile?.address && !locationCoords ? "default" : "outline"} className="w-full">
+              <MapPinned className="mr-2 h-4 w-4" />
+              {locationCoords ? "Update Map Location" : "Pin Location on Map"}
             </Button>
           </ProfileCard>
 
@@ -658,6 +869,13 @@ const ClinicProfile = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <LocationPickerModal
+        isOpen={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+        onSave={handleSaveLocation}
+        clinicAddress={dbProfile?.full_formatted_address || dbProfile?.address || ""}
+      />
     </div>
   );
 };

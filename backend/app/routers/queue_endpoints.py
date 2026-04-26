@@ -1,12 +1,116 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, and_
 from app.database.db import get_db
 from app.database.models import Appointment, CompletedAppointment, QRAppointment, ClinicTimeSlot, Clinic
 from app.services.email_service import send_queue_alert
+import json
 
 router = APIRouter(prefix="/auth", tags=["queue"])
+
+async def get_clinic_current_slot(clinic_id: str, db: AsyncSession):
+    """
+    Returns the index of the currently active time slot for a clinic.
+    Returns None if no slot is currently active.
+    """
+    result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        return None
+
+    slots = record.slots
+    if isinstance(slots, str):
+        slots = json.loads(slots)
+
+    now = datetime.now()
+    current_hour = now.hour
+    current_minute = now.minute
+    current_time_decimal = current_hour + current_minute / 60.0
+
+    for idx, slot in enumerate(slots):
+        if not slot.get("is_open"):
+            continue
+
+        start, end = slot.get("time_range", [0, 0])
+        if start <= current_time_decimal < end:
+            return idx
+
+    return None
+
+async def get_first_open_slot_start(clinic_id: str, db: AsyncSession):
+    """
+    Returns the start hour of the first open slot of the day.
+    """
+    result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        return None
+
+    slots = record.slots
+    if isinstance(slots, str):
+        slots = json.loads(slots)
+
+    for slot in slots:
+        if slot.get("is_open"):
+            return slot.get("time_range", [0, 0])[0]
+    return None
+
+async def get_last_open_slot_end(clinic_id: str, db: AsyncSession):
+    """
+    Returns the end hour of the last open slot of the day.
+    Only considers slots where is_open is True.
+    """
+    result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        return None
+
+    slots = record.slots
+    if isinstance(slots, str):
+        slots = json.loads(slots)
+
+    last_end = None
+    for slot in slots:
+        # Only count slots that are marked as open (is_open: true)
+        if slot.get("is_open"):
+            end_time = slot.get("time_range", [0, 0])[1]
+            if last_end is None or end_time > last_end:
+                last_end = end_time
+    return last_end
+
+async def all_slots_expired(clinic_id: str, db: AsyncSession) -> bool:
+    """
+    Returns True if all open slots have expired (current time is past all slot end times).
+    """
+    result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        return True  # No slots configured, consider as expired
+
+    slots = record.slots
+    if isinstance(slots, str):
+        slots = json.loads(slots)
+
+    now = datetime.now()
+    current_time_decimal = now.hour + now.minute / 60.0
+
+    # Check if current time is past all open slot end times
+    for slot in slots:
+        if slot.get("is_open"):
+            end_time = slot.get("time_range", [0, 0])[1]
+            if current_time_decimal < end_time:
+                return False  # At least one slot hasn't expired yet
+
+    return True  # All slots have expired
 
 def _token_number(token: str | None) -> int:
     if not token:
@@ -16,7 +120,16 @@ def _token_number(token: str | None) -> int:
 
 
 async def _send_queue_notifications(clinic_id: str, db: AsyncSession) -> None:
-    """Notify patients when they are close to being served."""
+    """Notify patients when they are close to being served.
+    
+    New cascade logic:
+    - Patient at position 0 (serving): No notification
+    - Patient at position 1 (next): "immediate" alert (your turn next)
+    - Patient at position 2: 
+        * If serving_index is 0: "ready" alert (cascade: A serving -> C ready)
+        * If serving_index is 1: "ready" alert (cascade: B serving -> D ready)
+        * Otherwise: "two_ahead" alert (2 patients ahead warning)
+    """
     from datetime import datetime
     import logging
 
@@ -88,9 +201,16 @@ async def _send_queue_notifications(clinic_id: str, db: AsyncSession) -> None:
         target_stage = None
 
         if distance_from_serving == 1:
+            # Next in line - immediate alert
             target_stage = "immediate"
-        elif distance_from_serving == 2 and appointment.notification_stage == "pending":
-            target_stage = "two_ahead"
+        elif distance_from_serving == 2:
+            # Cascade logic: position 2 gets "ready" when position 0 or 1 is serving
+            # This implements: A serving -> C ready, B serving -> D ready
+            if serving_index in [0, 1] and appointment.notification_stage not in ["ready", "immediate", "serving"]:
+                target_stage = "ready"
+            # Standard two_ahead warning for others at position 2
+            elif appointment.notification_stage == "pending":
+                target_stage = "two_ahead"
 
         if not target_stage:
             continue
@@ -126,30 +246,68 @@ async def set_clinic_active(
 ):
     """
     Set clinic as active (clicked Start) or inactive.
+    Includes pre-activation window check (45 mins before first slot).
+    Prevents activation if all slots have expired.
     """
     clinic_id = request.get("clinic_id")
     is_active = request.get("is_active", True)
-    
+
     if not clinic_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="clinic_id is required"
         )
-    
+
     result = await db.execute(
         select(Clinic).where(Clinic.clinic_id == clinic_id)
     )
     clinic = result.scalar_one_or_none()
-    
+
     if not clinic:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Clinic not found"
         )
-    
+
+    if is_active:
+        # Check if all slots have expired
+        if await all_slots_expired(clinic_id, db):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="All time slots have expired for today. Cannot activate clinic."
+            )
+
+        # Check pre-activation window
+        first_slot_start = await get_first_open_slot_start(clinic_id, db)
+        if first_slot_start is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No open time slots configured for today."
+            )
+
+        now = datetime.now()
+        current_time_decimal = now.hour + now.minute / 60.0
+        activation_threshold = first_slot_start - (45 / 60.0)
+
+        if current_time_decimal < activation_threshold:
+            # Calculate wait time
+            wait_minutes = int((activation_threshold - current_time_decimal) * 60)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Clinic can only be activated {wait_minutes} minutes from now (Slot starts at {int(first_slot_start)}:00)."
+            )
+
+        # Manual Online Restriction: Cannot go online if all slots have passed
+        last_slot_end = await get_last_open_slot_end(clinic_id, db)
+        if last_slot_end is not None and current_time_decimal >= last_slot_end:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No time slots available for today. All slots have already ended."
+            )
+
     clinic.is_active = is_active
     await db.commit()
-    
+
     return {
         "message": f"Clinic {'activated' if is_active else 'deactivated'}",
         "is_active": is_active
@@ -162,15 +320,32 @@ async def get_clinic_active_status(
 ):
     """
     Get clinic active status.
+    Automatically deactivates clinic if all open slots have ended.
     """
     result = await db.execute(
         select(Clinic).where(Clinic.clinic_id == clinic_id)
     )
     clinic = result.scalar_one_or_none()
-    
+
     if not clinic:
         return {"is_active": False}
-    
+
+    # Automatic Deactivation Logic
+    # Check if all slots have expired
+    if await all_slots_expired(clinic_id, db):
+        clinic.is_active = False
+        await db.commit()
+    else:
+        # Also check 15 minutes before last slot ends (existing logic)
+        last_slot_end = await get_last_open_slot_end(clinic_id, db)
+        if last_slot_end is not None:
+            now = datetime.now()
+            current_time_decimal = now.hour + now.minute / 60.0
+            auto_offline_time = last_slot_end - (15 / 60.0)
+            if current_time_decimal >= auto_offline_time:
+                clinic.is_active = False
+                await db.commit()
+
     return {"is_active": clinic.is_active}
 
 @router.post("/clinic/serve-patient")
@@ -181,17 +356,18 @@ async def serve_patient(
     """
     Mark patient as being served and move from appointments to serving state.
     This is called when clicking 'Next' button.
+    Includes a check to block serving before the slot start time.
     """
     clinic_id = request.get("clinic_id")
     appointment_id = request.get("appointment_id")
     source = request.get("source", "online")
-    
+
     if not all([clinic_id, appointment_id]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing clinic_id or appointment_id"
         )
-    
+
     if source == "walkin":
         result = await db.execute(
             select(QRAppointment).where(
@@ -208,20 +384,46 @@ async def serve_patient(
             )
         )
         appointment = result.scalar_one_or_none()
-    
+
     if not appointment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Appointment not found"
         )
-    
+
+    # Blocking Check: Ensure current time is >= slot start time
+    slot_id = appointment.slot_id
+    if slot_id is not None:
+        # slot_id is stored as human-friendly 1-based value (1,2,3)
+        slot_index = int(slot_id) - 1
+        if slot_index < 0:
+            slot_index = 0
+        result = await db.execute(
+            select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+        )
+        record = result.scalar_one_or_none()
+        if record:
+            slots = record.slots
+            if isinstance(slots, str):
+                slots = json.loads(slots)
+
+            if slot_index < len(slots):
+                slot_start = slots[slot_index].get("time_range", [0, 0])[0]
+                now = datetime.now()
+                current_time_decimal = now.hour + now.minute / 60.0
+                if current_time_decimal < slot_start:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Serving cannot start until the official slot start time ({int(slot_start)}:00)."
+                    )
+
     # Update status to serving
     appointment.status = "serving"
     if hasattr(appointment, "notification_stage"):
         appointment.notification_stage = "serving"
     await _send_queue_notifications(clinic_id, db)
     await db.commit()
-    
+
     return {
         "message": "Patient is now being served",
         "appointment": {
@@ -597,6 +799,7 @@ class QueueJoinRequest(BaseModel):
     phone: str
     source: str = "walkin"  # always "walkin" from the QR page
     booking_id: Optional[str] = None  # unused for walk-ins, kept for compatibility
+    slot_id: Optional[int] = None  # time slot ID for per-slot token numbering
 
 @router.post("/queue/join")
 async def join_queue(
@@ -605,8 +808,8 @@ async def join_queue(
 ):
     """
     Walk-in patients join the live queue via QR code scan.
-    - Counts total appointments from BOTH tables (online + QR) for unified numbering
-    - Assigns next sequential token (e.g. if last is T-7, new one is T-8)
+    - Uses per-slot token numbering (tokens reset for each time slot)
+    - Assigns next sequential token within the slot (e.g. if slot 1 has T-3, new one is T-4)
     - Inserts a new row in qr_appointments table
     - Returns token_label, token_number, and position in queue
     """
@@ -614,77 +817,134 @@ async def join_queue(
 
     today = date.today().isoformat()  # e.g. "2024-01-15"
 
-    # Get highest token number from all three tables (active + completed)
+    # Determine current slot if not provided
+    slot_id = payload.slot_id
+    if slot_id is None:
+        # Get current time slot
+        result = await db.execute(
+            select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == payload.clinic_id)
+        )
+        record = result.scalar_one_or_none()
+        if record:
+            slots = record.slots
+            if isinstance(slots, str):
+                slots = json.loads(slots)
+            
+            now = datetime.now()
+            current_hour = now.hour
+            current_minute = now.minute
+            current_time_decimal = current_hour + current_minute / 60.0
+            
+            for idx, slot in enumerate(slots):
+                if slot.get("is_open"):
+                    start, end = slot.get("time_range", [0, 0])
+                    if start <= current_time_decimal < end:
+                        slot_id = idx + 1  # 1-based
+                        break
+            
+            # If no current slot, use first open slot
+            if slot_id is None:
+                for idx, slot in enumerate(slots):
+                    if slot.get("is_open"):
+                        slot_id = idx + 1
+                        break
+
+    # Get highest token number for this specific slot
     max_token = -1
     
-    # Check online appointments
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.clinic_id == payload.clinic_id,
-            Appointment.date == today
+    # Check online appointments for this slot
+    if slot_id is not None:
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == payload.clinic_id,
+                Appointment.date == today,
+                Appointment.slot_id == slot_id
+            )
         )
-    )
-    for apt in result.scalars().all():
-        if apt.appointment_token:
-            try:
-                token_num = int(apt.appointment_token.replace("T-", ""))
-                if token_num > max_token:
-                    max_token = token_num
-            except:
-                pass
-    
-    # Check QR appointments
-    result = await db.execute(
-        select(QRAppointment).where(
-            QRAppointment.clinic_id == payload.clinic_id,
-            QRAppointment.date == today
+        for apt in result.scalars().all():
+            if apt.appointment_token:
+                try:
+                    token_num = int(apt.appointment_token.replace("T-", ""))
+                    if token_num > max_token:
+                        max_token = token_num
+                except:
+                    pass
+        
+        # Check QR appointments for this slot
+        result = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.clinic_id == payload.clinic_id,
+                QRAppointment.date == today,
+                QRAppointment.slot_id == slot_id
+            )
         )
-    )
-    for apt in result.scalars().all():
-        if apt.appointment_token:
-            try:
-                token_num = int(apt.appointment_token.replace("T-", ""))
-                if token_num > max_token:
-                    max_token = token_num
-            except:
-                pass
-    
-    # Check completed appointments for today
-    result = await db.execute(
-        select(CompletedAppointment).where(
-            CompletedAppointment.clinic_id == payload.clinic_id,
-            CompletedAppointment.date == today
+        for apt in result.scalars().all():
+            if apt.appointment_token:
+                try:
+                    token_num = int(apt.appointment_token.replace("T-", ""))
+                    if token_num > max_token:
+                        max_token = token_num
+                except:
+                    pass
+        
+        # Check completed appointments for this slot
+        result = await db.execute(
+            select(CompletedAppointment).where(
+                CompletedAppointment.clinic_id == payload.clinic_id,
+                CompletedAppointment.date == today
+                # Note: CompletedAppointment doesn't have slot_id, so we count all completed for today
+                # This ensures tokens don't repeat even if patients complete early
+            )
         )
-    )
-    for apt in result.scalars().all():
-        if apt.appointment_token:
-            try:
-                token_num = int(apt.appointment_token.replace("T-", ""))
-                if token_num > max_token:
-                    max_token = token_num
-            except:
-                pass
+        for apt in result.scalars().all():
+            if apt.appointment_token:
+                try:
+                    token_num = int(apt.appointment_token.replace("T-", ""))
+                    if token_num > max_token:
+                        max_token = token_num
+                except:
+                    pass
 
     # Next token is highest + 1
     next_token_number = max_token + 1
     token_label = f"T-{next_token_number}"
 
-    # Count total active appointments for position
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.clinic_id == payload.clinic_id,
-            Appointment.date == today
+    # Count active appointments for this slot for position
+    if slot_id is not None:
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == payload.clinic_id,
+                Appointment.date == today,
+                Appointment.slot_id == slot_id
+            )
         )
-    )
-    online_count = len(result.scalars().all())
-    
-    result = await db.execute(
-        select(QRAppointment).where(
-            QRAppointment.clinic_id == payload.clinic_id,
-            QRAppointment.date == today
+        online_count = len(result.scalars().all())
+        
+        result = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.clinic_id == payload.clinic_id,
+                QRAppointment.date == today,
+                QRAppointment.slot_id == slot_id
+            )
         )
-    )
-    qr_count = len(result.scalars().all())
+        qr_count = len(result.scalars().all())
+    else:
+        # Fallback: count all if no slot
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == payload.clinic_id,
+                Appointment.date == today
+            )
+        )
+        online_count = len(result.scalars().all())
+        
+        result = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.clinic_id == payload.clinic_id,
+                QRAppointment.date == today
+            )
+        )
+        qr_count = len(result.scalars().all())
     
     total_appointments = online_count + qr_count
 
@@ -697,6 +957,7 @@ async def join_queue(
         doctor_name=payload.doctor_id,
         date=today,
         status="booked",
+        slot_id=slot_id
     )
     db.add(walkin)
     await db.commit()
@@ -712,6 +973,7 @@ async def join_queue(
         "patient_name": payload.patient_name,
         "clinic_id": payload.clinic_id,
         "source": "walkin",
+        "slot_id": slot_id
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -933,4 +1195,145 @@ async def delete_time_slot(
         "message": "Time slot deleted successfully",
         "clinic_id": clinic_id,
         "slots": record.slots
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scheduled Notification Tasks
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/notifications/check-pre-slot")
+async def check_pre_slot_notifications(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Scheduled task endpoint (call every minute via cron/job scheduler).
+    Sends "pre_slot_start" email to first patients in queue when their slot
+    starts in 10 minutes.
+    
+    Logic:
+    - Find all clinics with appointments today
+    - For each clinic, find the first patient in queue (lowest token, status="booked")
+    - Check if their slot starts in ~10 minutes
+    - If yes and they haven't received pre_slot_start notification, send email
+    """
+    from datetime import datetime, timedelta
+    import logging
+    import json
+
+    logger = logging.getLogger(__name__)
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    current_time_decimal = now.hour + now.minute / 60.0
+    
+    # Window: 10 minutes before slot start (with 1-minute buffer for scheduling)
+    pre_slot_window_start = 10.5  # ~10.5 minutes before
+    pre_slot_window_end = 9.5     # ~9.5 minutes before
+    
+    # Get all clinics with appointments today
+    clinic_result = await db.execute(
+        select(Appointment.clinic_id).where(
+            Appointment.date == today
+        ).distinct()
+    )
+    clinic_ids = [r[0] for r in clinic_result.all()]
+    
+    notifications_sent = []
+    
+    for clinic_id in clinic_ids:
+        # Get clinic info
+        clinic_result = await db.execute(
+            select(Clinic).where(Clinic.clinic_id == clinic_id)
+        )
+        clinic = clinic_result.scalar_one_or_none()
+        if not clinic:
+            continue
+            
+        # Get time slots for this clinic
+        slot_result = await db.execute(
+            select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+        )
+        slot_record = slot_result.scalar_one_or_none()
+        if not slot_record:
+            continue
+            
+        slots = slot_record.slots
+        if isinstance(slots, str):
+            slots = json.loads(slots)
+        
+        # Find first patient in queue for this clinic (online appointments only)
+        # Ordered by token number (creation order)
+        apt_result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.date == today,
+                Appointment.status.in_(["booked", "pending"])
+            ).order_by(Appointment.id)
+        )
+        appointments = apt_result.scalars().all()
+        
+        if not appointments:
+            continue
+            
+        # First patient is the one with lowest ID/token (first in list)
+        first_patient = appointments[0]
+        
+        # Skip if already notified
+        if first_patient.notification_stage in ["pre_slot_start", "immediate", "serving", "reach_auto"]:
+            continue
+            
+        # Get slot start time for first patient
+        slot_id = first_patient.slot_id
+        if slot_id is None:
+            continue
+            
+        slot_index = int(slot_id) - 1  # slot_id is 1-based
+        if slot_index < 0 or slot_index >= len(slots):
+            continue
+            
+        slot = slots[slot_index]
+        if not slot.get("is_open"):
+            continue
+            
+        slot_start = slot.get("time_range", [0, 0])[0]
+        minutes_before_slot = (slot_start - current_time_decimal) * 60
+        
+        # Check if we're in the 10-minute window before slot starts
+        if pre_slot_window_end <= minutes_before_slot <= pre_slot_window_start:
+            # Send pre-slot notification
+            patient_email = (first_patient.patient_email or "").strip()
+            if patient_email:
+                email_sent = send_queue_alert(
+                    patient_email,
+                    first_patient.patient_name,
+                    clinic.clinic_name,
+                    "pre_slot_start",
+                )
+                if email_sent:
+                    first_patient.notification_stage = "pre_slot_start"
+                    await db.commit()
+                    notifications_sent.append({
+                        "clinic_id": clinic_id,
+                        "patient_email": patient_email,
+                        "patient_name": first_patient.patient_name,
+                        "slot_start": slot_start,
+                        "minutes_before": round(minutes_before_slot, 1)
+                    })
+                    logger.info(
+                        "Pre-slot notification sent to %s for clinic %s (slot starts at %s)",
+                        patient_email,
+                        clinic_id,
+                        slot_start
+                    )
+                else:
+                    logger.warning(
+                        "Failed to send pre-slot notification to %s for clinic %s",
+                        patient_email,
+                        clinic_id
+                    )
+    
+    return {
+        "checked_clinics": len(clinic_ids),
+        "notifications_sent": len(notifications_sent),
+        "details": notifications_sent
     }

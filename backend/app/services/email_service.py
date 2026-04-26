@@ -104,6 +104,18 @@ class EmailService:
             subject = f"Please reach {safe_clinic} now"
             heading = "Please reach the clinic ASAP"
             detail = "It is almost your turn. Please come to the clinic now so you are ready when called."
+        elif alert_type == "reach_auto":
+            subject = f"You're booked at {safe_clinic} - Please reach automatically"
+            heading = "Please reach the clinic automatically"
+            detail = "You're second in queue. Please start heading to the clinic now as you will be called soon after the first patient."
+        elif alert_type == "pre_slot_start":
+            subject = f"Your appointment at {safe_clinic} starts in 10 minutes"
+            heading = "Please reach the clinic ASAP"
+            detail = "Your slot starts in 10 minutes. You're the first patient. Please reach the clinic now to be ready."
+        elif alert_type == "ready":
+            subject = f"Please reach {safe_clinic} now"
+            heading = "Please reach the clinic now"
+            detail = "The patient ahead of you is now being served. Please come to the clinic immediately as you're next."
         else:
             subject = f"2 patients ahead of you at {safe_clinic}"
             heading = "Please start heading to the clinic"

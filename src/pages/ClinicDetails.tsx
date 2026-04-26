@@ -13,6 +13,19 @@ interface Review {
   created_at: string;
 }
 
+// Convert 24-hour to 12-hour format for display
+const formatTimeRange = (timeRange: number[]) => {
+  const convertHour = (h: number) => {
+    if (h === 0) return { hour: 12, ampm: "AM" };
+    if (h === 12) return { hour: 12, ampm: "PM" };
+    if (h > 12) return { hour: h - 12, ampm: "PM" };
+    return { hour: h, ampm: "AM" };
+  };
+  const start = convertHour(timeRange[0]);
+  const end = convertHour(timeRange[1]);
+  return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
+};
+
 const ClinicDetails = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -22,6 +35,7 @@ const ClinicDetails = () => {
   const [loading, setLoading] = useState(true);
   const [showTimeSelection, setShowTimeSelection] = useState(false);
   const [selectedTime, setSelectedTime] = useState("");
+  const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [booking, setBooking] = useState(false);
   const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
@@ -29,6 +43,24 @@ const ClinicDetails = () => {
   const [userReactions, setUserReactions] = useState<{[key: number]: string}>({});
   const [patientId, setPatientId] = useState<string>("");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const clinicAddress = [
+    clinic?.street_address,
+    clinic?.road,
+    clinic?.layout,
+    clinic?.section,
+    clinic?.city,
+    clinic?.pincode,
+  ].filter(Boolean).join(", ") || clinic?.address || "";
+  const lat = clinic?.latitude ? Number(clinic.latitude) : NaN;
+  const lng = clinic?.longitude ? Number(clinic.longitude) : NaN;
+  const hasPinnedCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  const mapQuery = encodeURIComponent(clinicAddress);
+  const googleMapsUrl = hasPinnedCoords
+    ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+    : `https://www.google.com/maps/search/?api=1&query=${mapQuery}`;
+  const embedMapUrl = hasPinnedCoords
+    ? `https://maps.google.com/maps?q=${lat},${lng}&z=15&output=embed`
+    : `https://maps.google.com/maps?q=${mapQuery}&z=15&output=embed`;
 
   useEffect(() => {
     if (message) {
@@ -188,12 +220,12 @@ const ClinicDetails = () => {
     setShowTimeSelection(true);
   };
 
-  const handleSlotSelect = (slot: any) => {
+  const handleSlotSelect = (slot: any, slotIndex: number) => {
     if (!slot.is_open || slot.is_expired) return;
     
-    // Set selected time
-    const timeString = `${slot.slot_name} ${slot.time_range[0]}:00 - ${slot.time_range[1]}:00`;
+    const timeString = `${slot.slot_name} ${formatTimeRange(slot.time_range)}`;
     setSelectedTime(timeString);
+    setSelectedSlotId(slotIndex + 1);
   };
 
   const handleConfirmBooking = async () => {
@@ -213,6 +245,11 @@ const ClinicDetails = () => {
   const proceedWithBooking = async () => {
     if (!selectedTime || !selectedDate) {
       setMessage({text: "Please select a date and time", type: "error"});
+      return;
+    }
+
+    if (selectedSlotId === null) {
+      setMessage({text: "Please select a time slot", type: "error"});
       return;
     }
 
@@ -294,7 +331,8 @@ const ClinicDetails = () => {
         clinic_id: clinicId,
         doctor_name: clinic.doctor_name || "General",
         date: selectedDate,
-        time: selectedTime
+        time: selectedTime,
+        slot_id: selectedSlotId
       };
 
       const response = await fetch("http://localhost:8000/auth/appointments/create", {
@@ -382,7 +420,7 @@ const ClinicDetails = () => {
             <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">
                 <MapPin className="h-4 w-4" />
-                {clinic.address}
+                {clinic.street_address}, {clinic.road}, {clinic.layout}, {clinic.section}, {clinic.city}, {clinic.pincode}
               </span>
               <span className="flex items-center gap-1">
                 <Phone className="h-4 w-4" />
@@ -394,7 +432,30 @@ const ClinicDetails = () => {
               </span>
             </div>
 
-            <div className="mt-4 flex h-36 items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
+            <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => window.open(googleMapsUrl, "_blank", "noopener,noreferrer")}
+                className="block w-full text-left"
+              >
+                <iframe
+                  title={`Map for ${clinic.clinic_name}`}
+                  src={embedMapUrl}
+                  className="h-56 w-full border-0"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+                <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Open in Google Maps</p>
+                    <p className="text-xs text-muted-foreground">{clinicAddress}</p>
+                  </div>
+                  <MapPin className="h-5 w-5 text-[#00555A]" />
+                </div>
+              </button>
+            </div>
+
+            <div className="hidden mt-4 flex h-36 items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
               🗺️ Map placeholder - {clinic.address}
             </div>
 
@@ -542,14 +603,14 @@ const ClinicDetails = () => {
                 {timeSlots.map((slot, index) => (
                   <button
                     key={index}
-                    onClick={() => handleSlotSelect(slot)}
+                    onClick={() => handleSlotSelect(slot, index)}
                     disabled={!slot.is_open || slot.is_expired || booking}
                     className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
                       slot.is_expired
                         ? "bg-gray-50 border-gray-200 cursor-not-allowed opacity-50"
                         : !slot.is_open
                           ? "bg-red-50 border-red-200 cursor-not-allowed opacity-60"
-                          : selectedTime === `${slot.slot_name} ${slot.time_range[0]}:00 - ${slot.time_range[1]}:00`
+                          : selectedTime === `${slot.slot_name} ${formatTimeRange(slot.time_range)}`
                             ? "border-[#00555A] bg-[#00555A]/10"
                             : "border-border bg-card hover:border-[#00555A]"
                     }`}
@@ -560,7 +621,7 @@ const ClinicDetails = () => {
                           {slot.slot_name}
                         </h3>
                         <p className={`text-sm ${slot.is_expired ? 'text-gray-400 line-through' : 'text-muted-foreground'}`}>
-                          {slot.time_range[0]}:00 - {slot.time_range[1]}:00
+                          {formatTimeRange(slot.time_range)}
                         </p>
                       </div>
                       <div className="text-right">

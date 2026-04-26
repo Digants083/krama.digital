@@ -1,4 +1,3 @@
-import TrustSection from "@/components/landing/TrustSection";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import {
@@ -24,13 +23,6 @@ const heroStats = [
   { value: "10+", label: "Clinics onboarding" },
   { value: "500+", label: "Expected patients" },
   { value: "18m", label: "Average visible wait" },
-];
-
-const problemPoints = [
-  "Long and unpredictable waiting times",
-  "No visibility into queue position",
-  "Overcrowded waiting rooms",
-  "Reception staff constantly interrupted",
 ];
 
 const patientFeatures = [
@@ -62,7 +54,7 @@ const Index = () => {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-white/80 px-4 py-2 text-sm text-muted-foreground shadow-sm">
               <Sparkles className="h-4 w-4 text-accent" />
-              Minimal clinic queueing for patients and staff
+              Minimal clinic queueing for patients
             </div>
 
             <h1 className="mt-6 font-display text-5xl font-bold leading-[1.02] tracking-tight text-foreground md:text-6xl lg:text-7xl">
@@ -163,16 +155,6 @@ const Index = () => {
         </div>
       </section>
 
-      <section className="section-container px-4 py-12 md:px-8 md:py-16">
-        <div className="grid gap-4 md:grid-cols-4">
-          {problemPoints.map((item) => (
-            <div key={item} className="rounded-[26px] border border-border/70 bg-white/80 p-6 shadow-sm">
-              <p className="text-sm font-medium leading-7 text-foreground">{item}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <section className="section-container px-4 py-16 md:px-8 md:py-20">
         <div className="grid gap-8 lg:grid-cols-2">
           <div className="rounded-[32px] bg-white/80 p-8 shadow-sm ring-1 ring-border/70">
@@ -242,7 +224,11 @@ const Index = () => {
               </Button>
             </Link>
             <Link to="/clinic/login">
-              <Button size="lg" variant="outline" className="border-white/25 bg-white/5 text-white hover:bg-white/10">
+              <Button
+                size="lg"
+                variant="outline"
+                className="border-white/25 bg-white/5 text-white hover:bg-white/10"
+              >
                 Clinic Login
               </Button>
             </Link>
@@ -250,7 +236,55 @@ const Index = () => {
         </div>
       </section>
 
-      <TrustSection />
+      <section className="section-container px-4 pb-16 md:px-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="flex items-center gap-4">
+            <div className="h-px flex-1 bg-border/70" />
+            <p className="text-xs font-medium uppercase tracking-[0.28em] text-muted-foreground">Get started</p>
+            <div className="h-px flex-1 bg-border/70" />
+          </div>
+
+          <div className="mt-10 grid gap-6 lg:grid-cols-2">
+            <div className="rounded-[32px] border border-border/70 bg-white/80 p-8 shadow-sm">
+              <p className="text-sm uppercase tracking-[0.22em] text-muted-foreground">For clinics</p>
+              <h3 className="mt-3 font-display text-2xl font-bold text-foreground">Register your clinic</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Create your clinic profile, add doctors, and set your time slots. Then go live and start serving.
+              </p>
+              <div className="mt-6 space-y-3 text-sm text-muted-foreground">
+                <p>1. Open Clinic Registration</p>
+                <p>2. Fill clinic details + add doctors</p>
+                <p>3. Set time slots and go online</p>
+              </div>
+              <div className="mt-8">
+                <Link to="/clinic/register">
+                  <Button className="w-full">Clinic Registration</Button>
+                </Link>
+              </div>
+            </div>
+
+            <div className="rounded-[32px] border border-border/70 bg-white/80 p-8 shadow-sm">
+              <p className="text-sm uppercase tracking-[0.22em] text-muted-foreground">For patients</p>
+              <h3 className="mt-3 font-display text-2xl font-bold text-foreground">Create your account</h3>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Sign up once, book appointments, and track your queue live so you arrive closer to your turn.
+              </p>
+              <div className="mt-6 space-y-3 text-sm text-muted-foreground">
+                <p>1. Sign up with your details</p>
+                <p>2. Choose a clinic and time slot</p>
+                <p>3. Track your token and reach on time</p>
+              </div>
+              <div className="mt-8">
+                <Link to="/patient/signup">
+                  <Button className="w-full" variant="outline">
+                    Patient Signup
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };

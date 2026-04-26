@@ -8,8 +8,7 @@ const Header = () => {
         <div className="flex min-h-20 flex-wrap items-center justify-between gap-4 py-3">
           <Link to="/" className="flex items-center">
             <div>
-              <p className="font-display text-2xl font-bold tracking-tight text-primary">Krama</p>
-              <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Clinic flow, simplified</p>
+              <p className="font-display font-bold tracking-tight text-primary text-[35px]">Krama</p>
             </div>
           </Link>
 

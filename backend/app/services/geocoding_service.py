@@ -1,15 +1,19 @@
 """
 Geocoding service to convert addresses to precise latitude/longitude coordinates.
-Uses Nominatim (OpenStreetMap) API - free and doesn't require API key.
+Uses Google Maps Geocoding API for high precision and reliability.
 """
 import requests
 import logging
+import os
 from typing import Optional, Tuple
+from dotenv import load_dotenv
+
+# Ensure .env file is loaded
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
+GOOGLE_MAPS_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 
 def get_coordinates_from_address(
     address: str,
@@ -17,71 +21,66 @@ def get_coordinates_from_address(
     pincode: Optional[str] = None
 ) -> Tuple[Optional[str], Optional[str]]:
     """
-    Convert address to precise latitude and longitude using Nominatim API.
-    
-    Args:
-        address: Full address string
-        city: City name for better precision
-        pincode: Pincode for better precision
-        
-    Returns:
-        Tuple of (latitude, longitude) as strings with high precision, or (None, None) if failed
+    Convert address to precise latitude and longitude using Google Maps Geocoding API.
     """
     try:
-        headers = {
-            "User-Agent": "KramaClinicApp/1.0 (contact@krama.care)"
-        }
-        
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not api_key:
+            logger.error("CRITICAL: GOOGLE_MAPS_API_KEY not found in environment variables. Check your .env file.")
+            return None, None
+
         # Build structured query for better precision
         query_parts = [address]
         if city:
             query_parts.append(city)
         if pincode:
             query_parts.append(pincode)
-        query_parts.append("India")  # Always add country for precision
-        
-        full_query = ", ".join(query_parts)
-        
+        query_parts.append("India")
+
+        full_query = ", ".join(filter(None, query_parts))
+
         params = {
-            "q": full_query,
-            "format": "json",
-            "limit": 1,
-            "addressdetails": 1,  # Get detailed address components
-            "extratags": 1,  # Get extra tags for better precision
-            "namedetails": 1,  # Get name details
-            "countrycodes": "in"  # Restrict to India
+            "address": full_query,
+            "key": api_key
         }
-        
+
+        logger.info(f"Requesting coordinates from Google for: {full_query}")
+
         response = requests.get(
-            NOMINATIM_URL,
-            headers=headers,
+            GOOGLE_MAPS_URL,
             params=params,
             timeout=15
         )
-        
+
         if response.status_code == 200:
             data = response.json()
-            if data and len(data) > 0:
-                result = data[0]
-                lat = result.get("lat")
-                lon = result.get("lon")
-                importance = result.get("importance", 0)
-                
-                # Log precision details
-                display_name = result.get("display_name", "")
-                logger.info(f"Geocoding successful - Lat: {lat}, Lon: {lon}, Importance: {importance}")
-                logger.info(f"Resolved address: {display_name[:100]}...")
-                
+            status = data.get("status")
+
+            if status == "OK":
+                result = data["results"][0]
+                location = result["geometry"]["location"]
+                lat = str(location["lat"])
+                lon = str(location["lng"])
+
+                logger.info(f"Google Geocoding SUCCESS - Lat: {lat}, Lon: {lon}")
                 return lat, lon
+            elif status == "ZERO_RESULTS":
+                logger.warning(f"Google Geocoding: No results found for address: {full_query}")
+            elif status == "OVER_QUERY_LIMIT":
+                logger.error("Google Geocoding: API quota exceeded (OVER_QUERY_LIMIT)")
+            elif status == "REQUEST_DENIED":
+                error_msg = data.get("error_message", "No error message provided")
+                logger.error(f"Google Geocoding: Request Denied. Check API key and permissions. Message: {error_msg}")
             else:
-                logger.warning(f"No results found for address: {address[:50]}...")
-                return None, None
-        else:
-            logger.error(f"Geocoding API error: {response.status_code}")
+                logger.error(f"Google Geocoding API returned unexpected status: {status}")
+
             return None, None
-            
+        else:
+            logger.error(f"Google Geocoding API HTTP Error: {response.status_code}")
+            return None, None
+
     except Exception as e:
-        logger.error(f"Error during geocoding: {str(e)}")
+        logger.error(f"Exception during Google geocoding: {str(e)}")
         return None, None
 
 
@@ -95,28 +94,15 @@ def get_coordinates_from_structured_address(
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Get precise coordinates from structured address components.
-    This provides better accuracy than using a single concatenated string.
-    
-    Args:
-        street: Street/Building number
-        road: Road/Street name
-        layout: Layout/Area (optional)
-        section: Section/Block (optional)
-        city: City name
-        pincode: Pincode
-        
-    Returns:
-        Tuple of (latitude, longitude) as strings with high precision
     """
-    # Build address in order of specificity (most specific first)
     parts = [street, road]
     if layout:
         parts.append(layout)
     if section:
         parts.append(section)
-    parts.extend([city, pincode, "India"])
-    
-    full_address = ", ".join(parts)
+    parts.extend([city, pincode])
+
+    full_address = ", ".join(filter(None, parts))
     return get_coordinates_from_address(full_address, city, pincode)
 
 

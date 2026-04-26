@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar } from "lucide-react";
+import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square } from "lucide-react";
 
 interface TimeSlot {
   slot_name: string;
@@ -10,11 +10,24 @@ interface TimeSlot {
   is_open: boolean;
 }
 
+// Convert 24-hour to 12-hour format for display
+const formatTimeRange = (timeRange: number[]) => {
+  const convertHour = (h: number) => {
+    if (h === 0) return { hour: 12, ampm: "AM" };
+    if (h === 12) return { hour: 12, ampm: "PM" };
+    if (h > 12) return { hour: h - 12, ampm: "PM" };
+    return { hour: h, ampm: "AM" };
+  };
+  const start = convertHour(timeRange[0]);
+  const end = convertHour(timeRange[1]);
+  return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
+};
+
 const SourceBadge = ({ source }: { source: string }) => {
   const map: Record<string, { label: string; className: string }> = {
     walkin:  { label: "Walk-in",  className: "bg-[#FFC107]/20 text-[#7A5800]" },
     online:  { label: "Online",   className: "bg-[#00555A]/10 text-[#00555A]" },
-    desk:    { label: "Desk",     className: "bg-gray-100 text-gray-600" },
+    desk:    { label: "Desk",     className: "bg-slate-100 text-slate-600" },
   };
   const style = map[source] ?? map.desk;
   return (
@@ -36,6 +49,8 @@ const ClinicControlQueue = () => {
     totalToday,
     currentServing,
     fetchQueueForClinic,
+    activeSlotId,
+    viewingSlotId,
   } = useQueue();
 
   const [clinicId, setClinicId] = useState("");
@@ -50,6 +65,16 @@ const ClinicControlQueue = () => {
       fetchQueueForClinic(clinicStr);
     }
   }, [fetchQueueForClinic]);
+
+  useEffect(() => {
+    if (!clinicId) return;
+
+    const interval = setInterval(() => {
+      fetchQueueForClinic(clinicId);
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [clinicId, fetchQueueForClinic]);
 
   useEffect(() => {
     if (currentServing?.startTime) {
@@ -92,6 +117,16 @@ const ClinicControlQueue = () => {
     }
   }, [clinicId]);
 
+  useEffect(() => {
+    if (!clinicId) return;
+
+    const interval = setInterval(() => {
+      fetchTimeSlots();
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [clinicId]);
+
   const fetchTimeSlots = async () => {
     setLoadingSlots(true);
     try {
@@ -100,27 +135,44 @@ const ClinicControlQueue = () => {
         const data = await response.json();
         const slots = data.slots || [];
         setTimeSlots(slots);
-        
-        // Auto-logout: check if current time is past 15 min before last slot ends
+
+        // Auto-logout: check if current time is past all slot end times
         if (isClinicActive && slots.length > 0) {
           const now = new Date();
           const currentMinutes = now.getHours() * 60 + now.getMinutes();
-          
-          // Find the latest end time from open slots
-          let latestEndMinutes = 0;
+
+          // Check if all slots have expired
+          let allExpired = true;
           for (const slot of slots) {
             if (slot.is_open) {
               const endMinutes = slot.time_range[1] * 60;
-              if (endMinutes > latestEndMinutes) {
-                latestEndMinutes = endMinutes;
+              if (currentMinutes < endMinutes) {
+                allExpired = false;
+                break;
               }
             }
           }
-          
-          // If current time is past (end - 15min), auto deactivate
-          const cutoffMinutes = latestEndMinutes - 15;
-          if (currentMinutes >= cutoffMinutes && latestEndMinutes > 0) {
+
+          // If all slots expired, auto deactivate
+          if (allExpired) {
             handleDeactivate();
+          } else {
+            // Also check 15 minutes before last OPEN slot ends (existing logic)
+            let latestEndMinutes = 0;
+            for (const slot of slots) {
+              if (slot.is_open) {
+                const endMinutes = slot.time_range[1] * 60;
+                if (endMinutes > latestEndMinutes) {
+                  latestEndMinutes = endMinutes;
+                }
+              }
+            }
+
+            // If current time is past (end - 15min), auto deactivate
+            const cutoffMinutes = latestEndMinutes - 15;
+            if (currentMinutes >= cutoffMinutes && latestEndMinutes > 0) {
+              handleDeactivate();
+            }
           }
         }
       }
@@ -178,17 +230,62 @@ const ClinicControlQueue = () => {
 
   const totalTodayReal = completedCount + queue.length + (currentServing ? 1 : 0);
 
+  // Check if all slots have expired
+  const allSlotsExpired = () => {
+    if (timeSlots.length === 0) return true;
+    
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    for (const slot of timeSlots) {
+      if (slot.is_open) {
+        const endMinutes = slot.time_range[1] * 60;
+        if (currentMinutes < endMinutes) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  // Check if current time is past the viewing slot's start time
+  const canServeInCurrentSlot = () => {
+    if (viewingSlotId === null || timeSlots.length === 0) return false;
+    
+    const slotIndex = viewingSlotId - 1; // Convert to 0-based index
+    if (slotIndex < 0 || slotIndex >= timeSlots.length) return false;
+    
+    const slot = timeSlots[slotIndex];
+    const slotStartHour = slot.time_range[0];
+    
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeDecimal = currentHour + currentMinute / 60.0;
+    
+    // Can serve if current time is >= slot start time
+    return currentTimeDecimal >= slotStartHour;
+  };
+
+  const isServingAllowedForViewingSlot =
+    viewingSlotId !== null && activeSlotId !== null && viewingSlotId === activeSlotId;
+
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
-          <Link to="/clinic" className="text-muted-foreground hover:text-foreground" aria-label="Go back">
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
-          <span className="font-semibold text-foreground">Control Queue</span>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
+        <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
+          <div className="flex items-center gap-3">
+            <Link to="/clinic" className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <div>
+              <h1 className="text-xl font-bold text-slate-800">Queue Control</h1>
+              <p className="text-xs text-slate-500">Manage your clinic's patient queue</p>
+            </div>
+          </div>
           <Button
             variant="outline"
-            className="ml-auto border-gray-300 text-[#0F172A] hover:bg-gray-50 rounded-lg px-3 py-1.5 transition-all duration-200"
+            className="border-slate-300 text-slate-600 hover:bg-slate-100 px-4 py-2 rounded-lg font-medium transition-all"
             onClick={handleRefreshQueue}
           >
             <RefreshCw className="h-4 w-4 mr-2" />
@@ -197,212 +294,272 @@ const ClinicControlQueue = () => {
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 pb-12">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-semibold text-[#0F172A] mb-6">Clinic Queue Control</h1>
-
-          <div className={`rounded-xl p-4 mb-6 flex items-center justify-between ${
+      <main className="mx-auto max-w-4xl px-4 py-8">
+        {/* Clinic Status Card */}
+        <div className={`rounded-2xl p-5 mb-6 flex items-center justify-between shadow-lg border-2 transition-all ${
             isClinicActive 
-              ? "bg-green-50 border border-green-300" 
-              : "bg-gray-50 border border-gray-200"
+              ? "bg-gradient-to-r from-green-50 to-white border-green-200" 
+              : "bg-gradient-to-r from-slate-50 to-white border-slate-200"
           }`}>
-            <div className="flex items-center gap-3">
-              {isClinicActive && (
-                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-              )}
-              <span className={isClinicActive ? "text-green-800 font-medium" : "text-gray-600"}>
-                {isClinicActive ? "Clinic is Live" : "Clinic is Offline"}
-              </span>
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isClinicActive ? 'bg-green-100' : 'bg-slate-100'}`}>
+                {isClinicActive ? (
+                  <div className="w-4 h-4 bg-green-500 rounded-full animate-pulse"></div>
+                ) : (
+                  <Clock className="h-6 w-6 text-slate-400" />
+                )}
+              </div>
+              <div>
+                <span className={`text-lg font-bold ${isClinicActive ? "text-green-700" : "text-slate-600"}`}>
+                  {isClinicActive ? "Clinic is Live" : "Clinic is Offline"}
+                </span>
+                <p className="text-sm text-slate-500">{isClinicActive ? "Accepting patients" : "Not accepting patients"}</p>
+              </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-3">
               <Button
                 onClick={handleActivate}
-                disabled={activating || isClinicActive}
-                className="bg-green-600 hover:bg-green-700 text-white"
+                disabled={activating || isClinicActive || allSlotsExpired()}
+                className="bg-green-500 hover:bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all"
               >
+                <Play className="h-4 w-4 mr-2" />
                 Start
               </Button>
               <Button
                 onClick={handleDeactivate}
                 disabled={activating || !isClinicActive}
                 variant="outline"
-                className="border-red-300 text-red-600 hover:bg-red-50"
+                className="border-red-300 text-red-500 hover:bg-red-50 px-6 py-2.5 rounded-lg font-medium transition-all"
               >
+                <Square className="h-4 w-4 mr-2" />
                 Stop
               </Button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
-            <div className="flex items-center gap-2 mb-4">
+          {/* Time Slots Card */}
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden mb-6">
+            <div className="bg-gradient-to-r from-slate-50 to-white px-5 py-4 border-b border-slate-100 flex items-center gap-2">
               <Calendar className="h-5 w-5 text-[#00555A]" />
-              <h2 className="font-semibold text-[#0F172A]">Today's Time Slots</h2>
+              <h2 className="font-semibold text-slate-800">Today's Time Slots</h2>
             </div>
-            
-            {loadingSlots ? (
-              <div className="text-center py-4 text-gray-500">Loading slots...</div>
-            ) : timeSlots.length === 0 ? (
-              <div className="text-center py-4 text-gray-500">
-                <p className="text-sm">No time slots configured.</p>
-                <Link to="/clinic/manage-time" className="text-[#00555A] text-sm underline mt-1 inline-block">
-                  Set up time slots
-                </Link>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {timeSlots.map((slot, index) => (
-                  <div
-                    key={index}
-                    className={`border rounded-lg p-3 ${
-                      slot.is_open ? 'bg-green-50 border-green-200' : 'bg-gray-100 border-gray-300'
-                    }`}
-                  >
-                    <h3 className="font-medium text-[#0F172A] text-sm">{slot.slot_name}</h3>
-                    <p className="text-xs text-gray-600">
-                      {slot.time_range[0]}:00 - {slot.time_range[1]}:00
-                      {slot.is_open ? ' (Open)' : ' (Closed)'}
-                    </p>
+            <div className="p-5">
+              {loadingSlots ? (
+                <div className="text-center py-6">
+                  <div className="animate-spin h-6 w-6 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto"></div>
+                  <p className="text-sm text-slate-500 mt-2">Loading slots...</p>
+                </div>
+              ) : timeSlots.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="bg-slate-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Clock className="h-6 w-6 text-slate-400" />
                   </div>
-                ))}
-              </div>
-            )}
+                  <p className="text-sm text-slate-600 mb-2">No time slots configured.</p>
+                  <Link to="/clinic/manage-time" className="text-[#00555A] text-sm font-medium hover:underline">
+                    Set up time slots →
+                  </Link>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {timeSlots.map((slot, index) => (
+                    <div
+                      key={index}
+                      className={`border-2 rounded-xl p-4 transition-all ${
+                        slot.is_open ? 'bg-gradient-to-r from-green-50 to-white border-green-200' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-semibold text-slate-800">{slot.slot_name.replace('Time ', 'Session ')}</h3>
+                          <p className="text-sm text-slate-500 font-medium">
+                            {formatTimeRange(slot.time_range)}
+                          </p>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${slot.is_open ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+                          {slot.is_open ? 'Open' : 'Closed'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
+          {/* Stats Cards */}
           <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-white rounded-xl shadow-sm p-4 text-center">
-              <p className="text-xs text-gray-600 mb-1">In Queue</p>
-              <p className="text-2xl font-bold text-[#0F172A]">{queue.length}</p>
+            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
+              <div className="bg-slate-100 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
+                <Users className="h-5 w-5 text-slate-600" />
+              </div>
+              <p className="text-xs text-slate-500 font-medium mb-1">In Queue</p>
+              <p className="text-3xl font-bold text-slate-800">{queue.length}</p>
             </div>
-            <div className="bg-white rounded-xl shadow-sm p-4 text-center">
-              <p className="text-xs text-gray-600 mb-1">Completed</p>
-              <p className="text-2xl font-bold text-[#FFC107]">{completedCount}</p>
+            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
+              <div className="bg-[#FFC107]/20 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
+                <ArrowRightCircle className="h-5 w-5 text-[#FFC107]" />
+              </div>
+              <p className="text-xs text-slate-500 font-medium mb-1">Completed</p>
+              <p className="text-3xl font-bold text-[#FFC107]">{completedCount}</p>
             </div>
-            <div className="bg-white rounded-xl shadow-sm p-4 text-center">
-              <p className="text-xs text-gray-600 mb-1">Now Serving</p>
-              <p className="text-2xl font-bold text-[#00555A]">{currentServing ? 1 : 0}</p>
+            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
+              <div className="bg-[#00555A]/10 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
+                <Clock className="h-5 w-5 text-[#00555A]" />
+              </div>
+              <p className="text-xs text-slate-500 font-medium mb-1">Now Serving</p>
+              <p className="text-3xl font-bold text-[#00555A]">{currentServing ? 1 : 0}</p>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm p-6 text-center mb-6">
-            {currentServing ? (
-              <>
-                <p className="text-sm text-gray-600 mb-2">Now Serving</p>
-                <div className="text-5xl font-extrabold text-[#0F172A]">{currentServing.token}</div>
-                <div className="mt-4 p-4 bg-green-50 rounded-lg">
-                  <div className="flex items-center justify-center gap-2 flex-wrap">
-                    <p className="font-medium text-[#0F172A]">
-                      {currentServing.patientName}
-                    </p>
-                    <SourceBadge source={
-                      queue.find((q) => q.token === currentServing.token)?.source || "online"
-                    } />
+          {/* Current Patient Card */}
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden mb-6">
+            <div className="bg-gradient-to-r from-[#00555A] to-[#006e78] px-6 py-4">
+              <p className="text-white font-semibold text-center">
+                {currentServing ? "Now Serving" : queue.length > 0 ? "Next to Serve" : "No Patient"}
+              </p>
+            </div>
+            <div className="p-6 text-center">
+              {currentServing ? (
+                <>
+                  <div className="text-6xl font-extrabold text-slate-800 mb-4">{currentServing.token}</div>
+                  <div className="bg-gradient-to-r from-green-50 to-white border-2 border-green-200 rounded-xl p-4">
+                    <div className="flex items-center justify-center gap-2 flex-wrap mb-2">
+                      <p className="font-semibold text-slate-800 text-lg">
+                        {currentServing.patientName}
+                      </p>
+                      <SourceBadge source={
+                        queue.find((q) => q.token === currentServing.token)?.source || "online"
+                      } />
+                    </div>
+                    <div className="flex items-center justify-center gap-2 text-sm text-slate-600">
+                      <Clock className="h-4 w-4" />
+                      <span>Elapsed: {formatTime(elapsedTime)}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-center gap-2 mt-2 text-sm text-gray-600">
-                    <Clock className="h-4 w-4" />
-                    <span>Elapsed: {formatTime(elapsedTime)}</span>
+                </>
+              ) : queue.length > 0 ? (
+                <>
+                  <div className="text-6xl font-extrabold text-slate-800 mb-4">{queue[0].token}</div>
+                  <div className="bg-gradient-to-r from-[#00555A]/5 to-[#00555A]/10 border-2 border-[#00555A]/20 rounded-xl p-4">
+                    <div className="flex items-center justify-center gap-2 flex-wrap mb-2">
+                      <p className="font-semibold text-slate-800 text-lg">
+                        {queue[0].name}
+                      </p>
+                      <SourceBadge source={queue[0].source} />
+                    </div>
+                    {queue[0].phone && (
+                      <p className="text-xs text-slate-500">{queue[0].phone}</p>
+                    )}
                   </div>
-                </div>
-              </>
-            ) : queue.length > 0 ? (
-              <>
-                <p className="text-sm text-[#00555A] mb-2 font-medium">Next to Serve</p>
-                <div className="text-5xl font-extrabold text-[#0F172A]">{queue[0].token}</div>
-                <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                  <div className="flex items-center justify-center gap-2 flex-wrap">
-                    <p className="font-medium text-[#0F172A]">
-                      {queue[0].name}
-                    </p>
-                    <SourceBadge source={queue[0].source} />
-                  </div>
-                  {queue[0].phone && (
-                    <p className="text-xs text-gray-500 mt-1">{queue[0].phone}</p>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-600 mb-2">Now Serving</p>
-                <div className="text-5xl font-extrabold text-gray-400">--</div>
-                <p className="mt-4 text-gray-500">No patients in queue</p>
-              </>
-            )}
+                </>
+              ) : (
+                <>
+                  <div className="text-6xl font-extrabold text-slate-300 mb-4">--</div>
+                  <p className="text-slate-500">No patients in queue</p>
+                </>
+              )}
+            </div>
           </div>
 
+          {/* Action Buttons */}
           <div className="flex gap-4 mb-6">
             <Button
-              className={`flex-1 hover:opacity-90 rounded-xl transition-all duration-200 ${
-                currentServing 
-                  ? "bg-[#FFC107] text-[#0F172A]" 
-                  : "bg-[#00555A] text-white"
+              className={`flex-1 hover:opacity-90 rounded-xl transition-all duration-200 py-3 font-semibold shadow-md hover:shadow-lg ${
+                currentServing
+                  ? "bg-[#FFC107] text-[#0F172A]"
+                  : "bg-[#00555A] text-white hover:bg-[#00494F]"
               }`}
               onClick={() => currentServing ? completePatient() : nextPatient()}
-              disabled={!currentServing && queue.length === 0}
+              disabled={
+                (!currentServing && queue.length === 0) ||
+                (!currentServing && queue.length > 0 && !canServeInCurrentSlot())
+              }
             >
-              <ArrowRightCircle className="mr-2" size={18} />
-              {currentServing ? "Completed" : "Next"}
+              <ArrowRightCircle className="mr-2 h-5 w-5" />
+              {currentServing ? "Completed" : "Next Patient"}
             </Button>
             <Button
               variant="outline"
-              className="flex-1 border-gray-300 text-[#0F172A] hover:bg-gray-50 rounded-xl transition-all duration-200"
+              className="flex-1 border-slate-300 text-slate-600 hover:bg-slate-100 rounded-xl transition-all duration-200 py-3 font-semibold"
               onClick={() => skipPatient()}
             >
-              <SkipForward className="mr-2" size={18} />
+              <SkipForward className="mr-2 h-5 w-5" />
               Skip
             </Button>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Users size={18} className="text-[#0F172A]" />
-              <h2 className="font-semibold text-[#0F172A]">Waiting Queue</h2>
+          {/* Waiting Queue */}
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden">
+            <div className="bg-gradient-to-r from-slate-50 to-white px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+              <Users size={18} className="text-[#00555A]" />
+              <h2 className="font-semibold text-slate-800">Waiting Queue</h2>
+              {typeof viewingSlotId === "number" && (
+                <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                  Slot {viewingSlotId}
+                  {!isServingAllowedForViewingSlot && " (Upcoming)"}
+                </span>
+              )}
               {walkinCount > 0 && (
-                <span className="ml-auto flex items-center gap-1 text-xs text-[#7A5800]">
+                <span className="ml-auto flex items-center gap-1 text-xs text-[#7A5800] bg-[#FFC107]/20 px-2 py-1 rounded-full">
                   <QrCode className="h-3 w-3" />
-                  {walkinCount} QR walk-in{walkinCount > 1 ? "s" : ""}
+                  {walkinCount} walk-in{walkinCount > 1 ? "s" : ""}
                 </span>
               )}
             </div>
-
-            {queue.length === 0 ? (
-              <p className="text-gray-500 text-center py-4">No patients in queue</p>
-            ) : (
-              queue.map((p, i) => (
-                <div
-                  key={p.token}
-                  className={`flex justify-between items-center rounded-lg px-4 py-3 mb-2 last:mb-0 ${
-                    p.source === "walkin"
-                      ? "bg-[#FFC107]/10 border border-[#FFC107]/30"
-                      : "bg-gray-50"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <p className="font-medium text-[#0F172A]">
-                        {p.token} - {p.name}
-                      </p>
-                      {p.source === "walkin" ? (
-                        p.phone && (
-                          <p className="text-xs text-gray-500">{p.phone}</p>
-                        )
-                      ) : (
-                        <>
-                          {p.phone && (
-                            <p className="text-xs text-gray-500">{p.phone}</p>
-                          )}
-                          {p.patient_email && (
-                            <p className="text-xs text-gray-400">{p.patient_email}</p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                    <SourceBadge source={p.source} />
+            <div className="p-4">
+              {queue.length === 0 ? (
+                <div className="text-center py-8">
+                  <div className="bg-slate-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Users className="h-6 w-6 text-slate-400" />
                   </div>
-                  <span className="text-xs text-gray-500 font-medium">#{i + 1}</span>
+                  <p className="text-slate-500">No patients in queue</p>
                 </div>
-              ))
-            )}
+              ) : null}
+              {queue.length > 0 && (
+                <div className="space-y-3">
+                  {queue.map((p, i) => (
+                    <div
+                      key={p.token}
+                      className={`flex justify-between items-center rounded-xl px-4 py-3 border-2 transition-all hover:shadow-md ${
+                        p.source === "walkin"
+                          ? "bg-gradient-to-r from-[#FFC107]/10 to-white border-[#FFC107]/30"
+                          : "bg-slate-50 border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm ${
+                          p.source === "walkin" ? "bg-[#FFC107]/20 text-[#7A5800]" : "bg-[#00555A]/10 text-[#00555A]"
+                        }`}>
+                          {p.token}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-800">
+                            {p.name}
+                          </p>
+                          {p.source === "walkin" ? (
+                            p.phone && (
+                              <p className="text-xs text-slate-500">{p.phone}</p>
+                            )
+                          ) : (
+                            <>
+                              {p.phone && (
+                                <p className="text-xs text-slate-500">{p.phone}</p>
+                              )}
+                              {p.patient_email && (
+                                <p className="text-xs text-slate-400">{p.patient_email}</p>
+                              )}
+                            </>
+                          )}
+                        </div>
+                        <SourceBadge source={p.source} />
+                      </div>
+                      <span className="text-xs text-slate-500 font-bold bg-slate-100 px-2 py-1 rounded-full">#{i + 1}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
       </main>
     </div>
   );

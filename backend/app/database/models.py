@@ -33,6 +33,7 @@ class Clinic(Base):
     end = Column(Integer, nullable=True)
     booking_cutoff_minutes = Column(Integer, default=15)
     is_active = Column(Boolean, default=False)
+    has_pinned_location = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class ClinicImage(Base):
@@ -57,7 +58,7 @@ class Patient(Base):
 
 class Appointment(Base):
     __tablename__ = "appointments"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     appointment_token = Column(String, nullable=False)
     clinic_id = Column(String, nullable=False)
@@ -72,6 +73,7 @@ class Appointment(Base):
     notification_stage = Column(String, default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     source = Column(String, default="online")
+    slot_id = Column(Integer, nullable=True)
 
 class CompletedAppointment(Base):
     """Model for storing completed/served patient history"""
@@ -157,6 +159,7 @@ class QRAppointment(Base):
     date = Column(String, nullable=False)
     status = Column(String, default="booked")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    slot_id = Column(Integer, nullable=True)
 
 class PendingClinicRegistration(Base):
     """Model for storing pending clinic registrations awaiting admin approval"""

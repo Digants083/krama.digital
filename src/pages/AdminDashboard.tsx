@@ -72,13 +72,13 @@ interface DashboardStats {
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
+  const adminToken = sessionStorage.getItem("admin_token");
+  const adminId = sessionStorage.getItem("admin_id");
   
   // Secure session validation
   useEffect(() => {
-    const adminToken = localStorage.getItem("admin_token");
-    const adminLoggedIn = localStorage.getItem("admin_logged_in");
-    const adminId = localStorage.getItem("admin_id");
-    const sessionTime = localStorage.getItem("admin_session_time");
+    const adminLoggedIn = sessionStorage.getItem("admin_logged_in");
+    const sessionTime = sessionStorage.getItem("admin_session_time");
     
     // Check if session exists and is valid (24 hour expiry)
     const isValidSession = adminToken && adminLoggedIn && adminId && sessionTime;
@@ -87,21 +87,26 @@ const AdminDashboard = () => {
     
     if (!isValidSession || sessionAge > maxSessionAge) {
       // Clear invalid/expired session
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_logged_in");
-      localStorage.removeItem("admin_username");
-      localStorage.removeItem("admin_id");
-      localStorage.removeItem("admin_session_time");
+      sessionStorage.removeItem("admin_token");
+      sessionStorage.removeItem("admin_logged_in");
+      sessionStorage.removeItem("admin_username");
+      sessionStorage.removeItem("admin_id");
+      sessionStorage.removeItem("admin_session_time");
       navigate("/admin/login", { replace: true });
     }
-  }, [navigate]);
+  }, [navigate, adminToken, adminId]);
+
+  const getAdminHeaders = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${adminToken ?? ""}`,
+  });
 
   const handleLogout = () => {
-    localStorage.removeItem("admin_token");
-    localStorage.removeItem("admin_logged_in");
-    localStorage.removeItem("admin_username");
-    localStorage.removeItem("admin_id");
-    localStorage.removeItem("admin_session_time");
+    sessionStorage.removeItem("admin_token");
+    sessionStorage.removeItem("admin_logged_in");
+    sessionStorage.removeItem("admin_username");
+    sessionStorage.removeItem("admin_id");
+    sessionStorage.removeItem("admin_session_time");
     navigate("/admin/login", { replace: true });
   };
 
@@ -122,22 +127,30 @@ const AdminDashboard = () => {
   const fetchRegistrations = async (tab: string) => {
     try {
       if (tab === "pending") {
-        const response = await fetch(`${API_BASE}/pending-registrations?status=pending`);
+        const response = await fetch(`${API_BASE}/pending-registrations?status=pending`, {
+          headers: getAdminHeaders(),
+        });
         if (!response.ok) throw new Error("Failed to fetch registrations");
         const data = await response.json();
         setRegistrations(data.registrations || []);
       } else if (tab === "approved") {
-        const response = await fetch(`${API_BASE}/approved-clinics`);
+        const response = await fetch(`${API_BASE}/approved-clinics`, {
+          headers: getAdminHeaders(),
+        });
         if (!response.ok) throw new Error("Failed to fetch approved clinics");
         const data = await response.json();
         setApprovedClinics(data.clinics || []);
       } else if (tab === "rejected") {
-        const response = await fetch(`${API_BASE}/rejected-clinics`);
+        const response = await fetch(`${API_BASE}/rejected-clinics`, {
+          headers: getAdminHeaders(),
+        });
         if (!response.ok) throw new Error("Failed to fetch rejected clinics");
         const data = await response.json();
         setRejectedClinics(data.clinics || []);
       } else {
-        const response = await fetch(`${API_BASE}/pending-registrations`);
+        const response = await fetch(`${API_BASE}/pending-registrations`, {
+          headers: getAdminHeaders(),
+        });
         if (!response.ok) throw new Error("Failed to fetch registrations");
         const data = await response.json();
         setRegistrations(data.registrations || []);
@@ -151,7 +164,9 @@ const AdminDashboard = () => {
   // Fetch stats
   const fetchStats = async () => {
     try {
-      const response = await fetch(`${API_BASE}/statistics`);
+      const response = await fetch(`${API_BASE}/statistics`, {
+        headers: getAdminHeaders(),
+      });
       if (!response.ok) throw new Error("Failed to fetch statistics");
       
       const data = await response.json();
@@ -178,12 +193,12 @@ const AdminDashboard = () => {
   const handleApprove = async (reg: ClinicData) => {
     setActionLoading(true);
     try {
-      // For production, get admin_id from auth context
-      const adminId = "admin-001";
-      
       const response = await fetch(
         `${API_BASE}/pending-registrations/${reg.id}/approve?admin_id=${adminId}`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: getAdminHeaders(),
+        }
       );
 
       if (!response.ok) {
@@ -211,12 +226,12 @@ const AdminDashboard = () => {
   const handleReject = async (reg: PendingRegistration) => {
     setActionLoading(true);
     try {
-      // For production, get admin_id from auth context
-      const adminId = "admin-001";
-      
       const response = await fetch(
         `${API_BASE}/pending-registrations/${reg.id}/reject?admin_id=${adminId}&reason=${encodeURIComponent(rejectionReason)}`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: getAdminHeaders(),
+        }
       );
 
       if (!response.ok) {

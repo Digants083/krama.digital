@@ -4,10 +4,11 @@ Provides endpoints for viewing, approving, and rejecting pending clinic registra
 """
 import random
 import string
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
@@ -17,13 +18,14 @@ from app.database.models import (
     PendingClinicRegistration, Clinic, Admin, ClinicImage
 )
 from app.security import hash_password, verify_password
-from app.services.geocoding_service import get_coordinates_from_address
 from app.services.email_service import (
     send_clinic_approval_email,
     send_clinic_rejection_email
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+ADMIN_SESSION_HOURS = 24
+admin_sessions: dict[str, dict[str, str | datetime]] = {}
 
 
 def generate_clinic_id():
@@ -48,6 +50,63 @@ class LoginRequest(BaseModel):
     password: str
 
 
+def create_admin_session(admin_id: str, username: str) -> tuple[str, datetime]:
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=ADMIN_SESSION_HOURS)
+    admin_sessions[token] = {
+        "admin_id": admin_id,
+        "username": username,
+        "expires_at": expires_at,
+    }
+    return token, expires_at
+
+
+def invalidate_admin_session(token: str) -> None:
+    admin_sessions.pop(token, None)
+
+
+def get_bearer_token(authorization: Optional[str]) -> str:
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin authentication required"
+        )
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin authorization header"
+        )
+    return token
+
+
+async def require_admin_session(authorization: Optional[str] = Header(None)) -> dict:
+    token = get_bearer_token(authorization)
+    session = admin_sessions.get(token)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin session not found. Please login again."
+        )
+
+    expires_at = session["expires_at"]
+    if not isinstance(expires_at, datetime) or datetime.utcnow() > expires_at:
+        invalidate_admin_session(token)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin session expired. Please login again."
+        )
+
+    return {
+        "token": token,
+        "admin_id": session["admin_id"],
+        "username": session["username"],
+        "expires_at": expires_at,
+    }
+
+
 @router.post("/login")
 async def admin_login(
     request: LoginRequest,
@@ -65,12 +124,16 @@ async def admin_login(
     ADMIN_PASSWORD = "Diganthadmin1"
     
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        access_token, expires_at = create_admin_session("admin-001", username)
         return {
             "success": True,
             "message": "Login successful",
             "admin_id": "admin-001",
             "name": "Admin",
             "username": username,
+            "access_token": access_token,
+            "expires_in": ADMIN_SESSION_HOURS * 60 * 60,
+            "expires_at": expires_at.isoformat(),
         }
     
     # Also check database
@@ -82,13 +145,17 @@ async def admin_login(
     if admin and verify_password(password, admin.password):
         admin.last_login = datetime.now()
         await db.commit()
+        access_token, expires_at = create_admin_session(admin.admin_id, admin.email)
         return {
             "success": True,
             "message": "Login successful",
             "admin_id": admin.admin_id,
             "name": admin.name,
             "email": admin.email,
-            "role": admin.role
+            "role": admin.role,
+            "access_token": access_token,
+            "expires_in": ADMIN_SESSION_HOURS * 60 * 60,
+            "expires_at": expires_at.isoformat(),
         }
     
     raise HTTPException(
@@ -145,6 +212,22 @@ async def create_admin(
     }
 
 
+@router.get("/session")
+async def get_admin_session(session: dict = Depends(require_admin_session)):
+    return {
+        "authenticated": True,
+        "admin_id": session["admin_id"],
+        "username": session["username"],
+        "expires_at": session["expires_at"].isoformat() if isinstance(session["expires_at"], datetime) else None,
+    }
+
+
+@router.post("/logout")
+async def admin_logout(session: dict = Depends(require_admin_session)):
+    invalidate_admin_session(session["token"])
+    return {"success": True, "message": "Logged out successfully"}
+
+
 # ============ Pending Registration Management ============
 
 @router.get("/pending-registrations")
@@ -152,7 +235,8 @@ async def get_pending_registrations(
     status: Optional[str] = Query(None, description="Filter by status: pending, approved, rejected"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
 ):
     """
     Get all pending clinic registrations with optional filtering.
@@ -224,7 +308,8 @@ async def get_pending_registrations(
 @router.get("/pending-registrations/{registration_id}")
 async def get_pending_registration_details(
     registration_id: int,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
 ):
     """
     Get detailed information about a specific pending registration.
@@ -275,13 +360,20 @@ async def approve_registration(
     registration_id: int,
     admin_id: str,
     notes: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
 ):
     """
     Approve a pending clinic registration.
     Moves the clinic from pending table to approved clinics table.
     """
     try:
+        if admin_id != session["admin_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin identity mismatch"
+            )
+
         # Get the pending registration
         result = await db.execute(
             select(PendingClinicRegistration)
@@ -308,6 +400,21 @@ async def approve_registration(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A clinic with this email already exists"
             )
+
+        latitude = pending_reg.latitude
+        longitude = pending_reg.longitude
+
+        # Geocode the address if coordinates are missing
+        if not latitude or not longitude:
+            from app.services.geocoding_service import get_coordinates_from_address
+
+            # Build address for geocoding
+            full_address = f"{pending_reg.street_address or ''}, {pending_reg.road or ''}, {pending_reg.city or ''}, {pending_reg.pincode or ''}"
+            latitude, longitude = get_coordinates_from_address(
+                full_address,
+                pending_reg.city,
+                pending_reg.pincode
+            )
  
         # Create approved clinic with all address fields, category and doctor details
         new_clinic = Clinic(
@@ -324,8 +431,8 @@ async def approve_registration(
             city=pending_reg.city,
             pincode=pending_reg.pincode,
             address=pending_reg.address,
-            latitude=pending_reg.latitude,
-            longitude=pending_reg.longitude,
+            latitude=latitude,
+            longitude=longitude,
             image_urls=pending_reg.image_urls,
             doctor_name=pending_reg.doctor_name,
             specialization=pending_reg.specialization,
@@ -396,12 +503,19 @@ async def reject_registration(
     registration_id: int,
     admin_id: str,
     reason: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
 ):
     """
     Reject a pending clinic registration.
     """
     try:
+        if admin_id != session["admin_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin identity mismatch"
+            )
+
         # Get the pending registration
         result = await db.execute(
             select(PendingClinicRegistration)
@@ -492,7 +606,10 @@ async def reject_registration(
 # ============ Statistics Endpoints ============
 
 @router.get("/statistics")
-async def get_admin_statistics(db: AsyncSession = Depends(get_db)):
+async def get_admin_statistics(
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
+):
     """
     Get statistics for the admin dashboard.
     """
@@ -536,7 +653,8 @@ async def get_admin_statistics(db: AsyncSession = Depends(get_db)):
 async def get_approved_clinics(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
 ):
     """
     Get all approved clinics from the clinics table.
@@ -594,7 +712,8 @@ async def get_approved_clinics(
 async def get_rejected_clinics(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
 ):
     """
     Get all rejected clinics from the rejected_clinics table.

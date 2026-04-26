@@ -14,6 +14,35 @@ import {
 import { ArrowLeft } from "lucide-react";
 import type { Clinic } from "@/data/mockData";
 
+type ClinicApiResponse = {
+  clinic_id: string;
+  clinic_name: string;
+  address: string;
+  street_address?: string | null;
+  road?: string | null;
+  layout?: string | null;
+  section?: string | null;
+  city: string;
+  pincode?: string | null;
+  phone: string;
+  doctors?: { name: string }[];
+  specializations?: string[];
+  is_active?: boolean;
+  latitude?: string | null;
+  longitude?: string | null;
+};
+
+type ReviewApiResponse = {
+  average_rating?: number;
+  total?: number;
+};
+
+type ClinicWithDistance = Clinic & {
+  distanceValue: number;
+};
+
+const SEARCH_RADIUS_KM = 5;
+
 const medicalCategories: Record<
   string,
   { name: string; description: string; icon: string }
@@ -21,251 +50,312 @@ const medicalCategories: Record<
   all: {
     name: "All Categories",
     description: "Show all clinics and specializations",
-    icon: "🏥",
+    icon: "hospital",
   },
   general: {
     name: "General",
     description: "Fever, cold, and general health issues",
-    icon: "🩺",
+    icon: "general",
   },
   skin: {
     name: "Skin",
     description: "Skin problems, allergies, treatments",
-    icon: "🔬",
+    icon: "skin",
   },
   dental: {
     name: "Dental",
     description: "Teeth cleaning, filling, extraction",
-    icon: "🦷",
+    icon: "dental",
   },
   bone: {
     name: "Bone & Joint",
     description: "Bone fractures, joint pain treatment",
-    icon: "🦴",
+    icon: "bone",
   },
   eye: {
     name: "Eye",
     description: "Vision check, glasses, eye problems",
-    icon: "👁️",
+    icon: "eye",
   },
   ent: {
     name: "ENT",
     description: "Ear nose throat problems treatment",
-    icon: "👂",
+    icon: "ent",
   },
   heart: {
     name: "Cardiology",
     description: "Heart-related issues",
-    icon: "❤️",
+    icon: "heart",
   },
   neuro: {
     name: "Neurology",
     description: "Brain, nerves, spine",
-    icon: "🧠",
+    icon: "neuro",
   },
   child: {
     name: "Pediatric",
     description: "Child care, vaccination",
-    icon: "👶",
+    icon: "child",
   },
   women: {
     name: "Gynecology",
     description: "Women's health",
-    icon: "🌸",
+    icon: "women",
   },
   mental: {
     name: "Mental Health",
     description: "Psychiatry, counseling",
-    icon: "🧘",
+    icon: "mental",
   },
   physio: {
     name: "Physiotherapy",
     description: "Physical therapy, rehab",
-    icon: "💪",
+    icon: "physio",
   },
   vet: {
     name: "Pet Hospital",
     description: "Pet treatment and grooming services",
-    icon: "🐕",
+    icon: "vet",
   },
   scanning: {
     name: "Scanning Center",
     description: "X-ray, MRI, CT scan services",
-    icon: "📷",
+    icon: "scan",
   },
   lab: {
     name: "Diagnostic Lab",
     description: "Blood tests, diagnostics",
-    icon: "🧪",
+    icon: "lab",
   },
   ayurveda: {
     name: "Ayurveda",
     description: "Ayurvedic treatment",
-    icon: "🌿",
+    icon: "leaf",
   },
   homeo: {
     name: "Homeopathy",
     description: "Homeopathic treatment",
-    icon: "💊",
+    icon: "pill",
   },
   other: {
     name: "Other",
     description: "Other specializations",
-    icon: "🏥",
+    icon: "other",
   },
+};
+
+const toRadians = (value: number) => (value * Math.PI) / 180;
+
+const haversineDistanceKm = (
+  userLat: number,
+  userLon: number,
+  clinicLat: number,
+  clinicLon: number
+) => {
+  const earthRadiusKm = 6371;
+  const deltaLat = toRadians(clinicLat - userLat);
+  const deltaLon = toRadians(clinicLon - userLon);
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(toRadians(userLat)) *
+      Math.cos(toRadians(clinicLat)) *
+      Math.sin(deltaLon / 2) *
+      Math.sin(deltaLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
 };
 
 const PatientFindClinics = () => {
   const [locationGranted, setLocationGranted] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationName, setLocationName] = useState("");
+  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [loading, setLoading] = useState(false);
-  const [clinics, setClinics] = useState<Clinic[]>([]);
-  const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
+  const [clinics, setClinics] = useState<ClinicWithDistance[]>([]);
+  const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   useEffect(() => {
-    if (message) {
-      const timer = setTimeout(() => setMessage(null), 5000);
-      return () => clearTimeout(timer);
-    }
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), 5000);
+    return () => clearTimeout(timer);
   }, [message]);
 
-  // Fetch clinics from backend - only active ones with available slots
   useEffect(() => {
+    if (!locationGranted || !userCoords) {
+      return;
+    }
+
     const fetchClinics = async () => {
       setLoading(true);
       try {
         const response = await fetch("http://localhost:8000/auth/clinics/list");
-        if (response.ok) {
-          const data = await response.json();
-          const now = new Date();
-          const currentHour = now.getHours();
-          const currentMinute = now.getMinutes();
-          const currentTimeMinutes = currentHour * 60 + currentMinute;
-          
-          // Filter and transform clinics
-          const filteredClinics = [];
-          
-          for (const clinic of data.clinics) {
-            // Only show clinics that are active
-            if (!clinic.is_active) continue;
-            
-            // Fetch time slots for this clinic
-            try {
-              const slotsResponse = await fetch(`http://localhost:8000/auth/clinic/time-slots?clinic_id=${clinic.clinic_id}`);
-              if (slotsResponse.ok) {
-                const slotsData = await slotsResponse.json();
-                const slots = slotsData.slots || [];
-                
-                // Check if clinic has any available slots
-                const availableSlots = slots.filter((slot: any) => {
-                  if (!slot.is_open) return false;
-                  const endHour = slot.time_range[1];
-                  const endTimeMinutes = endHour * 60;
-                  const cutoffTime = endTimeMinutes - 15;
-                  return currentTimeMinutes < cutoffTime;
-                });
-                
-                if (availableSlots.length > 0) {
-                  filteredClinics.push({
-                    id: clinic.clinic_id,
-                    name: clinic.clinic_name,
-                    address: clinic.address,
-                    phone: clinic.phone,
-                    doctors: clinic.doctors || [{ name: clinic.doctor_name || "Available Doctor" }],
-                    specializations: clinic.specializations || ["general"],
-                    rating: clinic.rating || 4.5,
-                    wait_time: clinic.wait_time || "15-30 min",
-                    distance: clinic.distance || "2.5 km",
-                    availableSlots: availableSlots
-                  });
-                }
-              }
-            } catch (e) {
-              console.error("Error fetching slots for clinic:", clinic.clinic_id, e);
-            }
-          }
-          
-          setClinics(filteredClinics);
-        } else {
-          setMessage({text: "Failed to fetch clinics", type: "error"});
+        if (!response.ok) {
+          setMessage({ text: "Failed to fetch clinics", type: "error" });
+          return;
         }
+
+        const data = await response.json();
+
+        const nearbyClinics = await Promise.all(
+          (data.clinics as ClinicApiResponse[]).map(async (clinic) => {
+            if (!clinic.is_active || !clinic.latitude || !clinic.longitude) {
+              return null;
+            }
+
+            const clinicLatitude = Number(clinic.latitude);
+            const clinicLongitude = Number(clinic.longitude);
+
+            if (Number.isNaN(clinicLatitude) || Number.isNaN(clinicLongitude)) {
+              return null;
+            }
+
+            try {
+              const reviewsResponse = await fetch(
+                `http://localhost:8000/auth/reviews/clinic?clinic_id=${clinic.clinic_id}`
+              );
+
+              const reviewData: ReviewApiResponse = reviewsResponse.ok
+                ? await reviewsResponse.json()
+                : {};
+
+              const distanceValue = haversineDistanceKm(
+                userCoords.latitude,
+                userCoords.longitude,
+                clinicLatitude,
+                clinicLongitude
+              );
+
+              if (distanceValue > SEARCH_RADIUS_KM) {
+                return null;
+              }
+
+              const fullAddress = [
+                clinic.street_address,
+                clinic.road,
+                clinic.layout,
+                clinic.section,
+                clinic.city,
+                clinic.pincode,
+              ].filter(Boolean).join(", ") || clinic.address || "";
+
+              return {
+                id: clinic.clinic_id,
+                name: clinic.clinic_name,
+                address: fullAddress,
+                city: clinic.city || "",
+                distance: `${distanceValue.toFixed(1)} km`,
+                distanceValue,
+                rating: reviewData.average_rating || 0,
+                reviewCount: reviewData.total || 0,
+                phone: clinic.phone,
+                doctors: clinic.doctors?.length ? clinic.doctors : [{ name: "Available Doctor" }],
+                specializations: clinic.specializations?.length ? clinic.specializations : ["general"],
+              };
+            } catch (error) {
+              console.error("Error building clinic card:", clinic.clinic_id, error);
+              return null;
+            }
+          })
+        );
+
+        setClinics(
+          nearbyClinics
+            .filter((clinic): clinic is ClinicWithDistance => clinic !== null)
+            .sort((a, b) => a.distanceValue - b.distanceValue)
+        );
       } catch (error) {
-        setMessage({text: "Error fetching clinics", type: "error"});
+        setMessage({ text: "Error fetching clinics", type: "error" });
       } finally {
         setLoading(false);
       }
     };
 
-    fetchClinics();
-  }, []);
+    void fetchClinics();
+  }, [locationGranted, userCoords]);
+
+  useEffect(() => {
+    if (!locationGranted || !navigator.geolocation) {
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setUserCoords({ latitude, longitude });
+      },
+      (error) => {
+        console.error("Location watch error:", error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 30000,
+      }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [locationGranted]);
 
   const handleGPS = () => {
     setLocationLoading(true);
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          try {
-            // Use reverse geocoding to get actual location name
-            const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
-            const data = await response.json();
-            const locationString = data.city || data.locality || data.principalSubdivision || `${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
-            setLocationName(locationString);
-          } catch (error) {
-            // Fallback to coordinates if API fails
-            setLocationName(`${latitude.toFixed(2)}, ${longitude.toFixed(2)}`);
-          }
-          setLocationGranted(true);
-          setLocationLoading(false);
-          setLoading(true);
-          setTimeout(() => setLoading(false), 1200);
-        },
-        async (error) => {
-          console.error("Geolocation error:", error);
-          // Try to get location anyway using a different method
-          try {
-            const response = await fetch('https://ipapi.co/json/');
-            const data = await response.json();
-            setLocationName(data.city || data.region || data.country || "Location not found");
-          } catch (e) {
-            setLocationName("Location unavailable");
-          }
-          setLocationGranted(true);
-          setLocationLoading(false);
-          setLoading(true);
-          setTimeout(() => setLoading(false), 1200);
-        },
-        { 
-          enableHighAccuracy: true, 
-          timeout: 30000, 
-          maximumAge: 0 
-        }
-      );
-    } else {
-      setLocationName("Geolocation not supported");
-      setLocationGranted(true);
+
+    if (!navigator.geolocation) {
       setLocationLoading(false);
+      setMessage({ text: "Geolocation is not supported on this device.", type: "error" });
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        setUserCoords({ latitude, longitude });
+
+        try {
+          const response = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+          );
+          const data = await response.json();
+          const resolvedLocation =
+            data.locality ||
+            data.city ||
+            data.principalSubdivision ||
+            `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+          setLocationName(resolvedLocation);
+        } catch {
+          setLocationName(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        }
+
+        setLocationGranted(true);
+        setLocationLoading(false);
+      },
+      (error) => {
+        console.error("Geolocation error:", error);
+        setLocationLoading(false);
+        setMessage({ text: "Please allow location access to see nearby clinics.", type: "error" });
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 30000,
+        maximumAge: 0,
+      }
+    );
   };
 
-  const filtered = clinics.filter((c) => {
+  const filtered = clinics.filter((clinic) => {
     const matchesSearch =
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.address.toLowerCase().includes(search.toLowerCase()) ||
-      c.doctors.some((d) =>
-        d.name.toLowerCase().includes(search.toLowerCase())
-      ) ||
-      c.specializations.some((s) =>
-        s.toLowerCase().includes(search.toLowerCase())
+      clinic.name.toLowerCase().includes(search.toLowerCase()) ||
+      clinic.address.toLowerCase().includes(search.toLowerCase()) ||
+      clinic.doctors.some((doctor) => doctor.name.toLowerCase().includes(search.toLowerCase())) ||
+      clinic.specializations.some((specialization) =>
+        specialization.toLowerCase().includes(search.toLowerCase())
       );
 
     const matchesCategory =
       selectedCategory === "all" ||
-      c.specializations.some((s) =>
-        s.toLowerCase().includes(selectedCategory.toLowerCase())
+      clinic.specializations.some(
+        (specialization) => specialization.toLowerCase() === selectedCategory.toLowerCase()
       );
 
     return matchesSearch && matchesCategory;
@@ -286,47 +376,42 @@ const PatientFindClinics = () => {
         </div>
       </header>
 
+      {message && (
+        <div
+          className={`fixed top-16 right-4 z-50 rounded-lg px-6 py-3 text-white shadow-lg ${
+            message.type === "success" ? "bg-green-500" : "bg-red-500"
+          }`}
+        >
+          {message.text}
+        </div>
+      )}
+
       <main className="mx-auto max-w-5xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground">
-          Find Clinics Near You
-        </h1>
+        <h1 className="text-2xl font-bold text-foreground">Find Clinics Near You</h1>
         <p className="mt-1 text-muted-foreground">
-          Book appointments and skip the waiting room.
+          Allow your location and we will show nearby clinics within {SEARCH_RADIUS_KM} km, sorted by distance.
         </p>
 
         {!locationGranted ? (
           <div className="mt-10">
-            <LocationAccessCard
-              onUseGPS={handleGPS}
-              loading={locationLoading}
-            />
+            <LocationAccessCard onUseGPS={handleGPS} loading={locationLoading} />
           </div>
         ) : (
           <>
             <div className="mt-6">
               <div className="flex flex-col gap-4 sm:flex-row">
                 <div className="flex-1">
-                  <SearchBar
-                    value={search}
-                    onChange={setSearch}
-                    location={locationName}
-                  />
+                  <SearchBar value={search} onChange={setSearch} location={locationName} />
                 </div>
                 <div className="sm:w-64">
-                  <Select
-                    value={selectedCategory}
-                    onValueChange={setSelectedCategory}
-                  >
+                  <Select value={selectedCategory} onValueChange={setSelectedCategory}>
                     <SelectTrigger className="h-[42px] w-full">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {Object.entries(medicalCategories).map(([key, cat]) => (
+                      {Object.entries(medicalCategories).map(([key, category]) => (
                         <SelectItem key={key} value={key}>
-                          <div className="flex items-center gap-2">
-                            <span>{cat.icon}</span>
-                            <span>{cat.name}</span>
-                          </div>
+                          {category.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -335,39 +420,29 @@ const PatientFindClinics = () => {
               </div>
 
               <div className="mt-4 rounded-lg border border-[#00555A]/20 bg-[#00555A]/10 p-4">
-                <div className="flex items-start gap-3">
-                  <span className="text-2xl">
-                    {medicalCategories[selectedCategory].icon}
-                  </span>
-                  <div>
-                    <h3 className="font-semibold text-[#00555A]">
-                      {medicalCategories[selectedCategory].name}
-                    </h3>
-                    <p className="mt-1 text-sm text-[#00555A]/80">
-                      {medicalCategories[selectedCategory].description}
-                    </p>
-                  </div>
-                </div>
+                <h3 className="font-semibold text-[#00555A]">
+                  {medicalCategories[selectedCategory].name}
+                </h3>
+                <p className="mt-1 text-sm text-[#00555A]/80">
+                  {medicalCategories[selectedCategory].description}. Clinics are sorted from nearest to farthest within {SEARCH_RADIUS_KM} km.
+                </p>
               </div>
             </div>
 
             <section className="mt-6 space-y-4" aria-label="Clinic list">
               {loading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="rounded-xl border border-border p-5"
-                  >
+                Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="rounded-xl border border-border p-5">
                     <Skeleton className="mb-3 h-5 w-48" />
                     <Skeleton className="mb-2 h-4 w-64" />
                     <Skeleton className="h-4 w-32" />
                   </div>
                 ))
               ) : filtered.length > 0 ? (
-                filtered.map((c) => <ClinicCard key={c.id} clinic={c} />)
+                filtered.map((clinic) => <ClinicCard key={clinic.id} clinic={clinic} />)
               ) : (
                 <p className="py-12 text-center text-muted-foreground">
-                  No clinics found matching your search.
+                  No clinics found within {SEARCH_RADIUS_KM} km for the selected category or search.
                 </p>
               )}
             </section>

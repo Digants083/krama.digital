@@ -1,33 +1,17 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { 
-  Users, 
-  Building2, 
-  Clock, 
-  Shield, 
-  Smartphone, 
-  MapPin, 
-  Phone, 
-  Mail, 
-  MessageCircle,
+import {
+  Users,
+  Building2,
+  Clock,
+  Smartphone,
+  Mail,
   ArrowRight,
   CheckCircle
 } from "lucide-react";
 const AboutUs = () => {
   return (
     <>
-      {/* Hero Section */}
-      <div className="bg-[#00555A] text-white py-20">
-        <div className="container mx-auto px-4 text-center">
-          <h1 className="text-4xl md:text-5xl font-bold mb-6">
-            About Krama
-          </h1>
-          <p className="text-xl md:text-2xl text-[#00FFF0] max-w-3xl mx-auto">
-            Revolutionizing healthcare queue management with smart, efficient, and patient-centric solutions
-          </p>
-        </div>
-      </div>
-
       {/* Main Content */}
       <div className="container mx-auto px-4 py-16">
         
@@ -62,14 +46,6 @@ const AboutUs = () => {
             </div>
 
             <div className="bg-white p-8 rounded-xl shadow-sm hover:shadow-md transition-all duration-200">
-              <div className="w-12 h-12 bg-[#FFC107]/20 rounded-lg flex items-center justify-center mb-4">
-                <Shield className="w-6 h-6 text-[#0F172A]" />
-              </div>
-              <h3 className="text-xl font-semibold mb-3 text-[#0F172A]">Secure & Private</h3>
-              <p className="text-gray-600">Your health data is protected with enterprise-grade security</p>
-            </div>
-
-            <div className="bg-white p-8 rounded-xl shadow-sm hover:shadow-md transition-all duration-200">
               <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center mb-4">
                 <Users className="w-6 h-6 text-orange-600" />
               </div>
@@ -87,7 +63,7 @@ const AboutUs = () => {
 
             <div className="bg-white p-8 rounded-xl shadow-sm hover:shadow-md transition-all duration-200">
               <div className="w-12 h-12 bg-[#00FFF0]/10 rounded-lg flex items-center justify-center mb-4">
-                <MessageCircle className="w-6 h-6 text-[#00555A]" />
+                <Clock className="w-6 h-6 text-[#00555A]" />
               </div>
               <h3 className="text-xl font-semibold mb-3 text-[#0F172A]">Real-time Updates</h3>
               <p className="text-gray-600">Get instant notifications about your queue position and appointment status</p>
@@ -138,31 +114,19 @@ const AboutUs = () => {
               <h3 className="text-xl font-semibold mb-6 text-[#0F172A]">Contact Information</h3>
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <MapPin className="w-5 h-5 text-[#00555A]" />
-                  <div>
-                    <p className="font-medium text-[#0F172A]">Head Office</p>
-                    <p className="text-gray-600">123 Healthcare Avenue, Medical District, Bangalore - 560001</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Phone className="w-5 h-5 text-[#00555A]" />
-                  <div>
-                    <p className="font-medium text-[#0F172A]">Phone</p>
-                    <p className="text-gray-600">+91 80 1234 5678</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
                   <Mail className="w-5 h-5 text-[#00555A]" />
                   <div>
                     <p className="font-medium text-[#0F172A]">Email</p>
-                    <p className="text-gray-600">support@krama.com</p>
+                    <a href="mailto:digitalkrama@gmail.com" className="text-[#00555A] hover:text-[#00555A]/80 transition-all duration-200">
+                      digitalkrama@gmail.com
+                    </a>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <MessageCircle className="w-5 h-5 text-[#00555A]" />
+                  <Clock className="w-5 h-5 text-[#00555A]" />
                   <div>
                     <p className="font-medium text-[#0F172A]">Support Hours</p>
-                    <p className="text-gray-600">Monday - Saturday: 9:00 AM - 8:00 PM</p>
+                    <p className="text-gray-600">All day - Help from 10 AM to 4 PM</p>
                   </div>
                 </div>
               </div>
