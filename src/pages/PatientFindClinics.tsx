@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import SearchBar from "@/components/shared/SearchBar";
 import ClinicCard from "@/components/shared/ClinicCard";
@@ -190,7 +190,7 @@ const PatientFindClinics = () => {
     const fetchClinics = async () => {
       setLoading(true);
       try {
-        const response = await fetch("http://localhost:8000/auth/clinics/list");
+        const response = await fetch("/api/auth/clinics/list");
         if (!response.ok) {
           setMessage({ text: "Failed to fetch clinics", type: "error" });
           return;
@@ -213,7 +213,7 @@ const PatientFindClinics = () => {
 
             try {
               const reviewsResponse = await fetch(
-                `http://localhost:8000/auth/reviews/clinic?clinic_id=${clinic.clinic_id}`
+                `/api/auth/reviews/clinic?clinic_id=${clinic.clinic_id}`
               );
 
               const reviewData: ReviewApiResponse = reviewsResponse.ok

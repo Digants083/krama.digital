@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -121,7 +121,7 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState("pending");
   const [searchTerm, setSearchTerm] = useState("");
 
-  const API_BASE = "http://localhost:8000/admin";
+  const API_BASE = "/api/admin";
 
   // Fetch registrations based on tab
   const fetchRegistrations = async (tab: string) => {

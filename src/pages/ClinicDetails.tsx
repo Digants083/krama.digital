@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from "react-router-dom";
+﻿import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,7 @@ const ClinicDetails = () => {
   useEffect(() => {
     const fetchClinicData = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${id}`);
+        const response = await fetch(`/api/auth/clinic/data?clinic_id=${id}`);
         if (response.ok) {
           const data = await response.json();
           setClinic(data);
@@ -86,7 +86,7 @@ const ClinicDetails = () => {
 
     const fetchReviews = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/auth/reviews/clinic?clinic_id=${id}`);
+        const response = await fetch(`/api/auth/reviews/clinic?clinic_id=${id}`);
         if (response.ok) {
           const data = await response.json();
           setReviews(data.reviews || []);
@@ -106,7 +106,7 @@ const ClinicDetails = () => {
         
         try {
           const response = await fetch(
-            `http://localhost:8000/auth/reviews/user-reaction?clinic_id=${id}&patient_id=${pid}`
+            `/api/auth/reviews/user-reaction?clinic_id=${id}&patient_id=${pid}`
           );
           if (response.ok) {
             const data = await response.json();
@@ -133,7 +133,7 @@ const ClinicDetails = () => {
     
     try {
       const response = await fetch(
-        `http://localhost:8000/auth/reviews/like?review_id=${reviewId}&patient_id=${patientId}`,
+        `/api/auth/reviews/like?review_id=${reviewId}&patient_id=${patientId}`,
         { method: "POST" }
       );
       if (response.ok) {
@@ -153,7 +153,7 @@ const ClinicDetails = () => {
     
     try {
       const response = await fetch(
-        `http://localhost:8000/auth/reviews/dislike?review_id=${reviewId}&patient_id=${patientId}`,
+        `/api/auth/reviews/dislike?review_id=${reviewId}&patient_id=${patientId}`,
         { method: "POST" }
       );
       if (response.ok) {
@@ -170,7 +170,7 @@ const ClinicDetails = () => {
 
   const fetchTimeSlots = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/auth/clinic/time-slots?clinic_id=${id}`);
+      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${id}`);
       if (response.ok) {
         const data = await response.json();
         const now = new Date();
@@ -261,7 +261,7 @@ const ClinicDetails = () => {
       const clinicId = clinic.clinic_id || id;
       
       try {
-        const appointmentsResponse = await fetch(`http://localhost:8000/auth/patient/appointments?email=${patientEmail}`);
+        const appointmentsResponse = await fetch(`/api/auth/patient/appointments?email=${patientEmail}`);
         if (appointmentsResponse.ok) {
           const appointmentsData = await appointmentsResponse.json();
           const activeBooking = appointmentsData.appointments?.find((apt: any) => 
@@ -312,7 +312,7 @@ const ClinicDetails = () => {
       
       if (!patientId || !patientPhone) {
         try {
-          const patientDataResponse = await fetch(`http://localhost:8000/auth/patient/data?email=${user.email}`);
+          const patientDataResponse = await fetch(`/api/auth/patient/data?email=${user.email}`);
           if (patientDataResponse.ok) {
             const patientData = await patientDataResponse.json();
             patientId = patientData.patient_id;
@@ -335,7 +335,7 @@ const ClinicDetails = () => {
         slot_id: selectedSlotId
       };
 
-      const response = await fetch("http://localhost:8000/auth/appointments/create", {
+      const response = await fetch("/api/auth/appointments/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -456,7 +456,7 @@ const ClinicDetails = () => {
             </div>
 
             <div className="hidden mt-4 flex h-36 items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
-              🗺️ Map placeholder - {clinic.address}
+              ðŸ—ºï¸ Map placeholder - {clinic.address}
             </div>
 
             {/* Clinic Images Gallery - only show valid URLs */}
@@ -472,7 +472,7 @@ const ClinicDetails = () => {
                         onClick={() => setSelectedImageIndex(idx)}
                       >
                         <img 
-                          src={`http://localhost:8000${url}`} 
+                          src={`/api${url}`} 
                           alt={`Clinic photo ${idx + 1}`}
                           className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
                           onError={(e) => {
@@ -491,7 +491,7 @@ const ClinicDetails = () => {
               <div className="mt-3 rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-                    <span className="text-lg">👨‍⚕️</span>
+                    <span className="text-lg">ðŸ‘¨â€âš•ï¸</span>
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground">{clinic.doctor_name || "Available Doctor"}</h3>
@@ -675,7 +675,7 @@ const ClinicDetails = () => {
 
             {/* Image */}
             <img
-              src={`http://localhost:8000${clinic.image_urls[selectedImageIndex]}`}
+              src={`/api${clinic.image_urls[selectedImageIndex]}`}
               alt={`Clinic photo ${selectedImageIndex + 1}`}
               className="max-h-[80vh] max-w-full object-contain rounded-lg"
               onClick={(e) => e.stopPropagation()}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,7 +59,7 @@ const PatientSignup = () => {
 
     try {
       // Directly send OTP with user data - backend will check if email exists
-      const otpResponse = await fetch("http://localhost:8000/auth/register/send-otp", {
+      const otpResponse = await fetch("/api/auth/register/send-otp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -147,14 +147,14 @@ const PatientSignup = () => {
               <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="password" type="password" placeholder="••••••••" value={form.password} onChange={(e) => update("password", e.target.value)} className="pl-9" />
+                <Input id="password" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" value={form.password} onChange={(e) => update("password", e.target.value)} className="pl-9" />
               </div>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="confirm">Confirm Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="confirm" type="password" placeholder="••••••••" value={form.confirm} onChange={(e) => update("confirm", e.target.value)} className="pl-9" />
+                <Input id="confirm" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" value={form.confirm} onChange={(e) => update("confirm", e.target.value)} className="pl-9" />
               </div>
             </div>
           </div>
@@ -224,7 +224,7 @@ const OTPVerificationPage = ({ email, onBack }: {
 
     try {
       // Verify OTP - this will create the patient account automatically
-      const verifyResponse = await fetch("http://localhost:8000/auth/verify-otp", {
+      const verifyResponse = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -256,7 +256,7 @@ const OTPVerificationPage = ({ email, onBack }: {
     
     setResendLoading(true);
     try {
-      const response = await fetch("http://localhost:8000/auth/resend-otp", {
+      const response = await fetch("/api/auth/resend-otp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -351,7 +351,7 @@ const OTPVerificationPage = ({ email, onBack }: {
               onClick={onBack}
               className="text-sm text-muted-foreground hover:text-foreground"
             >
-              ← Back to Signup
+              â† Back to Signup
             </Button>
           </div>
         </form>

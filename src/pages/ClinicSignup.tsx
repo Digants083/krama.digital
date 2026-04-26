@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,24 +27,24 @@ const Requirement = ({ met, label }: { met: boolean; label: string }) => (
 
 // Clinic categories with icons
 const clinicCategories = [
-  { id: "general", name: "General", icon: "🩺", description: "General health, fever, cold" },
-  { id: "skin", name: "Skin", icon: "🔬", description: "Skin problems, allergies" },
-  { id: "dental", name: "Dental", icon: "🦷", description: "Teeth, gums, oral care" },
-  { id: "bone", name: "Bone & Joint", icon: "🦴", description: "Orthopedic, fractures, joint pain" },
-  { id: "eye", name: "Eye", icon: "👁️", description: "Vision, glasses, eye care" },
-  { id: "ent", name: "ENT", icon: "👂", description: "Ear, nose, throat" },
-  { id: "heart", name: "Cardiology", icon: "❤️", description: "Heart-related issues" },
-  { id: "neuro", name: "Neurology", icon: "🧠", description: "Brain, nerves, spine" },
-  { id: "child", name: "Pediatric", icon: "👶", description: "Child care, vaccination" },
-  { id: "women", name: "Gynecology", icon: "🌸", description: "Women's health" },
-  { id: "mental", name: "Mental Health", icon: "🧘", description: "Psychiatry, counseling" },
-  { id: "physio", name: "Physiotherapy", icon: "💪", description: "Physical therapy, rehab" },
-  { id: "vet", name: "Pet Hospital", icon: "🐕", description: "Pet care, veterinary" },
-  { id: "scanning", name: "Scanning Center", icon: "📷", description: "X-ray, MRI, CT scan" },
-  { id: "lab", name: "Diagnostic Lab", icon: "🧪", description: "Blood tests, diagnostics" },
-  { id: "ayurveda", name: "Ayurveda", icon: "🌿", description: "Ayurvedic treatment" },
-  { id: "homeo", name: "Homeopathy", icon: "💊", description: "Homeopathic treatment" },
-  { id: "other", name: "Other", icon: "🏥", description: "Other specializations" }
+  { id: "general", name: "General", icon: "ðŸ©º", description: "General health, fever, cold" },
+  { id: "skin", name: "Skin", icon: "ðŸ”¬", description: "Skin problems, allergies" },
+  { id: "dental", name: "Dental", icon: "ðŸ¦·", description: "Teeth, gums, oral care" },
+  { id: "bone", name: "Bone & Joint", icon: "ðŸ¦´", description: "Orthopedic, fractures, joint pain" },
+  { id: "eye", name: "Eye", icon: "ðŸ‘ï¸", description: "Vision, glasses, eye care" },
+  { id: "ent", name: "ENT", icon: "ðŸ‘‚", description: "Ear, nose, throat" },
+  { id: "heart", name: "Cardiology", icon: "â¤ï¸", description: "Heart-related issues" },
+  { id: "neuro", name: "Neurology", icon: "ðŸ§ ", description: "Brain, nerves, spine" },
+  { id: "child", name: "Pediatric", icon: "ðŸ‘¶", description: "Child care, vaccination" },
+  { id: "women", name: "Gynecology", icon: "ðŸŒ¸", description: "Women's health" },
+  { id: "mental", name: "Mental Health", icon: "ðŸ§˜", description: "Psychiatry, counseling" },
+  { id: "physio", name: "Physiotherapy", icon: "ðŸ’ª", description: "Physical therapy, rehab" },
+  { id: "vet", name: "Pet Hospital", icon: "ðŸ•", description: "Pet care, veterinary" },
+  { id: "scanning", name: "Scanning Center", icon: "ðŸ“·", description: "X-ray, MRI, CT scan" },
+  { id: "lab", name: "Diagnostic Lab", icon: "ðŸ§ª", description: "Blood tests, diagnostics" },
+  { id: "ayurveda", name: "Ayurveda", icon: "ðŸŒ¿", description: "Ayurvedic treatment" },
+  { id: "homeo", name: "Homeopathy", icon: "ðŸ’Š", description: "Homeopathic treatment" },
+  { id: "other", name: "Other", icon: "ðŸ¥", description: "Other specializations" }
 ];
 
 const ClinicSignup = () => {
@@ -136,7 +136,7 @@ const ClinicSignup = () => {
     ].filter(Boolean).join(", ");
 
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/send-signup-otp", {
+      const response = await fetch("/api/auth/clinic/send-signup-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -191,7 +191,7 @@ const ClinicSignup = () => {
     ].filter(Boolean).join(", ");
 
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/verify-signup", {
+      const response = await fetch("/api/auth/clinic/verify-signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -462,7 +462,7 @@ const ClinicSignup = () => {
                       <Input
                         id="password"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                         value={form.password}
                         onChange={(e) => update("password", e.target.value)}
                         className="pl-9"

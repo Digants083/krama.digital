@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
 interface AdminProtectedRouteProps {
@@ -23,7 +23,7 @@ const AdminProtectedRoute = ({ children }: AdminProtectedRouteProps) => {
       }
 
       try {
-        const response = await fetch("http://localhost:8000/admin/session", {
+        const response = await fetch("/api/admin/session", {
           headers: {
             Authorization: `Bearer ${adminToken}`,
           },

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Eye, Settings, User, Users, MapPin, AlertCircle } from "lucide-react";
@@ -57,7 +57,7 @@ const ClinicDashboard = () => {
 
     const fetchClinicData = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${clinicId}`);
+        const response = await fetch(`/api/auth/clinic/data?clinic_id=${clinicId}`);
         if (response.ok) {
           const data = await response.json();
           setClinicProfile(data);
@@ -78,7 +78,7 @@ const ClinicDashboard = () => {
     if (!clinicId) return;
 
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/update-location", {
+      const response = await fetch("/api/auth/clinic/update-location", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

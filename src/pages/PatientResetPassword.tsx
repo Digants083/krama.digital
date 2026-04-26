@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,7 +68,7 @@ const PatientResetPassword = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/auth/patient/reset-password", {
+      const response = await fetch("/api/auth/patient/reset-password", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

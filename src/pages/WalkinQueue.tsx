@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface ClinicInfo {
   id: string;
   name: string;
@@ -10,7 +10,7 @@ interface ClinicInfo {
 
 type Step = "form" | "loading" | "success" | "error";
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const WalkinQueue = () => {
   // QR codes should link to /walkin?clinic_id=XYZ
   const [searchParams] = useSearchParams();
@@ -29,14 +29,14 @@ const WalkinQueue = () => {
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // ── Fetch clinic info when clinic_id is known ────────────────────────────
+  // â”€â”€ Fetch clinic info when clinic_id is known â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!qrClinicId) {
       setClinicLoading(false);
       return;
     }
 
-    fetch(`http://localhost:8000/auth/clinics/${qrClinicId}`)
+    fetch(`/api/auth/clinics/${qrClinicId}`)
       .then((r) => r.json())
       .then((data) => {
         setClinicInfo({
@@ -51,19 +51,19 @@ const WalkinQueue = () => {
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
 
-  // ── Validation ───────────────────────────────────────────────────────────
+  // â”€â”€ Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const phoneRegex = /^[6-9]\d{9}$/;
   const isValid =
     name.trim().length >= 2 &&
     phoneRegex.test(phone.trim());
 
-  // ── Submit ───────────────────────────────────────────────────────────────
+  // â”€â”€ Submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleJoin = async () => {
     if (!isValid || !clinicInfo) return;
     setStep("loading");
 
     try {
-      const res = await fetch("http://localhost:8000/auth/queue/join", {
+      const res = await fetch("/api/auth/queue/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -94,12 +94,12 @@ const WalkinQueue = () => {
     }
   };
 
-  // ── Go back to home ─────────────────────────────────────────────────────
+  // â”€â”€ Go back to home â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleGoHome = () => {
     navigate("/");
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Invalid QR code
   if (!qrClinicId) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,7 +66,7 @@ const ClinicProfile = () => {
       }
 
       try {
-        const response = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${loggedInClinicId}`);
+        const response = await fetch(`/api/auth/clinic/data?clinic_id=${loggedInClinicId}`);
         if (response.ok) {
           const data = await response.json();
           setDbProfile(data);
@@ -109,7 +109,7 @@ const ClinicProfile = () => {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/change-phone", {
+      const response = await fetch("/api/auth/clinic/change-phone", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -165,7 +165,7 @@ const ClinicProfile = () => {
       formData.append("clinic_id", loggedInClinicId);
 
       try {
-        const response = await fetch("http://localhost:8000/auth/clinic/upload-image", {
+        const response = await fetch("/api/auth/clinic/upload-image", {
           method: "POST",
           body: formData,
         });
@@ -184,7 +184,7 @@ const ClinicProfile = () => {
     setSelectedFiles([]);
 
     if (uploadedCount > 0) {
-      const dataResponse = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${loggedInClinicId}`);
+      const dataResponse = await fetch(`/api/auth/clinic/data?clinic_id=${loggedInClinicId}`);
       if (dataResponse.ok) {
         const profileData = await dataResponse.json();
         setImageUrls(profileData.image_urls || []);
@@ -201,7 +201,7 @@ const ClinicProfile = () => {
     if (!loggedInClinicId) return;
 
     try {
-      const response = await fetch(`http://localhost:8000/auth/clinic/image/${loggedInClinicId}/${index}`, {
+      const response = await fetch(`/api/auth/clinic/image/${loggedInClinicId}/${index}`, {
         method: "DELETE",
       });
 
@@ -224,7 +224,7 @@ const ClinicProfile = () => {
     try {
       // Only update address and images - NOT coordinates
       // Coordinates are handled separately via handleSaveLocation
-      const response = await fetch("http://localhost:8000/auth/clinic/update-profile", {
+      const response = await fetch("/api/auth/clinic/update-profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -243,14 +243,14 @@ const ClinicProfile = () => {
 
       if (response.ok) {
         setMessage({
-          text: "Address updated! ⚠️ Please update your map location to match the new address.",
+          text: "Address updated! âš ï¸ Please update your map location to match the new address.",
           type: "success"
         });
         // Auto-open location picker after 2 seconds to encourage coordinate update
         setTimeout(() => {
           setShowLocationModal(true);
         }, 2000);
-        const dataResponse = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${loggedInClinicId}`);
+        const dataResponse = await fetch(`/api/auth/clinic/data?clinic_id=${loggedInClinicId}`);
         if (dataResponse.ok) {
           const data = await dataResponse.json();
           setDbProfile(data);
@@ -277,7 +277,7 @@ const ClinicProfile = () => {
     if (!loggedInClinicId) return;
 
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/update-location", {
+      const response = await fetch("/api/auth/clinic/update-location", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -295,7 +295,7 @@ const ClinicProfile = () => {
           type: "success"
         });
         // Refresh clinic data
-        const dataResponse = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${loggedInClinicId}`);
+        const dataResponse = await fetch(`/api/auth/clinic/data?clinic_id=${loggedInClinicId}`);
         if (dataResponse.ok) {
           const clinicData = await dataResponse.json();
           setDbProfile(clinicData);
@@ -353,7 +353,7 @@ const ClinicProfile = () => {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/change-password", {
+      const response = await fetch("/api/auth/clinic/change-password", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -394,7 +394,7 @@ const ClinicProfile = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost:8000/auth/clinic/delete`, {
+      const response = await fetch(`/api/auth/clinic/delete`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -650,7 +650,7 @@ const ClinicProfile = () => {
                 </p>
               ) : (
                 <p className="mt-1 text-xs text-amber-600 font-medium">
-                  ⚠️ Location not pinned. Please pin your location on the map.
+                  âš ï¸ Location not pinned. Please pin your location on the map.
                 </p>
               )}
             </div>
@@ -738,7 +738,7 @@ const ClinicProfile = () => {
             <div className="border-t border-border my-2"></div>
             {dbProfile?.address && !locationCoords && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800 mb-2">
-                <span className="font-semibold">⚠️ Action needed:</span> You have an address but no map location. Please pin your coordinates.
+                <span className="font-semibold">âš ï¸ Action needed:</span> You have an address but no map location. Please pin your coordinates.
               </div>
             )}
             <Button onClick={() => setShowLocationModal(true)} variant={dbProfile?.address && !locationCoords ? "default" : "outline"} className="w-full">
@@ -753,7 +753,7 @@ const ClinicProfile = () => {
                 {imageUrls.map((url, idx) =>
                   url ? (
                     <div key={idx} className="relative">
-                      <img src={`http://localhost:8000${url}`} alt={`Clinic ${idx + 1}`} className="h-20 w-full rounded-lg object-cover" />
+                      <img src={`/api${url}`} alt={`Clinic ${idx + 1}`} className="h-20 w-full rounded-lg object-cover" />
                       <button
                         onClick={() => handleRemoveImage(idx)}
                         className="absolute -right-1 -top-1 rounded-full bg-red-500 p-0.5 text-white"

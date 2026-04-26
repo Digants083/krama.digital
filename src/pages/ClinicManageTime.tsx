@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 
 import { Link } from "react-router-dom";
 
@@ -72,7 +72,7 @@ const ClinicManageTime = () => {
 
     try {
 
-      const response = await fetch(`http://localhost:8000/auth/clinic/time-slots?clinic_id=${clinicId}`);
+      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${clinicId}`);
 
       if (response.ok) {
 
@@ -150,7 +150,7 @@ const ClinicManageTime = () => {
 
     try {
 
-      const response = await fetch("http://localhost:8000/auth/clinic/time-slots", {
+      const response = await fetch("/api/auth/clinic/time-slots", {
 
         method: "POST",
 
@@ -206,7 +206,7 @@ const ClinicManageTime = () => {
 
     try {
 
-      const response = await fetch(`http://localhost:8000/auth/clinic/time-slots/${slotIndex}?clinic_id=${clinicId}`, {
+      const response = await fetch(`/api/auth/clinic/time-slots/${slotIndex}?clinic_id=${clinicId}`, {
 
         method: "DELETE",
 
@@ -236,7 +236,7 @@ const ClinicManageTime = () => {
 
       console.log(`Setting slot ${slotIndex} to ${isOpen ? 'open' : 'close'}`);
 
-      const response = await fetch(`http://localhost:8000/auth/clinic/time-slots/${slotIndex}`, {
+      const response = await fetch(`/api/auth/clinic/time-slots/${slotIndex}`, {
 
         method: "PUT",
 
@@ -722,11 +722,11 @@ const ClinicManageTime = () => {
 
           <ul className="text-sm text-slate-700 space-y-2 ml-6">
 
-            <li>• Add time slots for different sessions (Morning, Afternoon, Evening)</li>
+            <li>â€¢ Add time slots for different sessions (Morning, Afternoon, Evening)</li>
 
-            <li>• Click Open/Close to control slot availability for bookings</li>
+            <li>â€¢ Click Open/Close to control slot availability for bookings</li>
 
-            <li>• Patients will see available slots when booking</li>
+            <li>â€¢ Patients will see available slots when booking</li>
 
           </ul>
 

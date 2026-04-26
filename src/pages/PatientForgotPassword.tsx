@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ const PatientForgotPassword = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/auth/patient/forgot-password", {
+      const response = await fetch("/api/auth/patient/forgot-password", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

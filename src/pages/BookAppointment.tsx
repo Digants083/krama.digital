@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+﻿import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { mockClinics } from "@/data/mockData";
 import type { Doctor } from "@/data/mockData";
@@ -71,7 +71,7 @@ const BookAppointment = () => {
   const fetchTimeSlots = async () => {
     setLoadingSlots(true);
     try {
-      const response = await fetch(`http://localhost:8000/auth/clinic/time-slots?clinic_id=${clinicId}`);
+      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${clinicId}`);
       if (response.ok) {
         const data = await response.json();
         setTimeSlots(data.slots || []);
@@ -137,7 +137,7 @@ const BookAppointment = () => {
       const timeRange = selectedSlot?.time_range || [9, 10];
       const time = `${timeRange[0]}:00`;
 
-      const response = await fetch("http://localhost:8000/auth/appointments", {
+      const response = await fetch("/api/auth/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -192,7 +192,7 @@ const BookAppointment = () => {
       </div>
 
       <main className="mx-auto max-w-3xl px-4 pb-12">
-        {/* Step 0 — Clinic Info */}
+        {/* Step 0 â€” Clinic Info */}
         {step === 0 && (
           <section className="space-y-6">
             <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
@@ -225,7 +225,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 1 — Select Time Slot */}
+        {/* Step 1 â€” Select Time Slot */}
         {step === 1 && (
           <section className="space-y-4">
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
@@ -256,7 +256,7 @@ const BookAppointment = () => {
                     }`}
                   >
                     <p className={`font-semibold ${selectedSlotIndex === index ? "text-primary" : "text-foreground"}`}>
-                      {slot.slot_name} • {formatTimeRange(slot.time_range)}
+                      {slot.slot_name} â€¢ {formatTimeRange(slot.time_range)}
                     </p>
                   </button>
                 ))}
@@ -265,7 +265,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 2 — Select Doctor */}
+        {/* Step 2 â€” Select Doctor */}
         {step === 2 && (
           <section className="space-y-3">
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
@@ -280,12 +280,12 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 3 — Select Date */}
+        {/* Step 3 â€” Select Date */}
         {step === 3 && (
           <section>
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
               <p className="text-sm text-primary font-medium">
-                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`} • {selectedDoctor?.name}
+                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`} â€¢ {selectedDoctor?.name}
               </p>
             </div>
             <h2 className="mb-4 text-lg font-semibold text-foreground">
@@ -310,7 +310,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 4 — Confirm */}
+        {/* Step 4 â€” Confirm */}
         {step === 4 && (
           <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-foreground">Confirm Your Appointment</h2>

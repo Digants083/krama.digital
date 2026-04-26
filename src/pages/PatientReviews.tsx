@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+﻿import { Link, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Star, MessageSquare } from "lucide-react";
@@ -33,7 +33,7 @@ const PatientReviews = () => {
           const patientId = user.patient_id || user.id;
           
           // Fetch completed appointments
-          const visitsResponse = await fetch(`http://localhost:8000/auth/patient/completed-appointments?patient_id=${patientId}`);
+          const visitsResponse = await fetch(`/api/auth/patient/completed-appointments?patient_id=${patientId}`);
           let visitsData: Visit[] = [];
           if (visitsResponse.ok) {
             const data = await visitsResponse.json();
@@ -42,7 +42,7 @@ const PatientReviews = () => {
           }
 
           // Fetch patient's reviews
-          const reviewsResponse = await fetch(`http://localhost:8000/auth/reviews/patient?patient_id=${patientId}`);
+          const reviewsResponse = await fetch(`/api/auth/reviews/patient?patient_id=${patientId}`);
           if (reviewsResponse.ok) {
             const data = await reviewsResponse.json();
             const reviewsMap: {[key: string]: Review} = {};

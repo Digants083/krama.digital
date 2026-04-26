@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePatient } from "@/context/PatientContext";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,7 @@ const PatientProfile = () => {
       }
 
       try {
-        const response = await fetch(`http://localhost:8000/auth/patient/data?email=${loggedInEmail}`);
+        const response = await fetch(`/api/auth/patient/data?email=${loggedInEmail}`);
         if (response.ok) {
           const data = await response.json();
           setDbProfile(data);
@@ -83,7 +83,7 @@ const PatientProfile = () => {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/auth/patient/change-phone", {
+      const response = await fetch("/api/auth/patient/change-phone", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -94,7 +94,7 @@ const PatientProfile = () => {
 
       if (response.ok) {
         setMessage({ text: "Phone number updated successfully!", type: "success" });
-        const dataResponse = await fetch(`http://localhost:8000/auth/patient/data?email=${loggedInEmail}`);
+        const dataResponse = await fetch(`/api/auth/patient/data?email=${loggedInEmail}`);
         if (dataResponse.ok) {
           const data = await dataResponse.json();
           setDbProfile(data);
@@ -121,7 +121,7 @@ const PatientProfile = () => {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/auth/patient/change-password", {
+      const response = await fetch("/api/auth/patient/change-password", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -161,7 +161,7 @@ const PatientProfile = () => {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/auth/patient/delete-account", {
+      const response = await fetch("/api/auth/patient/delete-account", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

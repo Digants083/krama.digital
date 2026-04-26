@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback } from "react";
+﻿import { createContext, useContext, useState, useCallback } from "react";
 
 type QueueItem = {
   token: string;
@@ -68,7 +68,7 @@ export const useQueue = () => {
   return ctx;
 };
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "/api";
 
 export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
   const [queue, setQueue] = useState<QueueItem[]>([]);

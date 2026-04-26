@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ const ClinicLogin = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/login", {
+      const response = await fetch("/api/auth/clinic/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -65,7 +65,7 @@ const ClinicLogin = () => {
         localStorage.setItem("clinic_id", data.clinic_id);
       }
 
-      // 🚀 Redirect to clinic dashboard immediately
+      // ðŸš€ Redirect to clinic dashboard immediately
       navigate("/clinic");
     } catch (err) {
       setError("Network error. Please try again.");
@@ -121,7 +121,7 @@ const ClinicLogin = () => {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-9"

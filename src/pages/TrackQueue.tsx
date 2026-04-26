@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from "react-router-dom";
+﻿import { useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { MapPin, Clock, Building2, UserCheck, Users, Timer } from "lucide-react";
 
@@ -42,7 +42,7 @@ const TrackQueue = () => {
           const user = JSON.parse(userStr);
           
           // Fetch appointments for this patient
-          const response = await fetch(`http://localhost:8000/auth/patient/appointments?email=${user.email}`);
+          const response = await fetch(`/api/auth/patient/appointments?email=${user.email}`);
           if (response.ok) {
             const data = await response.json();
             if (data.appointments && data.appointments.length > 0) {
@@ -55,7 +55,7 @@ const TrackQueue = () => {
                 
                 // Fetch queue position based on appointment
                 const queueResponse = await fetch(
-                  `http://localhost:8000/auth/appointments/queue-position?clinic_id=${latestAppointment.clinic_id}&appointment_token=${latestAppointment.token}&appointment_id=${latestAppointment.id}`
+                  `/api/auth/appointments/queue-position?clinic_id=${latestAppointment.clinic_id}&appointment_token=${latestAppointment.token}&appointment_id=${latestAppointment.id}`
                 );
                 if (queueResponse.ok) {
                   const queueData = await queueResponse.json();

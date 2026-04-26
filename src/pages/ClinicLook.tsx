@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,7 +47,7 @@ const ClinicLook = () => {
       if (!clinicId) return;
 
       try {
-        const response = await fetch(`http://localhost:8000/auth/clinic/data?clinic_id=${clinicId}`);
+        const response = await fetch(`/api/auth/clinic/data?clinic_id=${clinicId}`);
         if (response.ok) {
           const data = await response.json();
           setClinicProfile(data);
@@ -67,7 +67,7 @@ const ClinicLook = () => {
 
     setSearching(true);
     try {
-      let url = `http://localhost:8000/auth/clinic/patients/search?clinic_id=${clinicId}`;
+      let url = `/api/auth/clinic/patients/search?clinic_id=${clinicId}`;
       
       if (searchType === "date" && fromDate && toDate) {
         url += `&from_date=${fromDate}&to_date=${toDate}`;
@@ -237,7 +237,7 @@ const ClinicLook = () => {
                         ID: {patient.patient_id}
                       </p>
                       <p className="text-muted-foreground text-sm">
-                        {patient.patient_email} • {patient.patient_phone}
+                        {patient.patient_email} â€¢ {patient.patient_phone}
                       </p>
                     </div>
                     <span className="text-[#00555A] font-bold text-lg">{patient.appointment_token}</span>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePatient } from "@/context/PatientContext";
 import {
@@ -39,7 +39,7 @@ const PatientDashboard = () => {
 
   const fetchAppointments = async (patientEmail: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/auth/patient/appointments?email=${encodeURIComponent(patientEmail)}`);
+      const response = await fetch(`/api/auth/patient/appointments?email=${encodeURIComponent(patientEmail)}`);
       if (response.ok) {
         const data = await response.json();
         setAppointments(data.appointments || []);

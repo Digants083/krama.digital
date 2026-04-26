@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
@@ -58,7 +58,7 @@ const AppointmentConfirmation = () => {
         }
 
         const user = JSON.parse(userStr);
-        const response = await fetch(`http://localhost:8000/auth/patient/appointments?email=${user.email}`);
+        const response = await fetch(`/api/auth/patient/appointments?email=${user.email}`);
         if (!response.ok) {
           setLoading(false);
           return;
@@ -73,7 +73,7 @@ const AppointmentConfirmation = () => {
           setAppointmentDetails(latestAppointment);
 
           const queueResponse = await fetch(
-            `http://localhost:8000/auth/appointments/queue-position?clinic_id=${latestAppointment.clinic_id}&appointment_token=${latestAppointment.appointment_token}&appointment_id=${latestAppointment.id}`
+            `/api/auth/appointments/queue-position?clinic_id=${latestAppointment.clinic_id}&appointment_token=${latestAppointment.appointment_token}&appointment_id=${latestAppointment.id}`
           );
           if (queueResponse.ok) {
             const queueData = await queueResponse.json();

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
@@ -130,7 +130,7 @@ const ClinicControlQueue = () => {
   const fetchTimeSlots = async () => {
     setLoadingSlots(true);
     try {
-      const response = await fetch(`http://localhost:8000/auth/clinic/time-slots?clinic_id=${clinicId}`);
+      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${clinicId}`);
       if (response.ok) {
         const data = await response.json();
         const slots = data.slots || [];
@@ -185,7 +185,7 @@ const ClinicControlQueue = () => {
 
   useEffect(() => {
     if (clinicId) {
-      fetch(`http://localhost:8000/auth/clinic/active-status?clinic_id=${clinicId}`)
+      fetch(`/api/auth/clinic/active-status?clinic_id=${clinicId}`)
         .then(res => res.json())
         .then(data => setIsClinicActive(data.is_active || false))
         .catch(console.error);
@@ -195,7 +195,7 @@ const ClinicControlQueue = () => {
   const handleActivate = async () => {
     setActivating(true);
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/set-active", {
+      const response = await fetch("/api/auth/clinic/set-active", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clinic_id: clinicId, is_active: true })
@@ -213,7 +213,7 @@ const ClinicControlQueue = () => {
   const handleDeactivate = async () => {
     setActivating(true);
     try {
-      const response = await fetch("http://localhost:8000/auth/clinic/set-active", {
+      const response = await fetch("/api/auth/clinic/set-active", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clinic_id: clinicId, is_active: false })
@@ -356,7 +356,7 @@ const ClinicControlQueue = () => {
                   </div>
                   <p className="text-sm text-slate-600 mb-2">No time slots configured.</p>
                   <Link to="/clinic/manage-time" className="text-[#00555A] text-sm font-medium hover:underline">
-                    Set up time slots →
+                    Set up time slots â†’
                   </Link>
                 </div>
               ) : (

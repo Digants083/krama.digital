@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Link, useParams, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -40,7 +40,7 @@ const PatientWriteReview = () => {
       if (userStr) {
         const user = JSON.parse(userStr);
 
-        const response = await fetch("http://localhost:8000/auth/reviews/create", {
+        const response = await fetch("/api/auth/reviews/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -128,7 +128,7 @@ const PatientWriteReview = () => {
           <div className="space-y-6">
             {/* Rating */}
             <div className="space-y-3">
-              <Label>Rating (1–5)</Label>
+              <Label>Rating (1â€“5)</Label>
               <div className="flex gap-2">
                 {[1, 2, 3, 4, 5].map((n) => (
                   <button

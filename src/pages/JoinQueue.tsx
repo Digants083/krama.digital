@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface Doctor {
   id: string;
   name: string;
@@ -18,7 +18,7 @@ interface ClinicInfo {
 
 type Step = "form" | "loading" | "success" | "error";
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const JoinQueue = () => {
   // QR codes should link to /join?clinic_id=XYZ
   const [searchParams] = useSearchParams();
@@ -38,11 +38,11 @@ const JoinQueue = () => {
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // ── Fetch clinic info when clinic_id is known ────────────────────────────
+  // â”€â”€ Fetch clinic info when clinic_id is known â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!qrClinicId) return;
     setClinicLoading(true);
-    fetch(`http://localhost:8000/auth/clinics/${qrClinicId}`)
+    fetch(`/api/auth/clinics/${qrClinicId}`)
       .then((r) => r.json())
       .then((data) => {
         setClinicInfo({
@@ -63,14 +63,14 @@ const JoinQueue = () => {
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
 
-  // ── Validation ───────────────────────────────────────────────────────────
+  // â”€â”€ Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const phoneRegex = /^[6-9]\d{9}$/;
   const isValid =
     name.trim().length >= 2 &&
     phoneRegex.test(phone.trim()) &&
     (clinicInfo?.doctors.length === 0 || selectedDoctorId !== "");
 
-  // ── Submit ───────────────────────────────────────────────────────────────
+  // â”€â”€ Submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleJoin = async () => {
     if (!isValid) return;
     setStep("loading");
@@ -94,7 +94,7 @@ const JoinQueue = () => {
     }
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   if (!qrClinicId) {
     return (
@@ -108,7 +108,7 @@ const JoinQueue = () => {
     );
   }
 
-  // ── Success screen ───────────────────────────────────────────────────────
+  // â”€â”€ Success screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (step === "success" && tokenResult) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
@@ -148,7 +148,7 @@ const JoinQueue = () => {
     );
   }
 
-  // ── Error screen ─────────────────────────────────────────────────────────
+  // â”€â”€ Error screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (step === "error") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
@@ -171,7 +171,7 @@ const JoinQueue = () => {
     );
   }
 
-  // ── Form screen ──────────────────────────────────────────────────────────
+  // â”€â”€ Form screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
@@ -219,7 +219,7 @@ const JoinQueue = () => {
             )}
           </div>
 
-          {/* Doctor selector — shown only if clinic has multiple doctors */}
+          {/* Doctor selector â€” shown only if clinic has multiple doctors */}
           {clinicInfo && clinicInfo.doctors.length > 1 && (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Select doctor</label>
@@ -231,7 +231,7 @@ const JoinQueue = () => {
                 <option value="">Choose a doctor</option>
                 {clinicInfo.doctors.map((doc) => (
                   <option key={doc.id} value={doc.id}>
-                    {doc.name}{doc.specialization ? ` — ${doc.specialization}` : ""}
+                    {doc.name}{doc.specialization ? ` â€” ${doc.specialization}` : ""}
                   </option>
                 ))}
               </select>
