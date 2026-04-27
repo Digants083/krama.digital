@@ -12,8 +12,11 @@ const Navbar = () => {
         {/* LOGO → HOME */}
         <Link
           to="/"
-          className="font-display text-xl font-bold tracking-tight text-[#00555A] hover:opacity-80 transition-all duration-200"
+          className="flex items-center gap-2 font-display text-xl font-bold tracking-tight text-[#00555A] hover:opacity-80 transition-all duration-200"
         >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#00555A] text-white text-sm">
+            K
+          </div>
           Krama
         </Link>
       </div>

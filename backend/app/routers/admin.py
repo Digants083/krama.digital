@@ -118,25 +118,7 @@ async def admin_login(
     """
     username = request.username
     password = request.password
-    
-    # Hardcoded admin credentials for now
-    ADMIN_USERNAME = "admin1"
-    ADMIN_PASSWORD = "Diganthadmin1"
-    
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        access_token, expires_at = create_admin_session("admin-001", username)
-        return {
-            "success": True,
-            "message": "Login successful",
-            "admin_id": "admin-001",
-            "name": "Admin",
-            "username": username,
-            "access_token": access_token,
-            "expires_in": ADMIN_SESSION_HOURS * 60 * 60,
-            "expires_at": expires_at.isoformat(),
-        }
-    
-    # Also check database
+
     result = await db.execute(
         select(Admin).where(Admin.email == username, Admin.is_active == True)
     )

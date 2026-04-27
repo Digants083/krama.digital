@@ -133,7 +133,7 @@ const PatientLogin = () => {
                   <Input
                     id="password"
                     type="password"
-                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                    placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="pl-9"
