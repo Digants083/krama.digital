@@ -9,8 +9,8 @@ import { toast } from "sonner";
 const AdminLogin = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState(import.meta.env.DEV ? "admin1" : "");
+  const [password, setPassword] = useState(import.meta.env.DEV ? "Diganthadmin1" : "");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
