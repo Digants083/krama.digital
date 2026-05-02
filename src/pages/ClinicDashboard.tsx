@@ -1,27 +1,9 @@
 ﻿import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
-import { Eye, Settings, User, Users, MapPin, AlertCircle } from "lucide-react";
+import { Eye, Settings, User, Users, MapPin, AlertCircle, FileText } from "lucide-react";
 import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 import { Button } from "@/components/ui/button";
-
-const actions = [
-  {
-    to: "/clinic/manage-time",
-    title: "Manage Time",
-    icon: Settings,
-  },
-  {
-    to: "/clinic/control-queue",
-    title: "Control Queue",
-    icon: Users,
-  },
-  {
-    to: "/clinic/look",
-    title: "Look Up Patients",
-    icon: Eye,
-  },
-];
 
 const ClinicDashboard = () => {
   const [clinicProfile, setClinicProfile] = useState<any>(null);
@@ -30,6 +12,34 @@ const ClinicDashboard = () => {
   const { fetchQueueForClinic } = useQueue();
 
   const hasLocation = clinicProfile?.latitude && clinicProfile?.longitude;
+
+  // Check if clinic is diagnostic or scanning center
+  const isDiagnosticCenter = clinicProfile?.categories?.some(
+    (cat: string) => ["diagnostic_center", "scanning_center", "diagnostic", "scanning", "lab", "x-ray", "mri", "ct_scan"].includes(cat)
+  );
+
+  const actions = [
+    {
+      to: "/clinic/manage-time",
+      title: "Manage Time",
+      icon: Settings,
+    },
+    {
+      to: "/clinic/control-queue",
+      title: "Control Queue",
+      icon: Users,
+    },
+    {
+      to: "/clinic/look",
+      title: "Look Up Patients",
+      icon: Eye,
+    },
+    ...(isDiagnosticCenter ? [{
+      to: "/clinic/reports",
+      title: "Reports",
+      icon: FileText,
+    }] : []),
+  ];
 
   useEffect(() => {
     if (message) {

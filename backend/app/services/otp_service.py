@@ -429,8 +429,8 @@ class OTPService:
             
             # Verify OTP
             if self.verify_otp_hash(otp_record.otp_code, provided_otp):
-                # Mark as verified and delete
-                await db.delete(otp_record)
+                otp_record.is_verified = True
+                otp_record.expires_at = _utc_now_for(otp_record.expires_at) + timedelta(minutes=15)
                 await db.commit()
                 logger.info(f"Password reset OTP verified for {email}")
                 return True, "OTP verified successfully"

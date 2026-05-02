@@ -14,6 +14,7 @@ class Clinic(Base):
     password = Column(String, nullable=False)
     phone = Column(String, nullable=False)
     category = Column(String, nullable=True)
+    categories = Column(JSON, default=list)
     street_address = Column(String, nullable=True)
     road = Column(String, nullable=True)
     layout = Column(String, nullable=True)
@@ -74,11 +75,12 @@ class Appointment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     source = Column(String, default="online")
     slot_id = Column(Integer, nullable=True)
+    push_count = Column(Integer, default=0)  # Number of times patient has been pushed to next slot
 
 class CompletedAppointment(Base):
     """Model for storing completed/served patient history"""
     __tablename__ = "completed_appointments"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     appointment_token = Column(String, nullable=False)
     clinic_id = Column(String, nullable=False)
@@ -89,10 +91,14 @@ class CompletedAppointment(Base):
     doctor_name = Column(String, nullable=True)
     date = Column(String, nullable=False)
     time = Column(String, nullable=False)
+    slot_id = Column(Integer, nullable=True)
     served_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True))
     status = Column(String, default="served")  # served, completed, skipped
     wait_time_minutes = Column(Integer, nullable=True)  # how long they waited
+    outcome = Column(String, default="served")  # served or not_served
+    served = Column(Boolean, default=True)  # True if served normally or after push, False if not served
+    push_count = Column(Integer, default=0)  # Number of times patient was pushed to next slot
 
 class ClinicTimeSlot(Base):
     """Model for storing clinic operating time slots - one row per clinic with all slots as JSON array"""
@@ -102,6 +108,9 @@ class ClinicTimeSlot(Base):
     clinic_id = Column(String, unique=True, nullable=False, index=True)
     slots = Column(JSON, default=list)  # Array of {slot_name, time_range, is_open}
     slot = Column(ARRAY(String), default=list)  # Array of "open"/"close" for each slot
+    last_slot_change_date = Column(DateTime(timezone=True), nullable=True)  # Track when slots were last modified
+    daily_toggle_counts = Column(JSON, default=list)  # Array of toggle counts per slot [0, 0, 0] for 3 slots
+    last_toggle_date = Column(DateTime(timezone=True), nullable=True)  # Track date of last toggle operation
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -172,6 +181,7 @@ class PendingClinicRegistration(Base):
     password = Column(String, nullable=False)
     phone = Column(String, nullable=False)
     category = Column(String, nullable=True)
+    categories = Column(JSON, default=list)
     street_address = Column(String, nullable=True)
     road = Column(String, nullable=True)
     layout = Column(String, nullable=True)
@@ -191,18 +201,17 @@ class PendingClinicRegistration(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 class Admin(Base):
-    """Model for admin users who can approve/reject clinic registrations"""
+    """Model for admin users with double OTP authentication"""
     __tablename__ = "admins"
 
     id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(String, unique=True, index=True, nullable=False)
-    name = Column(String, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False)
-    role = Column(String, default="admin")  # admin, super_admin
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_login = Column(DateTime(timezone=True), nullable=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, nullable=False)  # Admin's personal email for OTP
+    confirmation_email = Column(String, nullable=False)  # Confirmation email for double OTP
+    otp_code = Column(String, nullable=True)  # Current OTP for admin
+    confirmation_otp_code = Column(String, nullable=True)  # Current confirmation OTP
+    otp_expires_at = Column(DateTime(timezone=True), nullable=True)  # OTP expiration time
+    confirmation_otp_expires_at = Column(DateTime(timezone=True), nullable=True)  # Confirmation OTP expiration time
 
 class RejectedClinic(Base):
     """Model for storing rejected clinic registrations"""
@@ -215,6 +224,7 @@ class RejectedClinic(Base):
     password = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     category = Column(String, nullable=True)
+    categories = Column(JSON, default=list)
     street_address = Column(String, nullable=True)
     road = Column(String, nullable=True)
     layout = Column(String, nullable=True)
@@ -232,3 +242,65 @@ class RejectedClinic(Base):
     rejection_reason = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     rejected_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Feedback(Base):
+    """Model for storing user feedback submissions"""
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    phone = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    status = Column(String, default="pending")  # pending, approved, rejected
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(String, nullable=True)  # admin_id who reviewed
+
+class PatientReport(Base):
+    """Model for storing patient reports for diagnostic/scanning centers"""
+    __tablename__ = "patient_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_name = Column(String, nullable=False)
+    patient_email = Column(String, nullable=False)
+    patient_phone = Column(String, nullable=False)
+    report_status = Column(String, default="no_report")  # sent, no_report, received
+    report_pdf = Column(String, nullable=True)  # Path to PDF file
+    report_date = Column(DateTime(timezone=True), server_default=func.now())
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Report(Base):
+    """Model for pending reports - patients who need reports"""
+    __tablename__ = "reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    patient_name = Column(String, nullable=False)
+    patient_email = Column(String, nullable=False)
+    patient_phone = Column(String, nullable=False)
+    status = Column(String, default="pending")  # pending
+    report_pdf = Column(String, nullable=True)  # Path to PDF file
+    report_type = Column(String, nullable=True)  # sent, collected, no_report
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CompletedReport(Base):
+    """Model for completed reports - patients whose reports are processed"""
+    __tablename__ = "completed_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    patient_name = Column(String, nullable=False)
+    patient_email = Column(String, nullable=False)
+    patient_phone = Column(String, nullable=False)
+    status = Column(Boolean, default=False)  # true = report provided, false = no report
+    report_pdf = Column(String, nullable=True)  # Path to PDF file
+    report_type = Column(String, nullable=True)  # sent, collected, no_report
+    completed_at = Column(DateTime(timezone=True), server_default=func.now())

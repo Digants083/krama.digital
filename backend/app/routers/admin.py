@@ -5,7 +5,7 @@ Provides endpoints for viewing, approving, and rejecting pending clinic registra
 import random
 import string
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Header
@@ -17,10 +17,10 @@ from app.database.db import get_db
 from app.database.models import (
     PendingClinicRegistration, Clinic, Admin, ClinicImage
 )
-from app.security import hash_password, verify_password
 from app.services.email_service import (
     send_clinic_approval_email,
-    send_clinic_rejection_email
+    send_clinic_rejection_email,
+    send_admin_otp_email
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -36,23 +36,26 @@ def generate_clinic_id():
     return f"{letters}{digits}{more_letters}"
 
 
-def generate_admin_id():
-    """Generate unique admin ID like AD-1234"""
-    letters = ''.join(random.choices(string.ascii_uppercase, k=2))
-    digits = ''.join(random.choices(string.digits, k=4))
-    return f"AD-{letters}{digits}"
+def generate_otp():
+    """Generate 6-digit OTP"""
+    return ''.join(random.choices(string.digits, k=6))
 
 
 # ============ Admin Authentication Endpoints ============
 
-class LoginRequest(BaseModel):
+class SendOtpRequest(BaseModel):
     username: str
-    password: str
+
+
+class VerifyOtpRequest(BaseModel):
+    username: str
+    otp_code: str
+    confirmation_otp_code: str
 
 
 def create_admin_session(admin_id: str, username: str) -> tuple[str, datetime]:
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(hours=ADMIN_SESSION_HOURS)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=ADMIN_SESSION_HOURS)
     admin_sessions[token] = {
         "admin_id": admin_id,
         "username": username,
@@ -92,7 +95,7 @@ async def require_admin_session(authorization: Optional[str] = Header(None)) -> 
         )
 
     expires_at = session["expires_at"]
-    if not isinstance(expires_at, datetime) or datetime.utcnow() > expires_at:
+    if not isinstance(expires_at, datetime) or datetime.now(timezone.utc) > expires_at:
         invalidate_admin_session(token)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -107,108 +110,160 @@ async def require_admin_session(authorization: Optional[str] = Header(None)) -> 
     }
 
 
-@router.post("/login")
-async def admin_login(
-    request: LoginRequest,
+@router.post("/send-otp")
+async def send_admin_otp(
+    request: SendOtpRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Admin login endpoint.
-    Accepts username and password.
+    Send OTP to admin's email and confirmation email.
+    For admin1: sends to diganths083@gmail.com and digitalkrama@gmail.com
+    For admin2: sends to yashavanthb28@gmail.com and digitalkrama@gmail.com
     """
     username = request.username
-    password = request.password
-    
-    # Hardcoded admin credentials for now
-    ADMIN_USERNAME = "admin1"
-    ADMIN_PASSWORD = "Diganthadmin1"
-    
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        access_token, expires_at = create_admin_session("admin-001", username)
-        return {
-            "success": True,
-            "message": "Login successful",
-            "admin_id": "admin-001",
-            "name": "Admin",
-            "username": username,
-            "access_token": access_token,
-            "expires_in": ADMIN_SESSION_HOURS * 60 * 60,
-            "expires_at": expires_at.isoformat(),
-        }
-    
-    # Also check database
+
+    # Check if username is valid
+    if username not in ["admin1", "admin2"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid username. Use admin1 or admin2"
+        )
+
+    # Get admin from database
     result = await db.execute(
-        select(Admin).where(Admin.email == username, Admin.is_active == True)
+        select(Admin).where(Admin.username == username)
     )
     admin = result.scalar_one_or_none()
-    
-    if admin and verify_password(password, admin.password):
-        admin.last_login = datetime.now()
-        await db.commit()
-        access_token, expires_at = create_admin_session(admin.admin_id, admin.email)
-        return {
-            "success": True,
-            "message": "Login successful",
-            "admin_id": admin.admin_id,
-            "name": admin.name,
-            "email": admin.email,
-            "role": admin.role,
-            "access_token": access_token,
-            "expires_in": ADMIN_SESSION_HOURS * 60 * 60,
-            "expires_at": expires_at.isoformat(),
-        }
-    
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid username or password"
-    )
+
+    if not admin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Admin account not found"
+        )
+
+    # Generate two different OTPs
+    otp_code = generate_otp()
+    confirmation_otp_code = generate_otp()
+
+    # Set expiration time (10 minutes)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    # Update admin with OTP codes
+    admin.otp_code = otp_code
+    admin.confirmation_otp_code = confirmation_otp_code
+    admin.otp_expires_at = expires_at
+    admin.confirmation_otp_expires_at = expires_at
+
+    await db.commit()
+
+    # Send OTP to admin's email
+    try:
+        send_admin_otp_email(admin.email, otp_code, username)
+    except Exception as e:
+        print(f"Failed to send OTP to {admin.email}: {str(e)}")
+
+    # Send confirmation OTP to confirmation email
+    try:
+        send_admin_otp_email(admin.confirmation_email, confirmation_otp_code, f"{username} (confirmation)")
+    except Exception as e:
+        print(f"Failed to send confirmation OTP to {admin.confirmation_email}: {str(e)}")
+
+    return {
+        "success": True,
+        "message": "OTP codes sent successfully",
+        "expires_in": 600,  # 10 minutes in seconds
+        "expires_at": expires_at.isoformat()
+    }
 
 
-@router.post("/create")
-async def create_admin(
-    name: str,
-    email: str,
-    password: str,
-    role: str = "admin",
+@router.post("/verify-otp")
+async def verify_admin_otp(
+    request: VerifyOtpRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a new admin account. (Should be protected in production)
+    Verify both OTP codes and create admin session.
     """
-    # Check if email already exists
-    result = await db.execute(select(Admin).where(Admin.email == email))
-    if result.scalar_one_or_none():
+    username = request.username
+    otp_code = request.otp_code
+    confirmation_otp_code = request.confirmation_otp_code
+
+    # Get admin from database
+    result = await db.execute(
+        select(Admin).where(Admin.username == username)
+    )
+    admin = result.scalar_one_or_none()
+
+    if not admin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Admin account not found"
+        )
+
+    # Check if OTP codes exist
+    if not admin.otp_code or not admin.confirmation_otp_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail="No OTP codes found. Please request new OTP codes."
         )
-    
-    # Generate unique admin ID
-    admin_id = generate_admin_id()
-    while True:
-        result = await db.execute(select(Admin).where(Admin.admin_id == admin_id))
-        if not result.scalar_one_or_none():
-            break
-        admin_id = generate_admin_id()
-    
-    hashed_password = hash_password(password)
-    
-    new_admin = Admin(
-        admin_id=admin_id,
-        name=name,
-        email=email,
-        password=hashed_password,
-        role=role
-    )
-    
-    db.add(new_admin)
+
+    # Check if OTP codes have expired
+    if not admin.otp_expires_at or not admin.confirmation_otp_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP expiration time not set."
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # Handle timezone-aware vs timezone-naive comparison
+    otp_expires = admin.otp_expires_at
+    confirmation_expires = admin.confirmation_otp_expires_at
+
+    # If stored datetimes are timezone-naive, treat them as UTC
+    if otp_expires.tzinfo is None:
+        otp_expires = otp_expires.replace(tzinfo=timezone.utc)
+    if confirmation_expires.tzinfo is None:
+        confirmation_expires = confirmation_expires.replace(tzinfo=timezone.utc)
+
+    if now > otp_expires or now > confirmation_expires:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP codes have expired. Please request new OTP codes."
+        )
+
+    # Verify OTP codes
+    if otp_code != admin.otp_code:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid OTP code"
+        )
+
+    if confirmation_otp_code != admin.confirmation_otp_code:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid confirmation OTP code"
+        )
+
+    # Clear OTP codes after successful verification
+    admin.otp_code = None
+    admin.confirmation_otp_code = None
+    admin.otp_expires_at = None
+    admin.confirmation_otp_expires_at = None
+
     await db.commit()
-    await db.refresh(new_admin)
-    
+
+    # Create admin session
+    access_token, expires_at = create_admin_session(str(admin.id), username)
+
     return {
-        "message": "Admin created successfully",
-        "admin_id": admin_id,
-        "email": email
+        "success": True,
+        "message": "Login successful",
+        "admin_id": str(admin.id),
+        "username": username,
+        "access_token": access_token,
+        "expires_in": ADMIN_SESSION_HOURS * 60 * 60,
+        "expires_at": expires_at.isoformat(),
     }
 
 
@@ -274,6 +329,7 @@ async def get_pending_registrations(
                 "email": reg.email,
                 "phone": reg.phone,
                 "category": reg.category,
+                "categories": reg.categories or ([] if not reg.category else [reg.category]),
                 # Address fields
                 "street_address": reg.street_address,
                 "road": reg.road,
@@ -333,6 +389,7 @@ async def get_pending_registration_details(
         "email": reg.email,
         "phone": reg.phone,
         "category": reg.category,
+        "categories": reg.categories or ([] if not reg.category else [reg.category]),
         # Address fields
         "street_address": reg.street_address,
         "road": reg.road,
@@ -424,6 +481,7 @@ async def approve_registration(
             password=pending_reg.password,
             phone=pending_reg.phone,
             category=pending_reg.category,
+            categories=pending_reg.categories or ([] if not pending_reg.category else [pending_reg.category]),
             street_address=pending_reg.street_address,
             road=pending_reg.road,
             layout=pending_reg.layout,
@@ -478,6 +536,7 @@ async def approve_registration(
                 "latitude": new_clinic.latitude,
                 "longitude": new_clinic.longitude,
                 "category": new_clinic.category,
+                "categories": new_clinic.categories or ([] if not new_clinic.category else [new_clinic.category]),
                 "city": new_clinic.city,
                 "doctor_name": new_clinic.doctor_name,
                 "specialization": new_clinic.specialization,
@@ -544,6 +603,7 @@ async def reject_registration(
             password=pending_reg.password,
             phone=pending_reg.phone,
             category=pending_reg.category,
+            categories=pending_reg.categories or ([] if not pending_reg.category else [pending_reg.category]),
             street_address=pending_reg.street_address,
             road=pending_reg.road,
             layout=pending_reg.layout,
@@ -679,6 +739,7 @@ async def get_approved_clinics(
                 "email": c.email,
                 "phone": c.phone,
                 "category": c.category,
+                "categories": c.categories or ([] if not c.category else [c.category]),
                 "street_address": c.street_address,
                 "road": c.road,
                 "layout": c.layout,
@@ -740,6 +801,7 @@ async def get_rejected_clinics(
                 "email": c.email,
                 "phone": c.phone,
                 "category": c.category,
+                "categories": c.categories or ([] if not c.category else [c.category]),
                 "street_address": c.street_address,
                 "road": c.road,
                 "layout": c.layout,

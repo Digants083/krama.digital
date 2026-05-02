@@ -2,7 +2,7 @@
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square } from "lucide-react";
+import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight } from "lucide-react";
 
 interface TimeSlot {
   slot_name: string;
@@ -22,6 +22,7 @@ const formatTimeRange = (timeRange: number[]) => {
   const end = convertHour(timeRange[1]);
   return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
 };
+
 
 const SourceBadge = ({ source }: { source: string }) => {
   const map: Record<string, { label: string; className: string }> = {
@@ -57,24 +58,33 @@ const ClinicControlQueue = () => {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isClinicActive, setIsClinicActive] = useState(false);
   const [activating, setActivating] = useState(false);
+  const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
+  const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const [pushingToken, setPushingToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), 5000);
+    return () => clearTimeout(timer);
+  }, [message]);
 
   useEffect(() => {
     const clinicStr = localStorage.getItem("clinic_id");
     if (clinicStr) {
       setClinicId(clinicStr);
-      fetchQueueForClinic(clinicStr);
+      fetchQueueForClinic(clinicStr, selectedSlotId, currentServing?.startTime);
     }
-  }, [fetchQueueForClinic]);
+  }, [fetchQueueForClinic, selectedSlotId, currentServing?.startTime]);
 
   useEffect(() => {
     if (!clinicId) return;
 
     const interval = setInterval(() => {
-      fetchQueueForClinic(clinicId);
+      fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [clinicId, fetchQueueForClinic]);
+  }, [clinicId, fetchQueueForClinic, selectedSlotId, currentServing?.startTime]);
 
   useEffect(() => {
     if (currentServing?.startTime) {
@@ -96,7 +106,7 @@ const ClinicControlQueue = () => {
         "Refresh the queue? This will reload today's data from the server."
       )
     ) {
-      if (clinicId) fetchQueueForClinic(clinicId);
+      if (clinicId) fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
     }
   };
 
@@ -116,6 +126,12 @@ const ClinicControlQueue = () => {
       fetchTimeSlots();
     }
   }, [clinicId]);
+
+  useEffect(() => {
+    if (viewingSlotId !== null && selectedSlotId === null) {
+      setSelectedSlotId(viewingSlotId);
+    }
+  }, [viewingSlotId, selectedSlotId]);
 
   useEffect(() => {
     if (!clinicId) return;
@@ -202,9 +218,15 @@ const ClinicControlQueue = () => {
       });
       if (response.ok) {
         setIsClinicActive(true);
+        setMessage({ text: "Clinic is now live.", type: "success" });
+        fetchTimeSlots();
+      } else {
+        const error = await response.json().catch(() => ({}));
+        setMessage({ text: error.detail || "Could not start clinic.", type: "error" });
       }
     } catch (error) {
       console.error("Error activating clinic:", error);
+      setMessage({ text: "Network error while starting clinic.", type: "error" });
     } finally {
       setActivating(false);
     }
@@ -220,9 +242,14 @@ const ClinicControlQueue = () => {
       });
       if (response.ok) {
         setIsClinicActive(false);
+        setMessage({ text: "Clinic is now offline.", type: "success" });
+      } else {
+        const error = await response.json().catch(() => ({}));
+        setMessage({ text: error.detail || "Could not stop clinic.", type: "error" });
       }
     } catch (error) {
       console.error("Error deactivating clinic:", error);
+      setMessage({ text: "Network error while stopping clinic.", type: "error" });
     } finally {
       setActivating(false);
     }
@@ -248,15 +275,60 @@ const ClinicControlQueue = () => {
     return true;
   };
 
+  const hasActivatableSlot = () => {
+    if (timeSlots.length === 0) return false;
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    return timeSlots.some((slot) => {
+      if (!slot.is_open) return false;
+
+      const startMinutes = slot.time_range[0] * 60;
+      const endMinutes = slot.time_range[1] * 60;
+
+      return currentMinutes < endMinutes && currentMinutes < startMinutes + 30;
+    });
+  };
+
+  const canActivateNow = () => {
+    if (timeSlots.length === 0) return false;
+    const slot1Start = timeSlots[0]?.time_range?.[0];
+    if (typeof slot1Start !== "number") return false;
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const slot1StartMinutes = slot1Start * 60;
+    const activationThresholdMinutes = slot1StartMinutes - 45;
+
+    let latestEndMinutes = 0;
+    for (const slot of timeSlots) {
+      if (slot.is_open) {
+        const endMinutes = slot.time_range[1] * 60;
+        if (endMinutes > latestEndMinutes) {
+          latestEndMinutes = endMinutes;
+        }
+      }
+    }
+
+    if (latestEndMinutes <= 0) return false;
+
+    const cutoffMinutes = latestEndMinutes - 15;
+
+    return currentMinutes >= activationThresholdMinutes &&
+      currentMinutes < cutoffMinutes &&
+      hasActivatableSlot();
+  };
+
   // Check if current time is past the viewing slot's start time
   const canServeInCurrentSlot = () => {
-    if (viewingSlotId === null || timeSlots.length === 0) return false;
+    const slotToCheck = selectedSlotId ?? viewingSlotId;
+    if (slotToCheck === null || timeSlots.length === 0) return false;
     
-    const slotIndex = viewingSlotId - 1; // Convert to 0-based index
+    const slotIndex = slotToCheck - 1; // Convert to 0-based index
     if (slotIndex < 0 || slotIndex >= timeSlots.length) return false;
     
     const slot = timeSlots[slotIndex];
-    const slotStartHour = slot.time_range[0];
     
     const now = new Date();
     const currentHour = now.getHours();
@@ -264,14 +336,116 @@ const ClinicControlQueue = () => {
     const currentTimeDecimal = currentHour + currentMinute / 60.0;
     
     // Can serve if current time is >= slot start time
-    return currentTimeDecimal >= slotStartHour;
+    return currentTimeDecimal >= slot.time_range[0];
+  };
+
+  // Check if a slot is currently available based on time
+  const isSlotCurrentlyAvailable = (slot: TimeSlot): boolean => {
+    if (!slot.is_open) return false;
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeDecimal = currentHour + currentMinute / 60.0;
+
+    const [startHour, endHour] = slot.time_range;
+
+    // Slot is available if it's open and end time hasn't passed yet
+    // (can be in the past, current, or future - as long as not expired)
+    return currentTimeDecimal < endHour;
   };
 
   const isServingAllowedForViewingSlot =
-    viewingSlotId !== null && activeSlotId !== null && viewingSlotId === activeSlotId;
+    (selectedSlotId ?? viewingSlotId) !== null &&
+    activeSlotId !== null &&
+    (selectedSlotId ?? viewingSlotId) === activeSlotId;
+
+  const currentSlotLabelId = selectedSlotId ?? viewingSlotId;
+
+  const handleSlotSelect = (slotId: number) => {
+    setSelectedSlotId(slotId);
+    if (clinicId) {
+      fetchQueueForClinic(clinicId, slotId, currentServing?.startTime);
+    }
+  };
+
+  const pushPatientToNextSlot = async (appointmentId: number, token: string) => {
+    if (!window.confirm(`Push patient ${token} to the next available slot? They will be added to the end of the queue and receive an email notification.`)) {
+      return;
+    }
+
+    setPushingToken(token);
+    try {
+      const response = await fetch("/api/auth/clinic/push-patient-to-next-slot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clinic_id: clinicId,
+          appointment_id: appointmentId
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setMessage({
+          text: data.action === "auto_finished"
+            ? `Patient was in last slot - marked as not served`
+            : `Patient ${token} pushed to next slot`,
+          type: "success"
+        });
+        // Refresh the queue
+        if (clinicId) {
+          fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
+        }
+      } else {
+        setMessage({ text: data.detail || "Failed to push patient", type: "error" });
+      }
+    } catch (error) {
+      console.error("Error pushing patient:", error);
+      setMessage({ text: "Network error while pushing patient", type: "error" });
+    } finally {
+      setPushingToken(null);
+    }
+  };
+
+  // Check if a patient's slot has expired (for showing push button)
+  const isPatientSlotExpired = (patientSlotId: number | null | undefined): boolean => {
+    if (patientSlotId == null || timeSlots.length === 0) return false;
+
+    const slotIndex = patientSlotId - 1;
+    if (slotIndex < 0 || slotIndex >= timeSlots.length) return false;
+
+    const slot = timeSlots[slotIndex];
+    if (!slot || !Array.isArray(slot.time_range) || slot.time_range.length < 2) {
+      return false;
+    }
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeDecimal = currentHour + currentMinute / 60.0;
+
+    const slotEnd = slot.time_range[1];
+    return currentTimeDecimal >= slotEnd;
+  };
+
+  // Check if patient is in the last slot
+  const isPatientInLastSlot = (patientSlotId: number | null): boolean => {
+    if (patientSlotId === null || timeSlots.length === 0) return false;
+    return patientSlotId >= timeSlots.length;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      {message && (
+        <div
+          className={`fixed right-4 top-20 z-50 rounded-full px-4 py-2 text-sm shadow-lg ${
+            message.type === "success" ? "bg-[#00555A] text-white" : "bg-red-600 text-white"
+          }`}
+        >
+          {message.text}
+        </div>
+      )}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
           <div className="flex items-center gap-3">
@@ -319,7 +493,7 @@ const ClinicControlQueue = () => {
             <div className="flex gap-3">
               <Button
                 onClick={handleActivate}
-                disabled={activating || isClinicActive || allSlotsExpired()}
+                disabled={activating || isClinicActive || allSlotsExpired() || !canActivateNow()}
                 className="bg-green-500 hover:bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all"
               >
                 <Play className="h-4 w-4 mr-2" />
@@ -356,31 +530,41 @@ const ClinicControlQueue = () => {
                   </div>
                   <p className="text-sm text-slate-600 mb-2">No time slots configured.</p>
                   <Link to="/clinic/manage-time" className="text-[#00555A] text-sm font-medium hover:underline">
-                    Set up time slots â†’
+                    Set up time slots →
                   </Link>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {timeSlots.map((slot, index) => (
-                    <div
-                      key={index}
-                      className={`border-2 rounded-xl p-4 transition-all ${
-                        slot.is_open ? 'bg-gradient-to-r from-green-50 to-white border-green-200' : 'bg-slate-50 border-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="font-semibold text-slate-800">{slot.slot_name.replace('Time ', 'Session ')}</h3>
-                          <p className="text-sm text-slate-500 font-medium">
-                            {formatTimeRange(slot.time_range)}
-                          </p>
+                  {timeSlots.map((slot, index) => {
+                    const isCurrentlyAvailable = isSlotCurrentlyAvailable(slot);
+                    return (
+                      <button
+                        type="button"
+                        key={index}
+                        onClick={() => handleSlotSelect(index + 1)}
+                        className={`border-2 rounded-xl p-4 transition-all ${
+                          currentSlotLabelId === index + 1
+                            ? "bg-gradient-to-r from-[#00555A]/10 to-white border-[#00555A] shadow-md"
+                            : isCurrentlyAvailable
+                              ? "bg-gradient-to-r from-green-50 to-white border-green-200"
+                              : "bg-slate-50 border-slate-200"
+                        }`}
+                        disabled={!slot.is_open}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold text-slate-800">{slot.slot_name.replace('Time ', 'Session ')}</h3>
+                            <p className="text-sm text-slate-500 font-medium">
+                              {formatTimeRange(slot.time_range)}
+                            </p>
+                          </div>
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isCurrentlyAvailable ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+                            {isCurrentlyAvailable ? 'Available' : 'Unavailable'}
+                          </span>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${slot.is_open ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
-                          {slot.is_open ? 'Open' : 'Closed'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -394,6 +578,9 @@ const ClinicControlQueue = () => {
               </div>
               <p className="text-xs text-slate-500 font-medium mb-1">In Queue</p>
               <p className="text-3xl font-bold text-slate-800">{queue.length}</p>
+              {currentSlotLabelId && (
+                <p className="text-xs text-slate-400 mt-1">Slot {currentSlotLabelId}</p>
+              )}
             </div>
             <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
               <div className="bg-[#FFC107]/20 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
@@ -401,6 +588,9 @@ const ClinicControlQueue = () => {
               </div>
               <p className="text-xs text-slate-500 font-medium mb-1">Completed</p>
               <p className="text-3xl font-bold text-[#FFC107]">{completedCount}</p>
+              {currentSlotLabelId && (
+                <p className="text-xs text-slate-400 mt-1">Slot {currentSlotLabelId}</p>
+              )}
             </div>
             <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
               <div className="bg-[#00555A]/10 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
@@ -408,6 +598,9 @@ const ClinicControlQueue = () => {
               </div>
               <p className="text-xs text-slate-500 font-medium mb-1">Now Serving</p>
               <p className="text-3xl font-bold text-[#00555A]">{currentServing ? 1 : 0}</p>
+              {currentSlotLabelId && (
+                <p className="text-xs text-slate-400 mt-1">Slot {currentSlotLabelId}</p>
+              )}
             </div>
           </div>
 
@@ -478,14 +671,15 @@ const ClinicControlQueue = () => {
               <ArrowRightCircle className="mr-2 h-5 w-5" />
               {currentServing ? "Completed" : "Next Patient"}
             </Button>
-            <Button
-              variant="outline"
-              className="flex-1 border-slate-300 text-slate-600 hover:bg-slate-100 rounded-xl transition-all duration-200 py-3 font-semibold"
-              onClick={() => skipPatient()}
-            >
-              <SkipForward className="mr-2 h-5 w-5" />
-              Skip
-            </Button>
+              <Button
+                variant="outline"
+                className="flex-1 border-slate-300 text-slate-600 hover:bg-slate-100 rounded-xl transition-all duration-200 py-3 font-semibold"
+                onClick={() => skipPatient()}
+                disabled={queue.length === 0 || !canServeInCurrentSlot()}
+              >
+                <SkipForward className="mr-2 h-5 w-5" />
+                Skip
+              </Button>
           </div>
 
           {/* Waiting Queue */}
@@ -493,9 +687,9 @@ const ClinicControlQueue = () => {
             <div className="bg-gradient-to-r from-slate-50 to-white px-5 py-4 border-b border-slate-100 flex items-center gap-2">
               <Users size={18} className="text-[#00555A]" />
               <h2 className="font-semibold text-slate-800">Waiting Queue</h2>
-              {typeof viewingSlotId === "number" && (
+              {typeof currentSlotLabelId === "number" && (
                 <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                  Slot {viewingSlotId}
+                  Slot {currentSlotLabelId}
                   {!isServingAllowedForViewingSlot && " (Upcoming)"}
                 </span>
               )}
@@ -553,7 +747,21 @@ const ClinicControlQueue = () => {
                         </div>
                         <SourceBadge source={p.source} />
                       </div>
-                      <span className="text-xs text-slate-500 font-bold bg-slate-100 px-2 py-1 rounded-full">#{i + 1}</span>
+                      <div className="flex items-center gap-2">
+                        {isPatientSlotExpired(p.slot_id) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                            onClick={() => pushPatientToNextSlot(p.appointment_id, p.token)}
+                            disabled={pushingToken === p.token}
+                          >
+                            <MoveRight className="h-3 w-3 mr-1" />
+                            {isPatientInLastSlot(p.slot_id) ? "Not Served" : "Push"}
+                          </Button>
+                        )}
+                        <span className="text-xs text-slate-500 font-bold bg-slate-100 px-2 py-1 rounded-full">#{i + 1}</span>
+                      </div>
                     </div>
                   ))}
                 </div>

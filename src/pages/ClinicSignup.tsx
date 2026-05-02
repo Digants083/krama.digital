@@ -57,7 +57,7 @@ const ClinicSignup = () => {
     password: "",
     confirm: "",
     phone: "",
-    category: "",
+    categories: [] as string[],
     address: "",
     road: "",
     city: "",
@@ -99,6 +99,17 @@ const ClinicSignup = () => {
   }, [form.password]);
 
   const update = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const toggleCategory = (categoryId: string) => {
+    setForm((f) => {
+      const alreadySelected = f.categories.includes(categoryId);
+      return {
+        ...f,
+        categories: alreadySelected
+          ? f.categories.filter((id) => id !== categoryId)
+          : [...f.categories, categoryId],
+      };
+    });
+  };
 
   // Send OTP to email
   const handleSendOTP = async () => {
@@ -123,7 +134,7 @@ const ClinicSignup = () => {
       return;
     }
 
-    if (!form.clinic_name || !form.phone || !form.category || !form.address || !form.road || !form.city || !form.pincode) {
+    if (!form.clinic_name || !form.phone || form.categories.length === 0 || !form.address || !form.road || !form.city || !form.pincode) {
       setError("Please fill all required fields");
       return;
     }
@@ -144,7 +155,7 @@ const ClinicSignup = () => {
           clinic_name: form.clinic_name,
           password: form.password,
           phone: form.phone,
-          category: form.category,
+          categories: form.categories,
           address: fullAddress,
           street_address: form.address,
           road: form.road,
@@ -200,7 +211,7 @@ const ClinicSignup = () => {
           clinic_name: form.clinic_name,
           password: form.password,
           phone: form.phone,
-          category: form.category,
+          categories: form.categories,
           address: fullAddress,
           street_address: form.address,
           road: form.road,
@@ -241,7 +252,7 @@ const ClinicSignup = () => {
   };
 
   const validateStep1 = () => {
-    if (!form.clinic_name || !form.email || !form.password || !form.phone || !form.category) {
+    if (!form.clinic_name || !form.email || !form.password || !form.phone || form.categories.length === 0) {
       setError("Please fill all required clinic details including category.");
       return false;
     }
@@ -324,14 +335,14 @@ const ClinicSignup = () => {
 
                 {/* Clinic Category Selection */}
                 <div className="space-y-2">
-                  <Label>Clinic Category *</Label>
+                  <Label>Clinic Categories * (select one or more)</Label>
                   <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-lg p-2">
                     {clinicCategories.map((cat) => (
                       <div
                         key={cat.id}
-                        onClick={() => update("category", cat.id)}
+                        onClick={() => toggleCategory(cat.id)}
                         className={`p-2 rounded-md cursor-pointer transition-all ${
-                          form.category === cat.id 
+                          form.categories.includes(cat.id)
                             ? 'bg-primary text-white border-primary' 
                             : 'bg-muted/50 hover:bg-muted border border-transparent'
                         }`}
@@ -340,7 +351,7 @@ const ClinicSignup = () => {
                           <span className="text-lg">{cat.icon}</span>
                           <div className="text-left">
                             <div className="text-sm font-medium">{cat.name}</div>
-                            <div className={`text-xs ${form.category === cat.id ? 'text-white/80' : 'text-muted-foreground'}`}>
+                            <div className={`text-xs ${form.categories.includes(cat.id) ? 'text-white/80' : 'text-muted-foreground'}`}>
                               {cat.description}
                             </div>
                           </div>

@@ -1,5 +1,5 @@
 ﻿import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,12 @@ import { Activity, Mail, ArrowLeft, ArrowRight, RefreshCw } from "lucide-react";
 
 const PatientVerifyResetOTP = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const role = location.pathname.startsWith("/clinic")
+    ? "clinic"
+    : sessionStorage.getItem("reset_role") || "patient";
+  const loginPath = `/${role}/login`;
+  const resetPath = `/${role}/reset-password`;
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -35,7 +41,7 @@ const PatientVerifyResetOTP = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/patient/verify-reset-otp", {
+      const response = await fetch(`/api/auth/${role}/verify-reset-otp`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -56,10 +62,11 @@ const PatientVerifyResetOTP = () => {
       setMessage("OTP verified successfully!");
       // Store reset token in sessionStorage
       sessionStorage.setItem("reset_token", data.reset_token);
+      sessionStorage.setItem("reset_role", role);
       
       // Navigate to reset password after 1 second
       setTimeout(() => {
-        navigate("/patient/reset-password");
+        navigate(resetPath);
       }, 1000);
     } catch (err) {
       setError("Network error. Please try again.");
@@ -74,7 +81,7 @@ const PatientVerifyResetOTP = () => {
     setResending(true);
 
     try {
-      const response = await fetch("/api/auth/patient/forgot-password", {
+      const response = await fetch(`/api/auth/${role}/forgot-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -182,7 +189,7 @@ const PatientVerifyResetOTP = () => {
 
             <div className="mt-6 text-center">
               <Link
-                to="/patient/login"
+                to={loginPath}
                 className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="mr-1 h-4 w-4" />

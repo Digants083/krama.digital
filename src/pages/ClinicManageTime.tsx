@@ -722,11 +722,11 @@ const ClinicManageTime = () => {
 
           <ul className="text-sm text-slate-700 space-y-2 ml-6">
 
-            <li>â€¢ Add time slots for different sessions (Morning, Afternoon, Evening)</li>
+            <li>• Add time slots for different sessions (Morning, Afternoon, Evening)</li>
 
-            <li>â€¢ Click Open/Close to control slot availability for bookings</li>
+            <li>• Click Open/Close to control slot availability for bookings</li>
 
-            <li>â€¢ Patients will see available slots when booking</li>
+            <li>• Patients will see available slots when booking</li>
 
           </ul>
 

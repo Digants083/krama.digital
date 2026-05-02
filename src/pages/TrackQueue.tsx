@@ -55,7 +55,7 @@ const TrackQueue = () => {
                 
                 // Fetch queue position based on appointment
                 const queueResponse = await fetch(
-                  `/api/auth/appointments/queue-position?clinic_id=${latestAppointment.clinic_id}&appointment_token=${latestAppointment.token}&appointment_id=${latestAppointment.id}`
+                  `/api/auth/appointments/queue-position?clinic_id=${latestAppointment.clinic_id}&appointment_token=${latestAppointment.appointment_token}&appointment_id=${latestAppointment.id}`
                 );
                 if (queueResponse.ok) {
                   const queueData = await queueResponse.json();

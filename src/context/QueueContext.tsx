@@ -54,7 +54,7 @@ type QueueContextType = {
   completePatient: () => Promise<void>;
   skipPatient: () => Promise<void>;
   fetchQueueStats: (clinicId: string) => void;
-  fetchQueueForClinic: (clinicId: string) => void;
+  fetchQueueForClinic: (clinicId: string, slotId?: number | null, preserveStartTime?: Date) => void;
   addWalkinToQueue: (payload: WalkinPayload) => Promise<WalkinResult>;
   addPatient: (name: string, source: "online" | "desk") => void;
   resetQueue: () => void;
@@ -81,9 +81,14 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
   const [activeSlotId, setActiveSlotId] = useState<number | null>(null);
   const [viewingSlotId, setViewingSlotId] = useState<number | null>(null);
 
-  const fetchQueueForClinic = useCallback(async (clinicId: string) => {
+  const fetchQueueForClinic = useCallback(async (clinicId: string, slotId?: number | null, preserveStartTime?: Date) => {
     try {
-      const response = await fetch(`${API_BASE}/auth/appointments/today?clinic_id=${clinicId}`);
+      const params = new URLSearchParams({ clinic_id: clinicId });
+      if (typeof slotId === "number") {
+        params.set("slot_id", String(slotId));
+      }
+
+      const response = await fetch(`${API_BASE}/auth/appointments/today?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         const appointments = data.appointments || [];
@@ -106,17 +111,14 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
         setQueue(queueItems);
         setTotalToday(appointments.length);
-        
-        // Preserve existing startTime if already set (when clicking Next)
-        const existingStartTime = currentServing?.startTime;
-        
+
         if (servingAppointment) {
           setCurrentServing({
             patientName: servingAppointment.patient_name,
             token: servingAppointment.token,
             position: 1,
-            // Use existing startTime if set, otherwise use created_at
-            startTime: existingStartTime || (servingAppointment.created_at ? new Date(servingAppointment.created_at) : null),
+            // Use preserveStartTime if provided (from Next button), otherwise use created_at
+            startTime: preserveStartTime || (servingAppointment.created_at ? new Date(servingAppointment.created_at) : null),
             appointmentId: servingAppointment.id,
             clinicId: servingAppointment.clinic_id,
             source: servingAppointment.source === "walkin" ? "walkin" : "online",
@@ -132,7 +134,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         );
       }
 
-      const statsResponse = await fetch(`${API_BASE}/auth/queue/history/stats?clinic_id=${clinicId}`);
+      const statsResponse = await fetch(`${API_BASE}/auth/queue/history/stats?clinic_id=${clinicId}${typeof slotId === "number" ? `&slot_id=${slotId}` : ""}`);
       if (statsResponse.ok) {
         const statsData = await statsResponse.json();
         setCompletedCount(statsData.total_patients_served || 0);
@@ -213,30 +215,31 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
-          // Set start time to now when starting to serve - before fetch
+          // Set start time to NOW when clicking Next - this is the actual serving start time
           const startTimeNow = new Date();
-          setCurrentServing(prev => prev ? { 
-            ...prev, 
-            startTime: startTimeNow,
+          setCurrentServing({
             patientName: patient.name,
             token: patient.token,
+            position: 1,
+            startTime: startTimeNow, // Start timer NOW when clicking Next
             appointmentId: patient.appointment_id,
             clinicId: patient.clinic_id,
-          } : null);
-          
+            source: patient.source,
+          });
+
           // Remove from queue
           setQueue(prev => prev.slice(1));
-          
-          // Refresh after a short delay to let timer start
+
+          // Refresh queue data but preserve the start time we just set
           setTimeout(() => {
-            fetchQueueForClinic(patient.clinic_id);
+            fetchQueueForClinic(patient.clinic_id, viewingSlotId, startTimeNow);
           }, 500);
         }
       } catch (error) {
         console.error("Error serving patient:", error);
       }
     }
-  }, [queue, fetchQueueForClinic]);
+  }, [queue, viewingSlotId]);
 
   const completePatient = useCallback(async () => {
     if (currentServing && currentServing.appointmentId) {
@@ -250,15 +253,16 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             source: currentServing.source || "online"
           })
         });
-        
+
         if (response.ok) {
-          await fetchQueueForClinic(currentServing.clinicId || "");
+          // Preserve the current start time when refreshing
+          await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId, currentServing.startTime);
         }
       } catch (error) {
         console.error("Error completing patient:", error);
       }
     }
-  }, [currentServing, fetchQueueForClinic]);
+  }, [currentServing, viewingSlotId]);
 
   const skipPatient = useCallback(async () => {
     if (queue.length > 0) {
@@ -275,13 +279,14 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
-          await fetchQueueForClinic(patient.clinic_id);
+          // Preserve the current start time when refreshing
+          await fetchQueueForClinic(patient.clinic_id, viewingSlotId, currentServing?.startTime);
         }
       } catch (error) {
         console.error("Error skipping patient:", error);
       }
     }
-  }, [queue, fetchQueueForClinic]);
+  }, [queue, viewingSlotId, currentServing]);
 
   const addPatient = useCallback(
     (name: string, source: "online" | "desk") => {
