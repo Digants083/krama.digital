@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -70,24 +70,24 @@ const PatientLogin = () => {
 
   return (
     <>
-      <div className="flex min-h-[calc(100vh-64px)]">
+      <div className="flex min-h-[calc(100vh-200px)]">
         {/* LEFT BRANDING PANEL */}
         <div className="hidden flex-1 items-center justify-center bg-primary/5 lg:flex">
           <div className="max-w-sm text-center">
-            <Activity className="mx-auto h-16 w-16 text-primary" />
-            <h2 className="mt-6 text-3xl font-bold text-foreground">
+            <Activity className="mx-auto h-12 w-12 text-primary" />
+            <h2 className="mt-4 text-3xl font-bold text-foreground">
               Krama
             </h2>
-            <p className="mt-3 text-muted-foreground">
+            <p className="mt-2 text-sm text-muted-foreground">
               Skip the wait. Book clinic appointments and track your queue in real time.
             </p>
           </div>
         </div>
 
         {/* RIGHT LOGIN FORM */}
-        <div className="flex flex-1 items-center justify-center px-4 py-12">
+        <div className="flex flex-1 items-center justify-center px-4 py-6">
           <AuthCard>
-            <div className="mb-6 text-center lg:text-left">
+            <div className="mb-4 text-center lg:text-left">
               <h1 className="text-2xl font-bold text-foreground">
                 Patient Login
               </h1>
@@ -147,7 +147,7 @@ const PatientLogin = () => {
               </Button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-muted-foreground">
+            <p className="mt-4 text-center text-sm text-muted-foreground">
               New user?{" "}
               <Link
                 to="/patient/signup"

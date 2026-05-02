@@ -3,15 +3,24 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Phone, Lock, Trash2, User, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, MapPinned } from "lucide-react";
+import { ArrowLeft, Phone, Lock, Trash2, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, MapPinned, CheckCircle, XCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
 import LocationPickerModal from "@/components/clinic/LocationPickerModal";
+
+const getPasswordChecks = (password: string) => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  lowercase: /[a-z]/.test(password),
+  number: /[0-9]/.test(password),
+  special: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password),
+});
 
 const ClinicProfile = () => {
   const navigate = useNavigate();
@@ -47,8 +56,17 @@ const ClinicProfile = () => {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpSubmitting, setOtpSubmitting] = useState(false);
+  const [otpDialogOpen, setOtpDialogOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"phone" | "password" | "delete" | "address" | null>(null);
   const [showQrDialog, setShowQrDialog] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
+
+  const passwordChecks = getPasswordChecks(newPassword);
+  const isNewPasswordStrong = Object.values(passwordChecks).every(Boolean);
 
   useEffect(() => {
     if (message) {
@@ -102,30 +120,90 @@ const ClinicProfile = () => {
     void fetchClinicData();
   }, [loggedInClinicId]);
 
-  const handleChangePhone = async () => {
+  const refreshClinicProfile = async () => {
+    if (!loggedInClinicId) {
+      return;
+    }
+
+    const response = await fetch(`/api/auth/clinic/data?clinic_id=${loggedInClinicId}`);
+    if (!response.ok) return;
+
+    const data = await response.json();
+    setDbProfile(data);
+    setPhone(data.phone || "");
+    setAddress(data.full_formatted_address || data.address || "");
+    setStreetAddress(data.street_address || "");
+    setRoad(data.road || "");
+    setLayout(data.layout || "");
+    setSection(data.section || "");
+    setCity(data.city || "");
+    setPincode(data.pincode || "");
+    setLocationCoords(
+      data.latitude && data.longitude
+        ? { latitude: data.latitude, longitude: data.longitude }
+        : null
+    );
+    setImageUrls(data.image_urls || []);
+  };
+
+  const sendProfileOtp = async (action: "phone" | "password" | "delete" | "address") => {
     if (!loggedInClinicId) {
       setMessage({ text: "No logged-in clinic found", type: "error" });
       return;
     }
 
+    if (action === "phone" && !phone.trim()) {
+      setMessage({ text: "Please enter a new phone number", type: "error" });
+      return;
+    }
+
+    if (action === "password") {
+      if (!currentPassword || !newPassword || newPassword !== confirmPassword) {
+        setMessage({ text: "Please fill all password fields correctly", type: "error" });
+        return;
+      }
+      if (!isNewPasswordStrong) {
+        setMessage({ text: "New password must match the signup password rules", type: "error" });
+        return;
+      }
+    }
+
+    if (action === "delete") {
+      if (!deletePassword) {
+        setMessage({ text: "Password required to delete account", type: "error" });
+        return;
+      }
+      if (!confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
+        return;
+      }
+    }
+
+    if (action === "address" && (!streetAddress || !road || !city || !pincode)) {
+      setMessage({ text: "Please complete the required address fields", type: "error" });
+      return;
+    }
+
+    setOtpSending(true);
     try {
-      const response = await fetch("/api/auth/clinic/change-phone", {
-        method: "PUT",
+      const response = await fetch("/api/auth/clinic/send-profile-otp", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clinic_id: loggedInClinicId,
-          new_phone: phone,
-        }),
+        body: JSON.stringify({ clinic_id: loggedInClinicId }),
       });
 
       if (response.ok) {
-        setMessage({ text: "Phone number updated successfully!", type: "success" });
+        setPendingAction(action);
+        setOtpCode("");
+        setOtpDialogOpen(true);
+        setMessage({ text: "OTP sent to your email", type: "success" });
       } else {
         const error = await response.json();
-        setMessage({ text: error.detail || "Failed to update phone number", type: "error" });
+        setMessage({ text: error.detail || "Failed to send OTP", type: "error" });
       }
-    } catch (error) {
+    } catch {
       setMessage({ text: "Network error. Please try again.", type: "error" });
+    } finally {
+      setOtpSending(false);
     }
   };
 
@@ -215,61 +293,56 @@ const ClinicProfile = () => {
     }
   };
 
-  const handleUpdateProfile = async () => {
+  const handleUpdateProfile = async (verifiedOtpCode?: string) => {
     if (!loggedInClinicId) {
       setMessage({ text: "No logged-in clinic found", type: "error" });
-      return;
+      return false;
     }
 
     try {
-      // Only update address and images - NOT coordinates
-      // Coordinates are handled separately via handleSaveLocation
+      const payload: Record<string, unknown> = {
+        clinic_id: loggedInClinicId,
+        image_urls: imageUrls,
+      };
+
+      if (verifiedOtpCode) {
+        payload.address = address || dbProfile?.address;
+        payload.street_address = streetAddress || dbProfile?.street_address;
+        payload.road = road || dbProfile?.road;
+        payload.layout = layout || dbProfile?.layout;
+        payload.section = section || dbProfile?.section;
+        payload.city = city || dbProfile?.city;
+        payload.pincode = pincode || dbProfile?.pincode;
+        payload.otp_code = verifiedOtpCode;
+      }
+
       const response = await fetch("/api/auth/clinic/update-profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clinic_id: loggedInClinicId,
-          address: address || dbProfile?.address,
-          // Structured address fields
-          street_address: streetAddress || dbProfile?.street_address,
-          road: road || dbProfile?.road,
-          layout: layout || dbProfile?.layout,
-          section: section || dbProfile?.section,
-          city: city || dbProfile?.city,
-          pincode: pincode || dbProfile?.pincode,
-          image_urls: imageUrls,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (response.ok) {
-        setMessage({
-          text: "Address updated! âš ï¸ Please update your map location to match the new address.",
-          type: "success"
-        });
-        // Auto-open location picker after 2 seconds to encourage coordinate update
-        setTimeout(() => {
+        if (verifiedOtpCode) {
+          setMessage({
+            text: "Address updated. Please pin your clinic on the map again.",
+            type: "success"
+          });
+          setLocationCoords(null);
           setShowLocationModal(true);
-        }, 2000);
-        const dataResponse = await fetch(`/api/auth/clinic/data?clinic_id=${loggedInClinicId}`);
-        if (dataResponse.ok) {
-          const data = await dataResponse.json();
-          setDbProfile(data);
-          setAddress(data.full_formatted_address || data.address || "");
-          // Refresh structured address fields
-          setStreetAddress(data.street_address || "");
-          setRoad(data.road || "");
-          setLayout(data.layout || "");
-          setSection(data.section || "");
-          setCity(data.city || "");
-          setPincode(data.pincode || "");
-          setImageUrls(data.image_urls || []);
+        } else {
+          setMessage({ text: "Profile updated successfully!", type: "success" });
         }
+        await refreshClinicProfile();
+        return true;
       } else {
         const error = await response.json();
         setMessage({ text: error.detail || "Failed to update profile", type: "error" });
+        return false;
       }
     } catch (error) {
       setMessage({ text: "Network error. Please try again.", type: "error" });
+      return false;
     }
   };
 
@@ -341,79 +414,91 @@ const ClinicProfile = () => {
     );
   };
 
-  const handleChangePassword = async () => {
-    if (!loggedInClinicId) {
-      setMessage({ text: "No logged-in clinic found", type: "error" });
+  const handleVerifiedAction = async () => {
+    if (!loggedInClinicId || !pendingAction) {
+      setMessage({ text: "No pending action found", type: "error" });
       return;
     }
 
-    if (!currentPassword || !newPassword || newPassword !== confirmPassword) {
-      setMessage({ text: "Please fill all password fields correctly", type: "error" });
+    if (!otpCode.trim()) {
+      setMessage({ text: "Please enter the OTP", type: "error" });
       return;
     }
 
+    setOtpSubmitting(true);
     try {
-      const response = await fetch("/api/auth/clinic/change-password", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clinic_id: loggedInClinicId,
-          current_password: currentPassword,
-          new_password: newPassword,
-        }),
-      });
+      let response: Response;
 
-      if (response.ok) {
+      if (pendingAction === "phone") {
+        response = await fetch("/api/auth/clinic/change-phone", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clinic_id: loggedInClinicId,
+            new_phone: phone,
+            otp_code: otpCode,
+          }),
+        });
+      } else if (pendingAction === "password") {
+        response = await fetch("/api/auth/clinic/change-password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clinic_id: loggedInClinicId,
+            current_password: currentPassword,
+            new_password: newPassword,
+            otp_code: otpCode,
+          }),
+        });
+      } else if (pendingAction === "address") {
+        const success = await handleUpdateProfile(otpCode);
+        if (success) {
+          setOtpDialogOpen(false);
+          setOtpCode("");
+          setPendingAction(null);
+        }
+        return;
+      } else {
+        response = await fetch("/api/auth/clinic/delete", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clinic_id: loggedInClinicId,
+            password: deletePassword,
+            confirmation: "DELETE",
+            otp_code: otpCode,
+          }),
+        });
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        setMessage({ text: errorData.detail || "Action failed", type: "error" });
+        return;
+      }
+
+      if (pendingAction === "phone") {
+        setMessage({ text: "Phone number updated successfully!", type: "success" });
+        await refreshClinicProfile();
+      } else if (pendingAction === "password") {
         setMessage({ text: "Password changed successfully!", type: "success" });
         setCurrentPassword("");
         setNewPassword("");
         setConfirmPassword("");
       } else {
-        const error = await response.json();
-        setMessage({ text: error.detail || "Failed to change password", type: "error" });
-      }
-    } catch (error) {
-      setMessage({ text: "Network error. Please try again.", type: "error" });
-    }
-  };
-
-  const handleDeleteAccount = async () => {
-    if (!loggedInClinicId) {
-      setMessage({ text: "No logged-in clinic found", type: "error" });
-      return;
-    }
-
-    const password = prompt("Enter your password to delete account:");
-    if (!password) {
-      setMessage({ text: "Password required to delete account", type: "error" });
-      return;
-    }
-
-    if (!confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/auth/clinic/delete`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clinic_id: loggedInClinicId,
-          password: password,
-          confirmation: "DELETE"
-        }),
-      });
-
-      if (response.ok) {
         setMessage({ text: "Account deleted successfully", type: "success" });
         localStorage.clear();
         navigate("/clinic/login");
-      } else {
-        const errorData = await response.json();
-        setMessage({ text: errorData.detail || "Failed to delete account", type: "error" });
+        return;
       }
-    } catch (error) {
-      setMessage({ text: "Error deleting account", type: "error" });
+
+      setOtpDialogOpen(false);
+      setOtpCode("");
+      setPendingAction(null);
+    } catch {
+      setMessage({ text: "Network error. Please try again.", type: "error" });
+    } finally {
+      setOtpSubmitting(false);
     }
   };
 
@@ -629,201 +714,191 @@ const ClinicProfile = () => {
           )}
         </section>
 
-        <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
-            <div>
-              <Label htmlFor="phone">New Phone Number</Label>
-              <Input id="phone" type="tel" placeholder="+91 98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-2" />
-            </div>
-            <Button onClick={handleChangePhone} disabled={!phone} className="w-full">
-              Update Phone Number
-            </Button>
-          </ProfileCard>
-
-          <ProfileCard icon={MapPin} title="Change Address" description="Update clinic location">
-            <div className="rounded-2xl bg-secondary p-4 text-sm text-foreground">
-              <p className="text-muted-foreground">Current Address</p>
-              <p className="mt-1 font-medium">{dbProfile?.full_formatted_address || dbProfile?.address || "Not set"}</p>
-              {locationCoords ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Coordinates: {locationCoords.latitude}, {locationCoords.longitude}
-                </p>
-              ) : (
-                <p className="mt-1 text-xs text-amber-600 font-medium">
-                  âš ï¸ Location not pinned. Please pin your location on the map.
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-foreground">Clinic Address Details</p>
-
+        <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
+          <div className="lg:col-span-4">
+            <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
               <div>
-                <Label htmlFor="street_address" className="text-xs">Street / Building Number *</Label>
-                <Input
-                  id="street_address"
-                  placeholder="#123, ABC Building"
-                  value={streetAddress}
-                  onChange={(e) => setStreetAddress(e.target.value)}
-                  className="mt-1"
-                />
+                <Label htmlFor="phone">New Phone Number</Label>
+                <Input id="phone" type="tel" placeholder="+91 98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-2" />
               </div>
-
-              <div>
-                <Label htmlFor="road" className="text-xs">Road / Street Name *</Label>
-                <Input
-                  id="road"
-                  placeholder="Main Road, MG Road"
-                  value={road}
-                  onChange={(e) => setRoad(e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="layout" className="text-xs">Layout / Area (Optional)</Label>
-                  <Input
-                    id="layout"
-                    placeholder="Vidyaranyapura"
-                    value={layout}
-                    onChange={(e) => setLayout(e.target.value)}
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="section" className="text-xs">Section / Block (Optional)</Label>
-                  <Input
-                    id="section"
-                    placeholder="A Block, 1st Stage"
-                    value={section}
-                    onChange={(e) => setSection(e.target.value)}
-                    className="mt-1"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="city" className="text-xs">City *</Label>
-                  <Input
-                    id="city"
-                    placeholder="Bangalore"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="pincode" className="text-xs">Pincode *</Label>
-                  <Input
-                    id="pincode"
-                    placeholder="560001"
-                    value={pincode}
-                    onChange={(e) => setPincode(e.target.value)}
-                    className="mt-1"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <Button
-              onClick={handleUpdateProfile}
-              disabled={!streetAddress || !road || !city || !pincode}
-              className="w-full"
-            >
-              Update Address
-            </Button>
-
-            <div className="border-t border-border my-2"></div>
-            {dbProfile?.address && !locationCoords && (
-              <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800 mb-2">
-                <span className="font-semibold">âš ï¸ Action needed:</span> You have an address but no map location. Please pin your coordinates.
-              </div>
-            )}
-            <Button onClick={() => setShowLocationModal(true)} variant={dbProfile?.address && !locationCoords ? "default" : "outline"} className="w-full">
-              <MapPinned className="mr-2 h-4 w-4" />
-              {locationCoords ? "Update Map Location" : "Pin Location on Map"}
-            </Button>
-          </ProfileCard>
-
-          <ProfileCard icon={ImagePlus} title="Clinic Images" description="Upload and manage up to 5 images">
-            {imageUrls.filter(Boolean).length > 0 && (
-              <div className="grid grid-cols-3 gap-2">
-                {imageUrls.map((url, idx) =>
-                  url ? (
-                    <div key={idx} className="relative">
-                      <img src={`/api${url}`} alt={`Clinic ${idx + 1}`} className="h-20 w-full rounded-lg object-cover" />
-                      <button
-                        onClick={() => handleRemoveImage(idx)}
-                        className="absolute -right-1 -top-1 rounded-full bg-red-500 p-0.5 text-white"
-                        title="Remove image"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ) : null
-                )}
-              </div>
-            )}
-
-            {imageUrls.length < 5 && (
-              <div className="space-y-3">
-                <input type="file" id="file-upload" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
-                <label
-                  htmlFor="file-upload"
-                  className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-white px-4 py-3 transition hover:bg-secondary"
-                >
-                  <ImagePlus className="h-5 w-5 text-primary" />
-                  <span className="truncate text-sm text-muted-foreground">
-                    {selectedFiles.length > 0 ? `${selectedFiles.length} file(s) selected` : "Choose files..."}
-                  </span>
-                </label>
-                <Button onClick={handleUploadImage} variant="outline" disabled={selectedFiles.length === 0 || uploading} className="w-full">
-                  {uploading ? "Uploading..." : "Upload Images"}
-                </Button>
-              </div>
-            )}
-
-            <p className="text-xs text-muted-foreground">{imageUrls.length}/5 images stored</p>
-            <Button onClick={handleUpdateProfile} className="w-full">
-              Save Images
-            </Button>
-          </ProfileCard>
-
-          <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
-            <div>
-              <Label htmlFor="current-pw">Current Password</Label>
-              <Input id="current-pw" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="mt-2" />
-            </div>
-            <div>
-              <Label htmlFor="new-pw">New Password</Label>
-              <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
-            </div>
-            <div>
-              <Label htmlFor="confirm-pw">Confirm New Password</Label>
-              <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
-            </div>
-            <Button onClick={handleChangePassword} disabled={!currentPassword || !newPassword || newPassword !== confirmPassword} className="w-full">
-              Change Password
-            </Button>
-          </ProfileCard>
-
-          <div className="lg:col-span-2">
-            <ProfileCard icon={QrCode} title="QR Code" description="Show QR code for patients to join queue">
-              <Button onClick={() => setShowQrDialog(true)} className="w-fit bg-primary text-white hover:bg-primary/90">
-                <QrCode className="mr-2 h-4 w-4" />
-                Show QR Code
+              <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full">
+                Verify OTP and Update
               </Button>
             </ProfileCard>
           </div>
 
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-8">
+            <ProfileCard icon={MapPin} title="Change Address" description="Update clinic location">
+              <div className="rounded-2xl bg-secondary p-4 text-sm text-foreground">
+                <p className="text-muted-foreground">Current Address</p>
+                <p className="mt-1 font-medium">{dbProfile?.full_formatted_address || dbProfile?.address || "Not set"}</p>
+                {locationCoords ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Coordinates: {locationCoords.latitude}, {locationCoords.longitude}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs font-medium text-amber-600">
+                    Location not pinned. Please pin your location on the map.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Clinic Address Details</p>
+
+                <div>
+                  <Label htmlFor="street_address" className="text-xs">Street / Building Number *</Label>
+                  <Input id="street_address" placeholder="#123, ABC Building" value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} className="mt-1" />
+                </div>
+
+                <div>
+                  <Label htmlFor="road" className="text-xs">Road / Street Name *</Label>
+                  <Input id="road" placeholder="Main Road, MG Road" value={road} onChange={(e) => setRoad(e.target.value)} className="mt-1" />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="layout" className="text-xs">Layout / Area (Optional)</Label>
+                    <Input id="layout" placeholder="Vidyaranyapura" value={layout} onChange={(e) => setLayout(e.target.value)} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label htmlFor="section" className="text-xs">Section / Block (Optional)</Label>
+                    <Input id="section" placeholder="A Block, 1st Stage" value={section} onChange={(e) => setSection(e.target.value)} className="mt-1" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="city" className="text-xs">City *</Label>
+                    <Input id="city" placeholder="Bangalore" value={city} onChange={(e) => setCity(e.target.value)} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label htmlFor="pincode" className="text-xs">Pincode *</Label>
+                    <Input id="pincode" placeholder="560001" value={pincode} onChange={(e) => setPincode(e.target.value)} className="mt-1" />
+                  </div>
+                </div>
+              </div>
+
+              <Button onClick={() => void sendProfileOtp("address")} disabled={!streetAddress || !road || !city || !pincode || otpSending} className="w-full">
+                Verify OTP and Update Address
+              </Button>
+
+              <div className="my-2 border-t border-border"></div>
+              {dbProfile?.address && !locationCoords && (
+                <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                  <span className="font-semibold">Action needed:</span> You have an address but no map location. Please pin your coordinates.
+                </div>
+              )}
+              <Button onClick={() => setShowLocationModal(true)} variant={dbProfile?.address && !locationCoords ? "default" : "outline"} className="w-full">
+                <MapPinned className="mr-2 h-4 w-4" />
+                {locationCoords ? "Update Map Location" : "Pin Location on Map"}
+              </Button>
+            </ProfileCard>
+          </div>
+
+          <div className="lg:col-span-7">
+            <ProfileCard icon={ImagePlus} title="Clinic Images" description="Upload and manage up to 5 images">
+              {imageUrls.filter(Boolean).length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {imageUrls.map((url, idx) =>
+                    url ? (
+                      <div key={idx} className="relative">
+                        <img src={`/api${url}`} alt={`Clinic ${idx + 1}`} className="h-20 w-full rounded-lg object-cover" />
+                        <button
+                          onClick={() => handleRemoveImage(idx)}
+                          className="absolute -right-1 -top-1 rounded-full bg-red-500 p-0.5 text-white"
+                          title="Remove image"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+              )}
+
+              {imageUrls.length < 5 && (
+                <div className="space-y-3">
+                  <input type="file" id="file-upload" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
+                  <label
+                    htmlFor="file-upload"
+                    className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-white px-4 py-3 transition hover:bg-secondary"
+                  >
+                    <ImagePlus className="h-5 w-5 text-primary" />
+                    <span className="truncate text-sm text-muted-foreground">
+                      {selectedFiles.length > 0 ? `${selectedFiles.length} file(s) selected` : "Choose files..."}
+                    </span>
+                  </label>
+                  <Button onClick={handleUploadImage} variant="outline" disabled={selectedFiles.length === 0 || uploading} className="w-full">
+                    {uploading ? "Uploading..." : "Upload Images"}
+                  </Button>
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">{imageUrls.length}/5 images stored</p>
+              <Button onClick={() => void handleUpdateProfile()} className="w-full">
+                Save Images
+              </Button>
+            </ProfileCard>
+          </div>
+
+          <div className="lg:col-span-5">
+            <ProfileCard icon={QrCode} title="QR Code" description="Show QR code for patients to join queue">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-border bg-secondary/40 p-4">
+                  <p className="text-sm font-medium text-foreground">Quick access for patients</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Open a larger QR preview or download it for the front desk.</p>
+                </div>
+                <Button onClick={() => setShowQrDialog(true)} className="w-full bg-primary text-white hover:bg-primary/90">
+                  <QrCode className="mr-2 h-4 w-4" />
+                  Show QR Code
+                </Button>
+              </div>
+            </ProfileCard>
+          </div>
+
+          <div className="lg:col-span-7">
+            <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
+              <div>
+                <Label htmlFor="current-pw">Current Password</Label>
+                <Input id="current-pw" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="mt-2" />
+              </div>
+              <div>
+                <Label htmlFor="new-pw">New Password</Label>
+                <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+              </div>
+              {newPassword && <PasswordRules checks={passwordChecks} />}
+              <div>
+                <Label htmlFor="confirm-pw">Confirm New Password</Label>
+                <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+              </div>
+              <Button
+                onClick={() => void sendProfileOtp("password")}
+                disabled={!currentPassword || !newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
+                className="w-full"
+              >
+                Verify OTP and Change Password
+              </Button>
+            </ProfileCard>
+          </div>
+
+          <div className="lg:col-span-5">
             <ProfileCard icon={Trash2} title="Delete Account" description="Permanently delete your clinic account and all data" danger>
+              <div>
+                <Label htmlFor="delete-clinic-pw">Enter Password to Confirm</Label>
+                <Input
+                  id="delete-clinic-pw"
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="mt-2"
+                />
+              </div>
               <div className="flex flex-wrap gap-3">
-                <Button onClick={handleDeleteAccount} className="bg-red-600 text-white hover:bg-red-700">
+                <Button onClick={() => void sendProfileOtp("delete")} disabled={!deletePassword || otpSending} className="bg-red-600 text-white hover:bg-red-700">
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Account
+                  Verify OTP and Delete
                 </Button>
                 <Button variant="outline" onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />
@@ -870,6 +945,46 @@ const ClinicProfile = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={otpDialogOpen}
+        onOpenChange={(open) => {
+          setOtpDialogOpen(open);
+          if (!open) {
+            setOtpCode("");
+            setPendingAction(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Verify OTP</DialogTitle>
+            <DialogDescription>
+              Enter the OTP sent to {dbProfile?.email || "your email"} to continue.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="clinic-profile-otp">OTP Code</Label>
+            <Input
+              id="clinic-profile-otp"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="Enter 6-digit OTP"
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value)}
+              className="mt-2"
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={() => pendingAction && void sendProfileOtp(pendingAction)} disabled={otpSending || otpSubmitting || !pendingAction}>
+              Resend OTP
+            </Button>
+            <Button onClick={() => void handleVerifiedAction()} disabled={!otpCode || otpSubmitting}>
+              {otpSubmitting ? "Verifying..." : "Verify and Continue"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <LocationPickerModal
         isOpen={showLocationModal}
         onClose={() => setShowLocationModal(false)}
@@ -879,6 +994,24 @@ const ClinicProfile = () => {
     </div>
   );
 };
+
+const PasswordRules = ({ checks }: { checks: ReturnType<typeof getPasswordChecks> }) => (
+  <div className="space-y-2 rounded-2xl bg-secondary/60 p-4">
+    <p className="text-xs text-muted-foreground">Password must contain:</p>
+    <PasswordRule ok={checks.length} text="At least 8 characters" />
+    <PasswordRule ok={checks.uppercase} text="One uppercase letter (A-Z)" />
+    <PasswordRule ok={checks.lowercase} text="One lowercase letter (a-z)" />
+    <PasswordRule ok={checks.number} text="One number (0-9)" />
+    <PasswordRule ok={checks.special} text="One special character" />
+  </div>
+);
+
+const PasswordRule = ({ ok, text }: { ok: boolean; text: string }) => (
+  <div className="flex items-center text-xs text-foreground">
+    {ok ? <CheckCircle className="mr-2 h-3.5 w-3.5 text-green-500" /> : <XCircle className="mr-2 h-3.5 w-3.5 text-red-500" />}
+    {text}
+  </div>
+);
 
 const ProfileStat = ({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) => (
   <div className="rounded-[22px] bg-white/10 px-4 py-4">

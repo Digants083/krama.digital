@@ -10,7 +10,8 @@ class ClinicSignup(BaseModel):
     email: EmailStr
     password: str
     phone: str
-    category: str  # Clinic category (e.g., general, dental, skin)
+    category: Optional[str] = None  # Backward-compatible single category
+    categories: Optional[List[str]] = None  # Multi-select categories
     address: str  # Full combined address
     # Individual address components
     street_address: Optional[str] = None  # Street/Building Number
@@ -68,23 +69,35 @@ class OTPVerifyResponse(BaseModel):
     success: bool
     verified: bool
 
+class PatientProfileOTPRequest(BaseModel):
+    patient_email: EmailStr
+
+class ClinicProfileOTPRequest(BaseModel):
+    clinic_id: str
+
 # Profile Management Schemas
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
-    patient_email: str
+    otp_code: str
+    patient_email: Optional[str] = None
+    clinic_id: Optional[str] = None
 
 class ChangePhoneRequest(BaseModel):
     new_phone: str
-    patient_email: str
+    otp_code: str
+    patient_email: Optional[str] = None
+    clinic_id: Optional[str] = None
 
 class DeleteAccountRequest(BaseModel):
     password: str
+    otp_code: str
     confirmation: str = "DELETE"
-    patient_email: str
+    patient_email: Optional[str] = None
 
 class DeleteClinicRequest(BaseModel):
     password: str
+    otp_code: str
     confirmation: str = "DELETE"
     clinic_id: str
 

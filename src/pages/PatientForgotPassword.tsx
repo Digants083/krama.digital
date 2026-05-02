@@ -1,5 +1,5 @@
 ﻿import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,11 @@ import { Activity, Mail, ArrowLeft, ArrowRight } from "lucide-react";
 
 const PatientForgotPassword = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const role = location.pathname.startsWith("/clinic") ? "clinic" : "patient";
+  const roleLabel = role === "clinic" ? "Clinic" : "Patient";
+  const loginPath = `/${role}/login`;
+  const verifyPath = `/${role}/verify-reset-otp`;
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -26,7 +31,7 @@ const PatientForgotPassword = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/patient/forgot-password", {
+      const response = await fetch(`/api/auth/${role}/forgot-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -46,10 +51,11 @@ const PatientForgotPassword = () => {
       setMessage("OTP sent to your email. Please check your inbox.");
       // Store email in sessionStorage for next steps
       sessionStorage.setItem("reset_email", email);
+      sessionStorage.setItem("reset_role", role);
       
       // Navigate to OTP verification after 2 seconds
       setTimeout(() => {
-        navigate("/patient/verify-reset-otp");
+        navigate(verifyPath);
       }, 2000);
     } catch (err) {
       setError("Network error. Please try again.");
@@ -82,7 +88,7 @@ const PatientForgotPassword = () => {
                 Forgot Password
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Enter your email to receive a password reset OTP.
+                Enter your {roleLabel.toLowerCase()} email to receive a password reset OTP.
               </p>
             </div>
 
@@ -121,7 +127,7 @@ const PatientForgotPassword = () => {
 
             <div className="mt-6 text-center">
               <Link
-                to="/patient/login"
+                to={loginPath}
                 className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="mr-1 h-4 w-4" />

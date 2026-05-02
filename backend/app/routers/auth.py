@@ -4,7 +4,7 @@ import string
 import re
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from pydantic import BaseModel, EmailStr
@@ -21,11 +21,13 @@ from app.services.geocoding_service import get_coordinates_from_address, get_coo
 from app.schemas import (
     ClinicSignup, ClinicLogin, PatientSignup, PatientLogin,
     ChangePasswordRequest, ChangePhoneRequest, DeleteAccountRequest, DeleteClinicRequest,
-    AuthResponse, SendOTPRequest, VerifyOTPRequest, OTPResponse, OTPVerifyResponse
+    AuthResponse, SendOTPRequest, VerifyOTPRequest, OTPResponse, OTPVerifyResponse,
+    PatientProfileOTPRequest, ClinicProfileOTPRequest
 )
 from app.security import hash_password, verify_password
 from app.services.otp_service import OTPService
 from fastapi.responses import JSONResponse
+from app.services.email_service import send_otp as send_otp_email
 
 
 def validate_password_strength(password: str) -> tuple[bool, str]:
@@ -69,7 +71,75 @@ def generate_patient_id():
     
     return f"PA-{letters}{alphanumeric}"
 
+
+async def _send_profile_otp(db: AsyncSession, email: str) -> None:
+    existing_result = await db.execute(select(OTPVerification).where(OTPVerification.email == email))
+    existing_otp = existing_result.scalar_one_or_none()
+
+    if existing_otp and not existing_otp.is_verified:
+        time_since_creation = datetime.utcnow() - existing_otp.created_at.replace(tzinfo=None) if existing_otp.created_at.tzinfo else datetime.utcnow() - existing_otp.created_at
+        if time_since_creation.total_seconds() < OTPService.RESEND_COOLDOWN_MINUTES * 60:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Please wait before requesting a new OTP"
+            )
+
+    if existing_otp:
+        await db.delete(existing_otp)
+        await db.commit()
+
+    otp_code = OTPService.generate_otp()
+    otp_record = OTPVerification(
+        email=email,
+        otp_code=OTPService.hash_otp(otp_code),
+        expires_at=datetime.utcnow().replace(microsecond=0) + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES),
+        user_name="",
+        user_password="",
+        user_phone=""
+    )
+    db.add(otp_record)
+    await db.commit()
+
+    if not send_otp_email(email, otp_code):
+        await db.delete(otp_record)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send OTP email. Please try again."
+        )
+
+
+async def _verify_profile_otp_or_raise(db: AsyncSession, email: str, otp_code: str) -> None:
+    is_valid, message = await OTPService.verify_otp_only(db, email.strip().lower(), otp_code.strip())
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+
+    normalized_category, normalized_categories = _normalize_clinic_categories(request.category, request.categories)
+    if not normalized_categories:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please select at least one clinic category"
+        )
+    await OTPService.delete_otp(db, email.strip().lower())
+
 router = APIRouter(prefix="/auth", tags=["authentication"])
+
+
+def _normalize_clinic_categories(
+    category: Optional[str],
+    categories: Optional[list[str]],
+) -> tuple[str, list[str]]:
+    if categories:
+        clean_categories = [c.strip() for c in categories if c and c.strip()]
+        if clean_categories:
+            return ", ".join(clean_categories), clean_categories
+    normalized = (category or "").strip()
+    if normalized:
+        return normalized, [normalized]
+    return "", []
 
 @router.post("/clinic/signup", response_model=AuthResponse)
 async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(get_db)):
@@ -121,6 +191,13 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
         # Generate unique clinic ID
         clinic_id = generate_clinic_id()
 
+        normalized_category, normalized_categories = _normalize_clinic_categories(clinic_data.category, clinic_data.categories)
+        if not normalized_categories:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please select at least one clinic category"
+            )
+
         # Create pending registration with all address components and doctor details
         new_pending_registration = PendingClinicRegistration(
             clinic_id=clinic_id,
@@ -128,7 +205,8 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
             email=clinic_data.email,
             password=hashed_password,
             phone=clinic_data.phone,
-            category=clinic_data.category,
+            category=normalized_category,
+            categories=normalized_categories,
             street_address=clinic_data.street_address or clinic_data.address.split(",")[0] if "," in clinic_data.address else clinic_data.address,
             road=clinic_data.road or "",
             layout=clinic_data.layout,
@@ -179,7 +257,8 @@ class ClinicSignupOTPRequest(BaseModel):
     clinic_name: str
     password: str
     phone: str
-    category: str
+    category: Optional[str] = None
+    categories: Optional[list[str]] = None
     address: str
     street_address: Optional[str] = None
     road: Optional[str] = None
@@ -201,7 +280,8 @@ class ClinicVerifySignupRequest(BaseModel):
     clinic_name: str
     password: str
     phone: str
-    category: str
+    category: Optional[str] = None
+    categories: Optional[list[str]] = None
     address: str
     street_address: Optional[str] = None
     road: Optional[str] = None
@@ -266,6 +346,13 @@ async def clinic_send_signup_otp(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
+        )
+
+    normalized_category, normalized_categories = _normalize_clinic_categories(request.category, request.categories)
+    if not normalized_categories:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please select at least one clinic category"
         )
 
     # Replace any stale pending OTP before creating a fresh one for clinic signup.
@@ -335,6 +422,13 @@ async def clinic_verify_signup(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=message
         )
+
+    normalized_category, normalized_categories = _normalize_clinic_categories(request.category, request.categories)
+    if not normalized_categories:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please select at least one clinic category"
+        )
     
     try:
         # Check again if email exists (might have been registered during OTP wait)
@@ -376,7 +470,8 @@ async def clinic_verify_signup(
             email=email,
             password=hashed_password,
             phone=request.phone,
-            category=request.category,
+            category=normalized_category,
+            categories=normalized_categories,
             street_address=request.street_address or request.address.split(",")[0] if "," in request.address else request.address,
             road=request.road or "",
             layout=request.layout,
@@ -599,6 +694,8 @@ async def get_clinic_data(
         "clinic_name": clinic.clinic_name,
         "email": clinic.email,
         "phone": clinic.phone,
+        "category": clinic.category or "",
+        "categories": clinic.categories or ([] if not clinic.category else [clinic.category]),
         "address": clinic.address,
         "street_address": clinic.street_address,
         "road": clinic.road,
@@ -652,8 +749,12 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
                 clinic.longitude = longitude
                 clinics_updated = True
 
-        # Use actual category as specialization, or default to "general"
-        specializations = [clinic.category.lower()] if clinic.category else ["general"]
+        # Support single or comma-separated multi categories.
+        specializations = [
+            part.strip().lower()
+            for part in (clinic.categories or ([clinic.category] if clinic.category else []))
+            if part and part.strip()
+        ] or ["general"]
         
         # Build doctors array from actual doctor_name
         doctors = []
@@ -678,6 +779,7 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
             "city": clinic.city or "",
             "pincode": clinic.pincode,
             "category": clinic.category or "",
+            "categories": clinic.categories or ([] if not clinic.category else [clinic.category]),
             "doctor_name": clinic.doctor_name or "",
             "specialization": clinic.specialization or "",
             "experience": clinic.experience or "",
@@ -696,12 +798,39 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
     return {"clinics": clinic_list}
 
 # Clinic Profile Management Endpoints
+@router.post("/clinic/send-profile-otp", response_model=OTPResponse)
+async def clinic_send_profile_otp(
+    request: ClinicProfileOTPRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.clinic_id))
+    clinic = result.scalar_one_or_none()
+
+    if not clinic:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Clinic not found"
+        )
+
+    await _send_profile_otp(db, clinic.email.strip().lower())
+    return OTPResponse(
+        message=f"OTP sent to {clinic.email}",
+        success=True,
+        expires_in=OTPService.OTP_EXPIRY_MINUTES * 60
+    )
+
 @router.put("/clinic/change-phone")
 async def clinic_change_phone(
     request: ChangePhoneRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.patient_email))
+    if not request.clinic_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="clinic_id is required"
+        )
+
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.clinic_id))
     clinic = result.scalar_one_or_none()
     
     if not clinic:
@@ -710,7 +839,8 @@ async def clinic_change_phone(
             detail="Clinic not found"
         )
     
-    # Update phone
+    await _verify_profile_otp_or_raise(db, clinic.email, request.otp_code)
+
     clinic.phone = request.new_phone
     await db.commit()
     
@@ -721,7 +851,13 @@ async def clinic_change_password(
     request: ChangePasswordRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.patient_email))
+    if not request.clinic_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="clinic_id is required"
+        )
+
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.clinic_id))
     clinic = result.scalar_one_or_none()
     
     if not clinic:
@@ -736,8 +872,16 @@ async def clinic_change_password(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect"
         )
-    
-    # Update password
+
+    valid, error_msg = validate_password_strength(request.new_password)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg
+        )
+
+    await _verify_profile_otp_or_raise(db, clinic.email, request.otp_code)
+
     clinic.password = hash_password(request.new_password)
     await db.commit()
     
@@ -807,6 +951,15 @@ async def update_clinic_profile(
         for value in [address, street_address, road, layout, section, city, pincode]
     )
 
+    if address_changed:
+        otp_code = request.get("otp_code")
+        if not otp_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="otp_code is required to update address"
+            )
+        await _verify_profile_otp_or_raise(db, clinic.email, otp_code)
+
     # Build full formatted address from structured fields
     full_parts = []
     if clinic.street_address:
@@ -826,19 +979,9 @@ async def update_clinic_profile(
     clinic.address = full_formatted_address
     
     if address_changed:
-        # Geocode the address to get fresh coordinates
-        lat, lon = get_coordinates_from_structured_address(
-            clinic.street_address or "",
-            clinic.road or "",
-            clinic.layout,
-            clinic.section,
-            clinic.city or "",
-            clinic.pincode or ""
-        )
-        # Only update if we actually found something
-        if lat and lon:
-            clinic.latitude = lat
-            clinic.longitude = lon
+        clinic.latitude = None
+        clinic.longitude = None
+        clinic.has_pinned_location = False
     
     await db.commit()
     
@@ -1141,14 +1284,37 @@ async def clinic_delete_account(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confirmation must be 'DELETE'"
         )
-    
-    # Delete clinic account
+
+    await _verify_profile_otp_or_raise(db, clinic.email, request.otp_code)
+
     await db.delete(clinic)
     await db.commit()
     
     return {"message": "Account deleted successfully"}
 
 # Patient Profile Management Endpoints
+@router.post("/patient/send-profile-otp", response_model=OTPResponse)
+async def patient_send_profile_otp(
+    request: PatientProfileOTPRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    email = request.patient_email.strip().lower()
+    result = await db.execute(select(Patient).where(Patient.email == email))
+    patient = result.scalar_one_or_none()
+
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient not found"
+        )
+
+    await _send_profile_otp(db, email)
+    return OTPResponse(
+        message=f"OTP sent to {email}",
+        success=True,
+        expires_in=OTPService.OTP_EXPIRY_MINUTES * 60
+    )
+
 @router.put("/patient/change-password")
 async def patient_change_password(
     request: ChangePasswordRequest,
@@ -1169,8 +1335,16 @@ async def patient_change_password(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect"
         )
-    
-    # Update password
+
+    valid, error_msg = validate_password_strength(request.new_password)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg
+        )
+
+    await _verify_profile_otp_or_raise(db, patient.email, request.otp_code)
+
     patient.password = hash_password(request.new_password)
     await db.commit()
     
@@ -1190,7 +1364,8 @@ async def patient_change_phone(
             detail="Patient not found"
         )
     
-    # Update phone
+    await _verify_profile_otp_or_raise(db, patient.email, request.otp_code)
+
     patient.phone = request.new_phone
     await db.commit()
     
@@ -1223,8 +1398,9 @@ async def patient_delete_account(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confirmation must be 'DELETE'"
         )
-    
-    # Delete patient account
+
+    await _verify_profile_otp_or_raise(db, patient.email, request.otp_code)
+
     await db.delete(patient)
     await db.commit()
     
@@ -1568,11 +1744,12 @@ async def create_appointment(
                         max_token = token_num
                 except Exception:
                     pass
-        
+
         result = await db.execute(
             select(CompletedAppointment).where(
                 CompletedAppointment.clinic_id == clinic_id,
-                CompletedAppointment.date == date
+                CompletedAppointment.date == date,
+                CompletedAppointment.slot_id == slot_id,
             )
         )
         for apt in result.scalars().all():
@@ -1605,25 +1782,78 @@ async def create_appointment(
         await db.commit()
         await db.refresh(new_appointment)
 
-        # New notification logic:
-        # - First patient: no immediate email (will get 10-min pre-slot email via scheduled task)
-        # - Second patient: gets "reach_auto" email immediately on booking
-        if not is_first_active_patient:
-            # This is the second patient - send "reach automatically" email
+        # Smart Reach-Turn Logic: Send immediate email if booking during active slot with 0-1 people ahead
+        try:
+            from datetime import datetime, timezone
+            from app.database.models import ClinicTimeSlot
             from app.services.email_service import send_queue_alert
 
-            email_to = (patient_email or "").strip()
-            if email_to:
-                email_sent = send_queue_alert(
-                    email_to,
-                    patient_name,
-                    clinic.clinic_name if clinic else clinic_id,
-                    "reach_auto",
-                )
-                if email_sent:
-                    new_appointment.notification_stage = "reach_auto"
-                    await db.commit()
-        
+            now = datetime.now()
+            current_time_decimal = now.hour + now.minute / 60.0
+
+            # Get clinic time slots
+            slot_result = await db.execute(
+                select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+            )
+            slot_record = slot_result.scalar_one_or_none()
+
+            if slot_record and slot_id is not None:
+                slots = slot_record.slots
+                if isinstance(slots, str):
+                    import json
+                    slots = json.loads(slots)
+                slots = list(slots or [])
+
+                # Find the slot being booked
+                slot_index = int(slot_id) - 1
+                if 0 <= slot_index < len(slots):
+                    slot = slots[slot_index]
+                    time_range = slot.get("time_range", [0, 0])
+                    start_time = time_range[0]
+                    end_time = time_range[1]
+
+                    # Check if booking is during active slot time
+                    if start_time <= current_time_decimal < end_time and slot.get("is_open"):
+                        # Count people ahead in same slot
+                        result = await db.execute(
+                            select(Appointment).where(
+                                Appointment.clinic_id == clinic_id,
+                                Appointment.date == date,
+                                Appointment.slot_id == slot_id,
+                                Appointment.status.in_(["booked", "serving"]),
+                                Appointment.id < new_appointment.id
+                            ).order_by(Appointment.id)
+                        )
+                        people_ahead = len(result.scalars().all())
+
+                        # If 0-1 people ahead, send immediate reach-turn email
+                        if people_ahead <= 1:
+                            clinic_result = await db.execute(
+                                select(Clinic).where(Clinic.clinic_id == clinic_id)
+                            )
+                            clinic = clinic_result.scalar_one_or_none()
+
+                            email_sent = send_queue_alert(
+                                patient_email,
+                                patient_name,
+                                clinic.clinic_name if clinic else clinic_id,
+                                "reach_turn",
+                                token_number=appointment_token,
+                                doctor_name=doctor_name or (clinic.doctor_name if clinic else ""),
+                                clinic_location=clinic.address if clinic else "",
+                                latitude=clinic.latitude if clinic else None,
+                                longitude=clinic.longitude if clinic else None,
+                            )
+
+                            if email_sent:
+                                # Set notification stage to prevent duplicate emails
+                                new_appointment.notification_stage = "reach_turn"
+                                await db.commit()
+                                await db.refresh(new_appointment)
+        except Exception as email_error:
+            # Don't fail the booking if email fails
+            print(f"Smart reach-turn email failed: {email_error}")
+
         return {
             "message": "Appointment booked successfully",
             "appointment_id": new_appointment.id,
@@ -1792,6 +2022,7 @@ async def get_clinic_appointments(
 @router.get("/appointments/today")
 async def get_today_appointments(
     clinic_id: str = Query(..., description="Clinic ID"),
+    slot_id: int | None = Query(None, description="Optional slot ID to view"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1821,7 +2052,6 @@ async def get_today_appointments(
 
     def _current_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> int | None:
         for idx, slot in enumerate(slots or []):
-            # Check if slot is open using the is_open field from slots JSON
             if not slot.get("is_open"):
                 continue
 
@@ -1833,7 +2063,6 @@ async def get_today_appointments(
     def _next_open_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> int | None:
         candidates: list[tuple[float, int]] = []
         for idx, slot in enumerate(slots or []):
-            # Check if slot is open using the is_open field from slots JSON
             if not slot.get("is_open"):
                 continue
 
@@ -1865,6 +2094,15 @@ async def get_today_appointments(
     if viewing_slot_id is None:
         next_index = _next_open_slot_index(slots, slot_array, current_time_decimal)
         viewing_slot_id = (next_index + 1) if next_index is not None else None
+
+    if slot_id is not None:
+        slot_index = slot_id - 1
+        if slot_index < 0 or slot_index >= len(slots):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid slot_id"
+            )
+        viewing_slot_id = slot_id
 
     if viewing_slot_id is None:
         return {"appointments": [], "total": 0, "active_slot_id": None, "viewing_slot_id": None}
@@ -1933,7 +2171,12 @@ async def get_today_appointments(
     # Sort by created_at time
     appointment_list.sort(key=lambda x: x["created_at"] or datetime.min)
 
-    return {"appointments": appointment_list, "total": len(appointment_list)}
+    return {
+        "appointments": appointment_list,
+        "total": len(appointment_list),
+        "active_slot_id": active_slot_id,
+        "viewing_slot_id": viewing_slot_id
+    }
 
 @router.delete("/appointments/{appointment_id}")
 async def delete_appointment(
@@ -1980,64 +2223,116 @@ async def get_queue_position(
 ):
     """
     Get queue position for a specific appointment.
-    Returns number of patients ahead, estimated wait time, and current position.
+    Returns the live queue position for the appointment's current slot.
+    Position is based on the active queue list order, not the token number.
     """
     from datetime import datetime
 
-    def parse_token_number(token: str | None) -> int:
-        if not token:
-            return 0
-        digits = "".join(ch for ch in token if ch.isdigit())
-        return int(digits) if digits else 0
-    
-    # Get today's date
     today = datetime.now().strftime("%Y-%m-%d")
-    
-    # Get all active appointments for this clinic today.
-    result = await db.execute(
+
+    current_result = await db.execute(
         select(Appointment).where(
             Appointment.clinic_id == clinic_id,
             Appointment.date == today,
-            Appointment.status.in_(["booked", "serving"])
+            Appointment.status.in_(["booked", "serving"]),
+            Appointment.id == appointment_id,
         )
     )
-    appointments = result.scalars().all()
-    appointments = sorted(
-        appointments,
-        key=lambda apt: (parse_token_number(apt.appointment_token), apt.id)
+    current_appointment = current_result.scalar_one_or_none()
+
+    if current_appointment is None:
+        current_result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.date == today,
+                Appointment.status.in_(["booked", "serving"]),
+                Appointment.appointment_token == appointment_token,
+            )
+        )
+        current_appointment = current_result.scalar_one_or_none()
+
+    if current_appointment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Appointment not found in active queue"
+        )
+
+    slot_id = current_appointment.slot_id
+
+    appointment_filters = [
+        Appointment.clinic_id == clinic_id,
+        Appointment.date == today,
+        Appointment.status.in_(["booked", "serving"]),
+    ]
+    qr_filters = [
+        QRAppointment.clinic_id == clinic_id,
+        QRAppointment.date == today,
+        QRAppointment.status.in_(["booked", "serving"]),
+    ]
+
+    if slot_id is not None:
+        appointment_filters.append(Appointment.slot_id == slot_id)
+        qr_filters.append(QRAppointment.slot_id == slot_id)
+
+    result = await db.execute(
+        select(Appointment).where(*appointment_filters).order_by(Appointment.created_at, Appointment.id)
     )
-    
-    # Find the current appointment's position
-    total_in_queue = len(appointments)
-    
+    online_appointments = result.scalars().all()
+
+    result = await db.execute(
+        select(QRAppointment).where(*qr_filters).order_by(QRAppointment.created_at, QRAppointment.id)
+    )
+    walkin_appointments = result.scalars().all()
+
+    queue_items = []
+    for apt in online_appointments:
+        queue_items.append({
+            "id": apt.id,
+            "token": apt.appointment_token,
+            "status": apt.status,
+            "source": "online",
+            "created_at": apt.created_at,
+        })
+
+    for apt in walkin_appointments:
+        queue_items.append({
+            "id": apt.id,
+            "token": apt.appointment_token,
+            "status": apt.status,
+            "source": "walkin",
+            "created_at": apt.created_at,
+        })
+
+    queue_items.sort(key=lambda item: (item["created_at"] or datetime.min, item["id"]))
+
+    total_in_queue = len(queue_items)
     your_position = 0
     patients_ahead = 0
-    
-    current_appointment = None
-    for index, apt in enumerate(appointments):
-        if apt.id == appointment_id or apt.appointment_token == appointment_token:
-            current_appointment = apt
+
+    for index, item in enumerate(queue_items):
+        if item["source"] == "online" and item["id"] == current_appointment.id:
             your_position = index + 1
             patients_ahead = index
             break
 
-    if current_appointment is None:
-        your_position = min(parse_token_number(appointment_token) + 1, total_in_queue) if total_in_queue else 1
-        patients_ahead = max(your_position - 1, 0)
-    
-    serving_appointment = next((apt for apt in appointments if apt.status == "serving"), None)
-    if serving_appointment:
-        now_serving_token = serving_appointment.appointment_token
-    elif current_appointment and your_position > 1:
-        now_serving_token = appointments[your_position - 2].appointment_token
-    elif appointments:
-        now_serving_token = appointments[0].appointment_token
+    if your_position == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Appointment not found in slot queue"
+        )
+
+    serving_item = next((item for item in queue_items if item["status"] == "serving"), None)
+    if serving_item:
+        now_serving_token = serving_item["token"]
+    elif your_position > 1:
+        now_serving_token = queue_items[your_position - 2]["token"]
+    elif queue_items:
+        now_serving_token = queue_items[0]["token"]
     else:
         now_serving_token = appointment_token
-    
-    # Calculate estimated wait time (15 minutes per patient ahead)
+
     estimated_wait_minutes = patients_ahead * 15
-    
+
     return {
         "patients_ahead": patients_ahead,
         "estimated_wait_minutes": estimated_wait_minutes,
@@ -2350,76 +2645,78 @@ async def search_clinic_patients(
     db: AsyncSession = Depends(get_db)
 ):
     """Search patients by date range, patient ID, email, or phone in both appointments and completed_appointments"""
-    
-    # Helper function to build query with filters
-    def build_query(model, clinic_id, from_date, to_date, patient_id, email, phone):
-        query = select(model).where(model.clinic_id == clinic_id)
+    try:
+        # Helper function to build query with filters
+        def build_query(model, clinic_id, from_date, to_date, patient_id, email, phone):
+            query = select(model).where(model.clinic_id == clinic_id)
+            
+            if from_date and to_date:
+                query = query.where(model.date >= from_date, model.date <= to_date)
+            
+            if patient_id:
+                query = query.where(model.patient_id == patient_id)
+            
+            if email:
+                query = query.where(model.patient_email.ilike(f"%{email}%"))
+            
+            if phone:
+                query = query.where(model.patient_phone.ilike(f"%{phone}%"))
+            
+            return query.order_by(model.date.desc(), model.time.desc())
         
-        if from_date and to_date:
-            query = query.where(model.date >= from_date, model.date <= to_date)
+        # Search appointments table
+        appointments_query = build_query(Appointment, clinic_id, from_date, to_date, patient_id, email, phone)
+        result = await db.execute(appointments_query)
+        appointments = result.scalars().all()
         
-        if patient_id:
-            query = query.where(model.patient_id == patient_id)
+        # Search completed_appointments table
+        completed_query = build_query(CompletedAppointment, clinic_id, from_date, to_date, patient_id, email, phone)
+        result = await db.execute(completed_query)
+        completed = result.scalars().all()
         
-        if email:
-            query = query.where(model.patient_email.ilike(f"%{email}%"))
+        # Combine and format results
+        patients = []
         
-        if phone:
-            query = query.where(model.patient_phone.ilike(f"%{phone}%"))
+        # Add appointments
+        for apt in appointments:
+            patients.append({
+                "appointment_token": apt.appointment_token,
+                "patient_name": apt.patient_name,
+                "patient_phone": apt.patient_phone,
+                "patient_id": apt.patient_id,
+                "patient_email": apt.patient_email,
+                "date": apt.date,
+                "time": apt.time,
+                "status": apt.status,
+                "source": "appointment"
+            })
         
-        return query.order_by(model.date.desc(), model.time.desc())
-    
-    # Search appointments table
-    appointments_query = build_query(Appointment, clinic_id, from_date, to_date, patient_id, email, phone)
-    result = await db.execute(appointments_query)
-    appointments = result.scalars().all()
-    
-    # Search completed_appointments table
-    completed_query = build_query(CompletedAppointment, clinic_id, from_date, to_date, patient_id, email, phone)
-    result = await db.execute(completed_query)
-    completed = result.scalars().all()
-    
-    # Combine and format results
-    patients = []
-    
-    # Add appointments
-    for apt in appointments:
-        patients.append({
-            "appointment_token": apt.appointment_token,
-            "patient_name": apt.patient_name,
-            "patient_phone": apt.patient_phone,
-            "patient_id": apt.patient_id,
-            "patient_email": apt.patient_email,
-            "date": apt.date,
-            "time": apt.time,
-            "status": apt.status,
-            "source": "appointment"
-        })
-    
-    # Add completed appointments
-    for apt in completed:
-        patients.append({
-            "appointment_token": apt.appointment_token,
-            "patient_name": apt.patient_name,
-            "patient_phone": apt.patient_phone,
-            "patient_id": apt.patient_id,
-            "patient_email": apt.patient_email,
-            "date": apt.date,
-            "time": apt.time,
-            "status": "completed",
-            "source": "completed"
-        })
-    
-    # Remove duplicates by patient_id + date + time
-    seen = set()
-    unique_patients = []
-    for p in patients:
-        key = (p["patient_id"], p["date"], p["time"])
-        if key not in seen:
-            seen.add(key)
-            unique_patients.append(p)
-    
-    return {"reactions": reaction_map}
+        # Add completed appointments
+        for apt in completed:
+            patients.append({
+                "appointment_token": apt.appointment_token,
+                "patient_name": apt.patient_name,
+                "patient_phone": apt.patient_phone,
+                "patient_id": apt.patient_id,
+                "patient_email": apt.patient_email,
+                "date": apt.date,
+                "time": apt.time,
+                "status": "completed",
+                "source": "completed"
+            })
+        
+        # Remove duplicates by patient_id + date + time
+        seen = set()
+        unique_patients = []
+        for p in patients:
+            key = (p["patient_id"], p["date"], p["time"])
+            if key not in seen:
+                seen.add(key)
+                unique_patients.append(p)
+        
+        return {"patients": unique_patients, "total": len(unique_patients)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 # ============= TOKEN/JOIN QUEUE ENDPOINTS =============
 

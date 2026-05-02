@@ -1,10 +1,19 @@
-﻿import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePatient } from "@/context/PatientContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Phone, Lock, Trash2, User, LogOut } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ArrowLeft, CheckCircle, Lock, LogOut, Phone, Trash2, User, XCircle } from "lucide-react";
+
+const getPasswordChecks = (password: string) => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  lowercase: /[a-z]/.test(password),
+  number: /[0-9]/.test(password),
+  special: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password),
+});
 
 const PatientProfile = () => {
   const navigate = useNavigate();
@@ -33,6 +42,14 @@ const PatientProfile = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpSubmitting, setOtpSubmitting] = useState(false);
+  const [otpDialogOpen, setOtpDialogOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"phone" | "password" | "delete" | null>(null);
+
+  const passwordChecks = getPasswordChecks(newPassword);
+  const isNewPasswordStrong = Object.values(passwordChecks).every(Boolean);
 
   useEffect(() => {
     if (message) {
@@ -40,6 +57,17 @@ const PatientProfile = () => {
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  const refreshPatientProfile = async () => {
+    if (!loggedInEmail) return;
+
+    const response = await fetch(`/api/auth/patient/data?email=${loggedInEmail}`);
+    if (response.ok) {
+      const data = await response.json();
+      setDbProfile(data);
+      setPhone(data.phone || "");
+    }
+  };
 
   useEffect(() => {
     const fetchPatientData = async () => {
@@ -50,14 +78,7 @@ const PatientProfile = () => {
       }
 
       try {
-        const response = await fetch(`/api/auth/patient/data?email=${loggedInEmail}`);
-        if (response.ok) {
-          const data = await response.json();
-          setDbProfile(data);
-          setPhone(data.phone || "");
-        } else {
-          console.error("Failed to fetch patient data:", response.status);
-        }
+        await refreshPatientProfile();
       } catch (error) {
         console.error("Failed to fetch patient data:", error);
       } finally {
@@ -76,112 +97,141 @@ const PatientProfile = () => {
     navigate("/");
   };
 
-  const handleChangePhone = async () => {
+  const sendProfileOtp = async (action: "phone" | "password" | "delete") => {
     if (!loggedInEmail) {
       setMessage({ text: "No logged-in user found", type: "error" });
       return;
     }
 
+    if (action === "phone" && !phone.trim()) {
+      setMessage({ text: "Please enter a new phone number", type: "error" });
+      return;
+    }
+
+    if (action === "password") {
+      if (!currentPassword || !newPassword || newPassword !== confirmPassword) {
+        setMessage({ text: "Please fill all password fields correctly", type: "error" });
+        return;
+      }
+
+      if (!isNewPasswordStrong) {
+        setMessage({ text: "New password must match the signup password rules", type: "error" });
+        return;
+      }
+    }
+
+    if (action === "delete") {
+      if (!deletePassword) {
+        setMessage({ text: "Please enter your password to delete account", type: "error" });
+        return;
+      }
+
+      if (!confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
+        return;
+      }
+    }
+
+    setOtpSending(true);
     try {
-      const response = await fetch("/api/auth/patient/change-phone", {
-        method: "PUT",
+      const response = await fetch("/api/auth/patient/send-profile-otp", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          new_phone: phone,
-          patient_email: loggedInEmail,
-        }),
+        body: JSON.stringify({ patient_email: loggedInEmail }),
       });
 
       if (response.ok) {
-        setMessage({ text: "Phone number updated successfully!", type: "success" });
-        const dataResponse = await fetch(`/api/auth/patient/data?email=${loggedInEmail}`);
-        if (dataResponse.ok) {
-          const data = await dataResponse.json();
-          setDbProfile(data);
-          setPhone(data.phone || "");
-        }
+        setPendingAction(action);
+        setOtpCode("");
+        setOtpDialogOpen(true);
+        setMessage({ text: "OTP sent to your email", type: "success" });
       } else {
         const error = await response.json();
-        setMessage({ text: error.detail || "Failed to update phone number", type: "error" });
+        setMessage({ text: error.detail || "Failed to send OTP", type: "error" });
       }
-    } catch (error) {
+    } catch {
       setMessage({ text: "Network error. Please try again.", type: "error" });
+    } finally {
+      setOtpSending(false);
     }
   };
 
-  const handleChangePassword = async () => {
-    if (!loggedInEmail) {
-      setMessage({ text: "No logged-in user found", type: "error" });
+  const handleVerifiedAction = async () => {
+    if (!loggedInEmail || !pendingAction) {
+      setMessage({ text: "No pending action found", type: "error" });
       return;
     }
 
-    if (!currentPassword || !newPassword || newPassword !== confirmPassword) {
-      setMessage({ text: "Please fill all password fields correctly", type: "error" });
+    if (!otpCode.trim()) {
+      setMessage({ text: "Please enter the OTP", type: "error" });
       return;
     }
 
+    setOtpSubmitting(true);
     try {
-      const response = await fetch("/api/auth/patient/change-password", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          current_password: currentPassword,
-          new_password: newPassword,
-          patient_email: loggedInEmail,
-        }),
-      });
+      let response: Response;
 
-      if (response.ok) {
-        setMessage({ text: "Password changed successfully!", type: "success" });
+      if (pendingAction === "phone") {
+        response = await fetch("/api/auth/patient/change-phone", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            new_phone: phone,
+            patient_email: loggedInEmail,
+            otp_code: otpCode,
+          }),
+        });
+      } else if (pendingAction === "password") {
+        response = await fetch("/api/auth/patient/change-password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            current_password: currentPassword,
+            new_password: newPassword,
+            patient_email: loggedInEmail,
+            otp_code: otpCode,
+          }),
+        });
+      } else {
+        response = await fetch("/api/auth/patient/delete-account", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            password: deletePassword,
+            confirmation: "DELETE",
+            patient_email: loggedInEmail,
+            otp_code: otpCode,
+          }),
+        });
+      }
+
+      if (!response.ok) {
+        const error = await response.json();
+        setMessage({ text: error.detail || "Action failed", type: "error" });
+        return;
+      }
+
+      if (pendingAction === "phone") {
+        await refreshPatientProfile();
+        setMessage({ text: "Phone number updated successfully!", type: "success" });
+      } else if (pendingAction === "password") {
         setCurrentPassword("");
         setNewPassword("");
         setConfirmPassword("");
+        setMessage({ text: "Password changed successfully!", type: "success" });
       } else {
-        const error = await response.json();
-        setMessage({ text: error.detail || "Failed to change password", type: "error" });
-      }
-    } catch (error) {
-      setMessage({ text: "Network error. Please try again.", type: "error" });
-    }
-  };
-
-  const handleDeleteAccount = async () => {
-    if (!loggedInEmail) {
-      setMessage({ text: "No logged-in user found", type: "error" });
-      return;
-    }
-
-    if (!deletePassword) {
-      setMessage({ text: "Please enter your password to delete account", type: "error" });
-      return;
-    }
-
-    if (!confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/auth/patient/delete-account", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          password: deletePassword,
-          confirmation: "DELETE",
-          patient_email: loggedInEmail,
-        }),
-      });
-
-      if (response.ok) {
         setMessage({ text: "Account deleted successfully!", type: "success" });
         localStorage.clear();
         navigate("/");
-      } else {
-        const error = await response.json();
-        setMessage({ text: error.detail || "Failed to delete account", type: "error" });
+        return;
       }
-    } catch (error) {
-      console.error("Error deleting account:", error);
+
+      setOtpDialogOpen(false);
+      setOtpCode("");
+      setPendingAction(null);
+    } catch {
       setMessage({ text: "Network error. Please try again.", type: "error" });
+    } finally {
+      setOtpSubmitting(false);
     }
   };
 
@@ -254,8 +304,8 @@ const PatientProfile = () => {
                 className="mt-2"
               />
             </div>
-            <Button onClick={handleChangePhone} disabled={!phone} className="w-full">
-              Update Phone Number
+            <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full">
+              {otpSending && pendingAction === "phone" ? "Sending OTP..." : "Verify OTP and Update"}
             </Button>
           </ProfileCard>
 
@@ -268,12 +318,17 @@ const PatientProfile = () => {
               <Label htmlFor="new-pw">New Password</Label>
               <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
             </div>
+            {newPassword && <PasswordRules checks={passwordChecks} />}
             <div>
               <Label htmlFor="confirm-pw">Confirm New Password</Label>
               <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
             </div>
-            <Button onClick={handleChangePassword} disabled={!currentPassword || !newPassword || newPassword !== confirmPassword} className="w-full">
-              Change Password
+            <Button
+              onClick={() => void sendProfileOtp("password")}
+              disabled={!currentPassword || !newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
+              className="w-full"
+            >
+              Verify OTP and Change Password
             </Button>
           </ProfileCard>
 
@@ -291,9 +346,9 @@ const PatientProfile = () => {
                 />
               </div>
               <div className="flex flex-wrap gap-3">
-                <Button onClick={handleDeleteAccount} disabled={!deletePassword} className="bg-red-600 text-white hover:bg-red-700">
+                <Button onClick={() => void sendProfileOtp("delete")} disabled={!deletePassword || otpSending} className="bg-red-600 text-white hover:bg-red-700">
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Account
+                  Verify OTP and Delete
                 </Button>
                 <Button variant="outline" onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />
@@ -304,9 +359,67 @@ const PatientProfile = () => {
           </div>
         </section>
       </main>
+
+      <Dialog
+        open={otpDialogOpen}
+        onOpenChange={(open) => {
+          setOtpDialogOpen(open);
+          if (!open) {
+            setOtpCode("");
+            setPendingAction(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Verify OTP</DialogTitle>
+            <DialogDescription>
+              Enter the OTP sent to {loggedInEmail} to continue.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="profile-otp">OTP Code</Label>
+            <Input
+              id="profile-otp"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="Enter 6-digit OTP"
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value)}
+              className="mt-2"
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={() => pendingAction && void sendProfileOtp(pendingAction)} disabled={otpSending || otpSubmitting || !pendingAction}>
+              Resend OTP
+            </Button>
+            <Button onClick={() => void handleVerifiedAction()} disabled={!otpCode || otpSubmitting}>
+              {otpSubmitting ? "Verifying..." : "Verify and Continue"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
+
+const PasswordRules = ({ checks }: { checks: ReturnType<typeof getPasswordChecks> }) => (
+  <div className="space-y-2 rounded-2xl bg-secondary/60 p-4">
+    <p className="text-xs text-muted-foreground">Password must contain:</p>
+    <PasswordRule ok={checks.length} text="At least 8 characters" />
+    <PasswordRule ok={checks.uppercase} text="One uppercase letter (A-Z)" />
+    <PasswordRule ok={checks.lowercase} text="One lowercase letter (a-z)" />
+    <PasswordRule ok={checks.number} text="One number (0-9)" />
+    <PasswordRule ok={checks.special} text="One special character" />
+  </div>
+);
+
+const PasswordRule = ({ ok, text }: { ok: boolean; text: string }) => (
+  <div className="flex items-center text-xs text-foreground">
+    {ok ? <CheckCircle className="mr-2 h-3.5 w-3.5 text-green-500" /> : <XCircle className="mr-2 h-3.5 w-3.5 text-red-500" />}
+    {text}
+  </div>
+);
 
 const ProfileStat = ({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) => (
   <div className="rounded-[22px] bg-white/10 px-4 py-4">

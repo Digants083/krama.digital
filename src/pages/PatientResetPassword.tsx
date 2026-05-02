@@ -1,5 +1,5 @@
 ﻿import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,11 @@ import { Activity, Lock, Eye, EyeOff, ArrowLeft, ArrowRight, CheckCircle, XCircl
 
 const PatientResetPassword = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const role = location.pathname.startsWith("/clinic")
+    ? "clinic"
+    : sessionStorage.getItem("reset_role") || "patient";
+  const loginPath = `/${role}/login`;
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -18,6 +23,7 @@ const PatientResetPassword = () => {
 
   // Get email from sessionStorage
   const email = sessionStorage.getItem("reset_email") || "";
+  const resetToken = sessionStorage.getItem("reset_token") || "";
 
   // Password strength indicators
   const [passwordChecks, setPasswordChecks] = useState({
@@ -68,7 +74,7 @@ const PatientResetPassword = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/patient/reset-password", {
+      const response = await fetch(`/api/auth/${role}/reset-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -76,6 +82,7 @@ const PatientResetPassword = () => {
         body: JSON.stringify({
           email: email,
           new_password: newPassword,
+          reset_token: resetToken,
         }),
       });
 
@@ -91,10 +98,11 @@ const PatientResetPassword = () => {
       // Clear sessionStorage
       sessionStorage.removeItem("reset_email");
       sessionStorage.removeItem("reset_token");
+      sessionStorage.removeItem("reset_role");
       
       // Navigate to login after 2 seconds
       setTimeout(() => {
-        navigate("/patient/login");
+        navigate(loginPath);
       }, 2000);
     } catch (err) {
       setError("Network error. Please try again.");
@@ -257,7 +265,7 @@ const PatientResetPassword = () => {
 
             <div className="mt-6 text-center">
               <Link
-                to="/patient/login"
+                to={loginPath}
                 className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="mr-1 h-4 w-4" />

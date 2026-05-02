@@ -43,6 +43,7 @@ const ClinicDetails = () => {
   const [userReactions, setUserReactions] = useState<{[key: number]: string}>({});
   const [patientId, setPatientId] = useState<string>("");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const [slotQueueCounts, setSlotQueueCounts] = useState<{[key: number]: number}>({});
   const clinicAddress = [
     clinic?.street_address,
     clinic?.road,
@@ -177,22 +178,22 @@ const ClinicDetails = () => {
         const currentHour = now.getHours();
         const currentMinute = now.getMinutes();
         const currentTimeMinutes = currentHour * 60 + currentMinute;
-        
+
         // Use slot array from database to determine open/close status
         const slotArray = data.slot || [];
-        
+
         // Process slots and add disabled status based on current time
         const processedSlots = (data.slots || []).map((slot: any, idx: number) => {
           const startHour = slot.time_range[0];
           const endHour = slot.time_range[1];
           const endTimeMinutes = endHour * 60;
           const cutoffTime = endTimeMinutes - 15; // 15 min before slot ends
-          
+
           // Check if slot is expired (current time past cutoff)
           const isExpired = currentTimeMinutes >= cutoffTime;
           // Use slot array to determine if open or closed
           const isOpen = slotArray[idx] === "open";
-          
+
           return {
             ...slot,
             is_open: isOpen,
@@ -200,11 +201,26 @@ const ClinicDetails = () => {
             display_status: isExpired ? "Expired" : (isOpen ? "Available" : "Not Available")
           };
         });
-        
+
         setTimeSlots(processedSlots);
+
+        // Fetch queue counts for each slot
+        fetchSlotQueueCounts();
       }
     } catch (error) {
       console.error("Error fetching time slots:", error);
+    }
+  };
+
+  const fetchSlotQueueCounts = async () => {
+    try {
+      const response = await fetch(`/api/auth/clinic/slot-queue-counts?clinic_id=${id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSlotQueueCounts(data.slot_counts || {});
+      }
+    } catch (error) {
+      console.error("Error fetching slot queue counts:", error);
     }
   };
 
@@ -456,7 +472,7 @@ const ClinicDetails = () => {
             </div>
 
             <div className="hidden mt-4 flex h-36 items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
-              ðŸ—ºï¸ Map placeholder - {clinic.address}
+              🗺️ Map placeholder - {clinic.address}
             </div>
 
             {/* Clinic Images Gallery - only show valid URLs */}
@@ -491,7 +507,7 @@ const ClinicDetails = () => {
               <div className="mt-3 rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-                    <span className="text-lg">ðŸ‘¨â€âš•ï¸</span>
+                    <span className="text-lg">👨‍⚕️</span>
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground">{clinic.doctor_name || "Available Doctor"}</h3>
@@ -600,41 +616,54 @@ const ClinicDetails = () => {
 
             {timeSlots.length > 0 ? (
               <div className="space-y-4">
-                {timeSlots.map((slot, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSlotSelect(slot, index)}
-                    disabled={!slot.is_open || slot.is_expired || booking}
-                    className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                      slot.is_expired
-                        ? "bg-gray-50 border-gray-200 cursor-not-allowed opacity-50"
-                        : !slot.is_open
-                          ? "bg-red-50 border-red-200 cursor-not-allowed opacity-60"
-                          : selectedTime === `${slot.slot_name} ${formatTimeRange(slot.time_range)}`
-                            ? "border-[#00555A] bg-[#00555A]/10"
-                            : "border-border bg-card hover:border-[#00555A]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className={`font-semibold ${slot.is_expired ? 'line-through text-gray-400' : 'text-foreground'}`}>
-                          {slot.slot_name}
-                        </h3>
-                        <p className={`text-sm ${slot.is_expired ? 'text-gray-400 line-through' : 'text-muted-foreground'}`}>
-                          {formatTimeRange(slot.time_range)}
-                        </p>
+                {timeSlots.map((slot, index) => {
+                  const slotId = index + 1;
+                  const patientCount = slotQueueCounts[slotId] || 0;
+
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => handleSlotSelect(slot, index)}
+                      disabled={!slot.is_open || slot.is_expired || booking}
+                      className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                        slot.is_expired
+                          ? "bg-gray-50 border-gray-200 cursor-not-allowed opacity-50"
+                          : !slot.is_open
+                            ? "bg-red-50 border-red-200 cursor-not-allowed opacity-60"
+                            : selectedTime === `${slot.slot_name} ${formatTimeRange(slot.time_range)}`
+                              ? "border-[#00555A] bg-[#00555A]/10"
+                              : "border-border bg-card hover:border-[#00555A]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className={`font-semibold ${slot.is_expired ? 'line-through text-gray-400' : 'text-foreground'}`}>
+                            {slot.slot_name}
+                          </h3>
+                          <p className={`text-sm ${slot.is_expired ? 'text-gray-400 line-through' : 'text-muted-foreground'}`}>
+                            {formatTimeRange(slot.time_range)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className={`text-sm font-medium ${
+                            slot.is_expired ? 'text-gray-400' :
+                            slot.is_open ? 'text-green-600' : 'text-red-500'
+                          }`}>
+                            {slot.display_status}
+                          </span>
+                          {slot.is_open && !slot.is_expired && (
+                            <div className="mt-1 flex items-center justify-end gap-1">
+                              <span className="text-lg">🧑</span>
+                              <span className="text-xs text-muted-foreground">
+                                {patientCount}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className={`text-sm font-medium ${
-                          slot.is_expired ? 'text-gray-400' : 
-                          slot.is_open ? 'text-green-600' : 'text-red-500'
-                        }`}>
-                          {slot.display_status}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-center text-muted-foreground py-8">No time slots available</p>

@@ -32,8 +32,11 @@ import PatientResetPassword from "./pages/PatientResetPassword";
 import ClinicLogin from "./pages/ClinicLogin";
 import ClinicSignup from "./pages/ClinicSignup";
 import ClinicRegistrationSuccess from "./pages/ClinicRegistrationSuccess";
+import ClinicPatientReports from "./pages/ClinicPatientReports";
 import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminFeedbackPage from "./pages/AdminFeedbackPage";
+import FeedbackPage from "./pages/FeedbackPage";
 import AboutUs from "./pages/AboutUs";
 import NotFound from "./pages/NotFound";
 
@@ -47,6 +50,7 @@ function App() {
             {/* Public Routes with Header */}
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
             <Route path="/about" element={<MainLayout><AboutUs /></MainLayout>} />
+            <Route path="/feedback" element={<MainLayout><FeedbackPage /></MainLayout>} />
 
             {/* Patient Auth with Header */}
             <Route path="/patient/login" element={<MainLayout><PatientLogin /></MainLayout>} />
@@ -60,6 +64,9 @@ function App() {
             <Route path="/clinic/login" element={<MainLayout><ClinicLogin /></MainLayout>} />
             <Route path="/clinic/register" element={<MainLayout><ClinicSignup /></MainLayout>} />
             <Route path="/clinic/register/success" element={<MainLayout><ClinicRegistrationSuccess /></MainLayout>} />
+            <Route path="/clinic/forgot-password" element={<MainLayout><PatientForgotPassword /></MainLayout>} />
+            <Route path="/clinic/verify-reset-otp" element={<MainLayout><PatientVerifyResetOTP /></MainLayout>} />
+            <Route path="/clinic/reset-password" element={<MainLayout><PatientResetPassword /></MainLayout>} />
 
             {/* Patient Area without Header */}
             <Route path="/patient" element={<NoHeaderLayout><PatientDashboard /></NoHeaderLayout>} />
@@ -82,19 +89,30 @@ function App() {
             <Route path="/clinic/manage-time" element={<NoHeaderLayout><ClinicManageTime /></NoHeaderLayout>} />
             <Route path="/clinic/look" element={<NoHeaderLayout><ClinicLook /></NoHeaderLayout>} />
             <Route path="/clinic/profile" element={<NoHeaderLayout><ClinicProfile /></NoHeaderLayout>} />
+            <Route path="/clinic/reports" element={<NoHeaderLayout><ClinicPatientReports /></NoHeaderLayout>} />
 
             {/* Admin Area - Secure Routes */}
             <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
             <Route path="/admin/login" element={<NoHeaderLayout><AdminLogin /></NoHeaderLayout>} />
-            <Route 
-              path="/admin/dashboard" 
+            <Route
+              path="/admin/dashboard"
               element={
                 <NoHeaderLayout>
                   <AdminProtectedRoute>
                     <AdminDashboard />
                   </AdminProtectedRoute>
                 </NoHeaderLayout>
-              } 
+              }
+            />
+            <Route
+              path="/admin/feedback"
+              element={
+                <NoHeaderLayout>
+                  <AdminProtectedRoute>
+                    <AdminFeedbackPage />
+                  </AdminProtectedRoute>
+                </NoHeaderLayout>
+              }
             />
 
             {/* 404 with Header */}

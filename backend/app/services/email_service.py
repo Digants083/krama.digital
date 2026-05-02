@@ -94,39 +94,52 @@ class EmailService:
         to_email: str,
         patient_name: str,
         clinic_name: str,
-        alert_type: str
+        alert_type: str,
+        token_number: str | None = None,
+        doctor_name: str | None = None,
+        clinic_location: str | None = None,
+        latitude: str | None = None,
+        longitude: str | None = None,
     ) -> bool:
         """Send queue progress alerts for patients nearing their turn."""
         safe_name = patient_name or "Patient"
         safe_clinic = clinic_name or "the clinic"
+        safe_token = token_number or "TBD"
+        safe_doctor = doctor_name or "Assigned Doctor"
 
-        if alert_type == "immediate":
-            subject = f"Please reach {safe_clinic} now"
+        # Generate Google Maps link if coordinates are available
+        if latitude and longitude:
+            google_maps_url = f"https://maps.google.com/?q={latitude},{longitude}"
+            safe_location = f'<a href="{google_maps_url}" style="color: #00555A; text-decoration: none; font-weight: bold;">Click for directions to {safe_clinic}</a>'
+        else:
+            safe_location = clinic_location or "Location will be shared at clinic desk"
+
+        if alert_type == "reach_turn":
+            subject = f"It's your turn soon at {safe_clinic} - please reach clinic"
             heading = "Please reach the clinic ASAP"
-            detail = "It is almost your turn. Please come to the clinic now so you are ready when called."
+            detail = "It is your time to be ready. Please reach the clinic now so your consultation can start without delay."
         elif alert_type == "reach_auto":
             subject = f"You're booked at {safe_clinic} - Please reach automatically"
             heading = "Please reach the clinic automatically"
             detail = "You're second in queue. Please start heading to the clinic now as you will be called soon after the first patient."
         elif alert_type == "pre_slot_start":
-            subject = f"Your appointment at {safe_clinic} starts in 10 minutes"
+            subject = f"Your appointment at {safe_clinic} starts in 15 minutes"
             heading = "Please reach the clinic ASAP"
-            detail = "Your slot starts in 10 minutes. You're the first patient. Please reach the clinic now to be ready."
-        elif alert_type == "ready":
+            detail = "Your slot starts in 15 minutes. Please reach the clinic now to be ready for your turn."
+        else:
             subject = f"Please reach {safe_clinic} now"
             heading = "Please reach the clinic now"
-            detail = "The patient ahead of you is now being served. Please come to the clinic immediately as you're next."
-        else:
-            subject = f"2 patients ahead of you at {safe_clinic}"
-            heading = "Please start heading to the clinic"
-            detail = "There are 2 patients ahead of you now. Please plan to reach the clinic as soon as possible."
+            detail = "Your turn is approaching. Please reach the clinic now."
 
         text_content = f"""
         Hello {safe_name},
 
         {detail}
 
+        Token Number: {safe_token}
         Clinic: {safe_clinic}
+        Doctor: {safe_doctor}
+        Clinic Location: {safe_location}
 
         Thank you,
         Krama Clinic
@@ -150,7 +163,10 @@ class EmailService:
                     <h2 class="title">{heading}</h2>
                     <p>Hello {safe_name},</p>
                     <p>{detail}</p>
+                    <p><strong>Token Number:</strong> {safe_token}</p>
                     <p><strong>Clinic:</strong> {safe_clinic}</p>
+                    <p><strong>Doctor:</strong> {safe_doctor}</p>
+                    <p><strong>Clinic Location:</strong> {safe_location}</p>
                 </div>
                 <div class="footer">Krama Clinic</div>
             </div>
@@ -222,9 +238,29 @@ def send_otp(to_email: str, otp_code: str) -> bool:
     return email_service.send_otp_email(to_email, otp_code)
 
 
-def send_queue_alert(to_email: str, patient_name: str, clinic_name: str, alert_type: str) -> bool:
+def send_queue_alert(
+    to_email: str,
+    patient_name: str,
+    clinic_name: str,
+    alert_type: str,
+    token_number: str | None = None,
+    doctor_name: str | None = None,
+    clinic_location: str | None = None,
+    latitude: str | None = None,
+    longitude: str | None = None,
+) -> bool:
     """Convenience function to send queue alert email"""
-    return email_service.send_queue_alert_email(to_email, patient_name, clinic_name, alert_type)
+    return email_service.send_queue_alert_email(
+        to_email,
+        patient_name,
+        clinic_name,
+        alert_type,
+        token_number,
+        doctor_name,
+        clinic_location,
+        latitude,
+        longitude,
+    )
 
 
 # ============ Clinic Registration Email Functions ============
@@ -381,6 +417,72 @@ def send_clinic_approval_email(to_email: str, clinic_name: str, clinic_id: str) 
     return email_service._send_email(to_email, subject, text_content, html_content)
 
 
+def send_slot_push_email(to_email: str, patient_name: str, clinic_name: str, old_slot: str, new_slot: str, new_token: str = None) -> bool:
+    """
+    Send email to patient when they are pushed to a new slot by the clinic.
+    """
+    subject = f"Your appointment at {clinic_name} has been moved to next slot"
+
+    token_info = f"<p><strong>Your new token number:</strong> {new_token}</p>" if new_token else ""
+    token_info_plain = f"Your new token number: {new_token}\n" if new_token else ""
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .card {{ background: #f7fbfb; border: 1px solid #d8ecec; border-radius: 10px; padding: 24px; }}
+            .title {{ color: #00555A; margin-bottom: 12px; }}
+            .footer {{ font-size: 12px; color: #777; margin-top: 20px; }}
+            .slot-box {{ background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 4px; margin: 15px 0; }}
+            .token-box {{ background: #d4edda; border: 1px solid #28a745; padding: 15px; border-radius: 4px; margin: 15px 0; text-align: center; }}
+            .token-number {{ font-size: 24px; font-weight: bold; color: #28a745; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h2 class="title">Appointment Moved to Next Slot</h2>
+                <p>Hello {patient_name},</p>
+                <p>Due to high patient volume, your appointment has been moved to the next available time slot because you did not show up for your scheduled time.</p>
+                <div class="slot-box">
+                    <p><strong>Original slot:</strong> {old_slot}</p>
+                    <p><strong>New slot:</strong> {new_slot}</p>
+                </div>
+                {token_info}
+                <p><strong>Note:</strong> You have been added to the end of the queue for the new slot. Please wait for your turn.</p>
+                <p><strong>Clinic:</strong> {clinic_name}</p>
+            </div>
+            <div class="footer">Krama Clinic</div>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+    Appointment Moved to Next Slot
+    ===============================
+
+    Hello {patient_name},
+
+    Due to high patient volume, your appointment has been moved to the next available time slot because you did not show up for your scheduled time.
+
+    Original slot: {old_slot}
+    New slot: {new_slot}
+    {token_info_plain}
+    Note: You have been added to the end of the queue for the new slot. Please wait for your turn.
+
+    Clinic: {clinic_name}
+
+    Thank you,
+    Krama Clinic
+    """
+
+    return email_service._send_email(to_email, subject, text_content, html_content)
+
+
 def send_clinic_rejection_email(to_email: str, clinic_name: str, reason: str = None) -> bool:
     """
     Send email to clinic informing them their registration has been rejected.
@@ -443,11 +545,260 @@ def send_clinic_rejection_email(to_email: str, clinic_name: str, reason: str = N
     If you believe this was a mistake or would like to provide additional information, please contact our support team.
     
     Thank you for your interest in Krama Care.
-    
+
     Best regards,
     Krama Care Team
-    
+
     © 2024 Krama Care. All rights reserved.
     """
-    
+
     return email_service._send_email(to_email, subject, text_content, html_content)
+
+
+def send_patient_report_email(
+    patient_email: str,
+    patient_name: str,
+    clinic_name: str,
+    pdf_path: str,
+    notes: str | None = None
+) -> bool:
+    """
+    Send patient report email with PDF attachment.
+
+    Args:
+        patient_email: Recipient email address
+        patient_name: Patient's name
+        clinic_name: Clinic's name
+        pdf_path: Path to the PDF file to attach
+        notes: Optional notes from the clinic
+
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    try:
+        subject = f"Your Medical Report from {clinic_name}"
+
+        # HTML email content
+        notes_section = ""
+        if notes:
+            notes_section = f"""
+                    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; margin: 20px 0; border-radius: 5px;">
+                        <p style="margin: 0; color: #856404;"><strong>Note from Clinic:</strong></p>
+                        <p style="margin: 5px 0 0 0;">{notes}</p>
+                    </div>
+            """
+
+        # Text email content
+        notes_text_section = ""
+        if notes:
+            notes_text_section = f"Note from Clinic: {notes}\n\n"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Your Medical Report</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: #f9f9f9; border-radius: 10px; overflow: hidden;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center;">
+                    <h1 style="margin: 0; font-size: 28px;">Your Medical Report is Ready</h1>
+                    <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">From {clinic_name}</p>
+                </div>
+
+                <div style="padding: 30px;">
+                    <p>Dear <strong>{patient_name}</strong>,</p>
+
+                    <p>We are pleased to inform you that your medical report from <strong>{clinic_name}</strong> is now ready.</p>
+
+                    <div style="background: #e8f4f8; border-left: 4px solid #2196F3; padding: 20px; margin: 20px 0; border-radius: 5px;">
+                        <p style="margin: 0; color: #1976D2;"><strong>Your Report</strong></p>
+                        <p style="margin: 5px 0 0 0;">Please find your medical report attached to this email as a PDF file.</p>
+                    </div>
+
+                    {notes_section}
+
+                    <p style="margin: 20px 0;">If you have any questions about your report, please don't hesitate to contact {clinic_name} directly.</p>
+
+                    <p>Thank you for choosing {clinic_name} for your healthcare needs.</p>
+
+                    <p style="margin: 30px 0 0 0; color: #666; font-size: 14px;">
+                        Best regards,<br>
+                        <strong>{clinic_name} Team</strong>
+                    </p>
+                </div>
+
+                <div style="background: #f0f0f0; padding: 20px; text-align: center; font-size: 12px; color: #888;">
+                    <p style="margin: 0;">© 2024 Krama Care. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        text_content = f"""
+        Your Medical Report is Ready
+        ==============================
+
+        Dear {patient_name},
+
+        We are pleased to inform you that your medical report from {clinic_name} is now ready.
+
+        Please find your medical report attached to this email as a PDF file.
+
+        {notes_text_section}
+        If you have any questions about your report, please don't hesitate to contact {clinic_name} directly.
+
+        Thank you for choosing {clinic_name} for your healthcare needs.
+
+        Best regards,
+        {clinic_name} Team
+
+        © 2024 Krama Care. All rights reserved.
+        """
+
+        # Create email with attachment
+        msg = MIMEMultipart()
+        msg['From'] = email_service.sender_email
+        msg['To'] = patient_email
+        msg['Subject'] = subject
+
+        # Attach the PDF file
+        if os.path.exists(pdf_path):
+            with open(pdf_path, 'rb') as f:
+                part = MIMEApplication(
+                    f.read(),
+                    Name=os.path.basename(pdf_path)
+                )
+                part['Content-Disposition'] = f'attachment; filename="{os.path.basename(pdf_path)}"'
+                msg.attach(part)
+        else:
+            logger.error(f"PDF file not found: {pdf_path}")
+            return False
+
+        # Attach HTML and text parts
+        part1 = MIMEText(text_content, "plain")
+        part2 = MIMEText(html_content, "html")
+        msg.attach(part1)
+        msg.attach(part2)
+
+        # Connect to SMTP server and send
+        with smtplib.SMTP(email_service.smtp_host, email_service.smtp_port, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(email_service.smtp_user, email_service.smtp_password)
+            server.sendmail(email_service.sender_email, patient_email, msg.as_string())
+
+        logger.info("Patient report email sent successfully to %s", patient_email)
+        return True
+
+    except smtplib.SMTPException as e:
+        logger.error("Failed to send patient report email to %s: %s", patient_email, str(e))
+        return False
+    except Exception as e:
+        logger.error("Unexpected error sending patient report email to %s: %s", patient_email, str(e))
+        return False
+
+
+def send_admin_otp_email(to_email: str, otp_code: str, admin_username: str) -> bool:
+    """
+    Send OTP email to admin for authentication
+
+    Args:
+        to_email: Recipient email address
+        otp_code: 6-digit OTP code
+        admin_username: Admin username (e.g., "admin1" or "admin1 (confirmation)")
+
+    Returns:
+        bool: True if email sent successfully, False otherwise
+    """
+    try:
+        email_service = EmailService()
+
+        subject = f"Admin Login OTP - {admin_username}"
+
+        # HTML email content
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Admin Login OTP</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+            <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #00555A; margin: 0;">Krama Admin</h1>
+                    <p style="color: #666; margin: 10px 0 0 0;">Secure Authentication</p>
+                </div>
+
+                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center;">
+                    <p style="color: #333; margin: 0 0 10px 0; font-size: 16px;">Your One-Time Password (OTP) is:</p>
+                    <div style="background-color: #00555A; color: #ffffff; padding: 15px 30px; border-radius: 8px; font-size: 32px; font-weight: bold; letter-spacing: 5px; display: inline-block;">
+                        {otp_code}
+                    </div>
+                </div>
+
+                <div style="color: #666; font-size: 14px; line-height: 1.6;">
+                    <p style="margin: 0 0 10px 0;">This OTP will expire in <strong>10 minutes</strong>.</p>
+                    <p style="margin: 0 0 10px 0;">If you didn't request this OTP, please ignore this email.</p>
+                    <p style="margin: 0;">For security reasons, never share your OTP with anyone.</p>
+                </div>
+
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #999; font-size: 12px;">
+                    <p style="margin: 0;">This is an automated email from Krama Admin System.</p>
+                    <p style="margin: 5px 0 0 0;">© 2024 Krama Care. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Plain text version
+        text_content = f"""
+        Krama Admin - Secure Authentication
+
+        Your One-Time Password (OTP) is: {otp_code}
+
+        This OTP will expire in 10 minutes.
+
+        If you didn't request this OTP, please ignore this email.
+        For security reasons, never share your OTP with anyone.
+
+        This is an automated email from Krama Admin System.
+        © 2024 Krama Care. All rights reserved.
+        """
+
+        # Create email
+        msg = MIMEMultipart()
+        msg['From'] = email_service.sender_email
+        msg['To'] = to_email
+        msg['Subject'] = subject
+
+        # Attach HTML and text parts
+        part1 = MIMEText(text_content, "plain")
+        part2 = MIMEText(html_content, "html")
+        msg.attach(part1)
+        msg.attach(part2)
+
+        # Connect to SMTP server and send
+        with smtplib.SMTP(email_service.smtp_host, email_service.smtp_port, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(email_service.smtp_user, email_service.smtp_password)
+            server.sendmail(email_service.sender_email, to_email, msg.as_string())
+
+        logger.info("Admin OTP email sent successfully to %s for %s", to_email, admin_username)
+        return True
+
+    except smtplib.SMTPException as e:
+        logger.error("Failed to send admin OTP email to %s: %s", to_email, str(e))
+        return False
+    except Exception as e:
+        logger.error("Unexpected error sending admin OTP email to %s: %s", to_email, str(e))
+        return False

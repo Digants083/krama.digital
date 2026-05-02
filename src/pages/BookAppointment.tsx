@@ -192,7 +192,7 @@ const BookAppointment = () => {
       </div>
 
       <main className="mx-auto max-w-3xl px-4 pb-12">
-        {/* Step 0 â€” Clinic Info */}
+        {/* Step 0 — Clinic Info */}
         {step === 0 && (
           <section className="space-y-6">
             <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
@@ -225,7 +225,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 1 â€” Select Time Slot */}
+        {/* Step 1 — Select Time Slot */}
         {step === 1 && (
           <section className="space-y-4">
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
@@ -256,7 +256,7 @@ const BookAppointment = () => {
                     }`}
                   >
                     <p className={`font-semibold ${selectedSlotIndex === index ? "text-primary" : "text-foreground"}`}>
-                      {slot.slot_name} â€¢ {formatTimeRange(slot.time_range)}
+                      {slot.slot_name} • {formatTimeRange(slot.time_range)}
                     </p>
                   </button>
                 ))}
@@ -265,7 +265,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 2 â€” Select Doctor */}
+        {/* Step 2 — Select Doctor */}
         {step === 2 && (
           <section className="space-y-3">
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
@@ -280,12 +280,12 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 3 â€” Select Date */}
+        {/* Step 3 — Select Date */}
         {step === 3 && (
           <section>
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
               <p className="text-sm text-primary font-medium">
-                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`} â€¢ {selectedDoctor?.name}
+                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`} • {selectedDoctor?.name}
               </p>
             </div>
             <h2 className="mb-4 text-lg font-semibold text-foreground">
@@ -310,7 +310,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 4 â€” Confirm */}
+        {/* Step 4 — Confirm */}
         {step === 4 && (
           <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-foreground">Confirm Your Appointment</h2>

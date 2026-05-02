@@ -1,8 +1,8 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Types ────────────────────────────────────────────────────────────────────────────────
 interface Doctor {
   id: string;
   name: string;
@@ -18,7 +18,7 @@ interface ClinicInfo {
 
 type Step = "form" | "loading" | "success" | "error";
 
-// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Component ────────────────────────────────────────────────────────────────────────────────
 const JoinQueue = () => {
   // QR codes should link to /join?clinic_id=XYZ
   const [searchParams] = useSearchParams();
@@ -38,7 +38,7 @@ const JoinQueue = () => {
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // â”€â”€ Fetch clinic info when clinic_id is known â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Fetch clinic info when clinic_id is known ────────────────────────────────────────────────
   useEffect(() => {
     if (!qrClinicId) return;
     setClinicLoading(true);
@@ -51,51 +51,63 @@ const JoinQueue = () => {
           address: data.address,
           doctors: data.doctors || [],
         });
-        // Auto-select doctor if only one
-        if (data.doctors?.length === 1) {
-          setSelectedDoctorId(data.doctors[0].id);
-        }
       })
       .catch(() => {
-        // If clinic endpoint isn't ready yet, fall back gracefully
         setClinicInfo({ id: qrClinicId, name: "Clinic", doctors: [] });
       })
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
 
-  // â”€â”€ Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Validation ────────────────────────────────────────────────────────────────────────────────
   const phoneRegex = /^[6-9]\d{9}$/;
   const isValid =
     name.trim().length >= 2 &&
-    phoneRegex.test(phone.trim()) &&
-    (clinicInfo?.doctors.length === 0 || selectedDoctorId !== "");
+    phoneRegex.test(phone.trim());
 
-  // â”€â”€ Submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Submit ────────────────────────────────────────────────────────────────────────────────────
   const handleJoin = async () => {
-    if (!isValid) return;
+    if (!isValid || !clinicInfo) return;
     setStep("loading");
 
     try {
-      const result = await addWalkinToQueue({
-        clinic_id: clinicInfo?.id || qrClinicId,
-        doctor_id: selectedDoctorId,
-        patient_name: name.trim(),
-        phone: phone.trim(),
+      const res = await fetch("/api/auth/queue/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clinic_id: clinicInfo.id,
+          doctor_id: selectedDoctorId || "1",
+          patient_name: name.trim(),
+          phone: phone.trim(),
+          source: "walkin",
+        }),
       });
 
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to join queue");
+      }
+
+      const data = await res.json();
       setTokenResult({
-        token_label: result.token_label,
-        position: result.position,
+        token_label: data.token_label,
+        position: data.position,
       });
       setStep("success");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Something went wrong. Please try again.");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      setErrorMsg(errorMessage);
       setStep("error");
     }
   };
 
-  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Go back to home ────────────────────────────────────────────────────────────────────────────
+  const handleGoHome = () => {
+    window.location.href = "/";
+  };
 
+  // ─── Render ────────────────────────────────────────────────────────────────────────────────────
+
+  // Invalid QR code
   if (!qrClinicId) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
@@ -108,7 +120,19 @@ const JoinQueue = () => {
     );
   }
 
-  // â”€â”€ Success screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Loading clinic info
+  if (clinicLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
+        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
+          <div className="h-6 w-32 mx-auto rounded bg-gray-100 animate-pulse mb-2" />
+          <div className="h-4 w-24 mx-auto rounded bg-gray-100 animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  // Success screen
   if (step === "success" && tokenResult) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
@@ -140,15 +164,22 @@ const JoinQueue = () => {
             <span className="font-semibold">{Math.max(0, tokenResult.position - 1)}</span>
           </div>
 
-          <p className="text-xs text-gray-400">
-            Please wait for your token to be called. Keep this screen open or note your token number.
+          <p className="text-xs text-gray-400 mb-4">
+            Please wait for your token to be called.
           </p>
+
+          <button
+            onClick={handleGoHome}
+            className="w-full rounded-xl bg-[#00555A] px-4 py-3 text-sm font-medium text-white hover:opacity-90 transition-all duration-200"
+          >
+            Back to Home
+          </button>
         </div>
       </div>
     );
   }
 
-  // â”€â”€ Error screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Error screen
   if (step === "error") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
@@ -171,20 +202,16 @@ const JoinQueue = () => {
     );
   }
 
-  // â”€â”€ Form screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Form screen
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
 
         {/* Header */}
         <div className="mb-6 text-center">
-          {clinicLoading ? (
-            <div className="h-5 w-32 mx-auto rounded bg-gray-100 animate-pulse mb-1" />
-          ) : (
-            <h1 className="text-lg font-semibold text-[#0F172A]">
-              {clinicInfo?.name || "Join Queue"}
-            </h1>
-          )}
+          <h1 className="text-lg font-semibold text-[#0F172A]">
+            {clinicInfo?.name || "Join Queue"}
+          </h1>
           {clinicInfo?.address && (
             <p className="text-xs text-gray-400 mt-0.5">{clinicInfo.address}</p>
           )}
@@ -219,7 +246,7 @@ const JoinQueue = () => {
             )}
           </div>
 
-          {/* Doctor selector â€” shown only if clinic has multiple doctors */}
+          {/* Doctor selector — shown only if clinic has multiple doctors */}
           {clinicInfo && clinicInfo.doctors.length > 1 && (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Select doctor</label>
@@ -228,10 +255,10 @@ const JoinQueue = () => {
                 onChange={(e) => setSelectedDoctorId(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#00FFF0] transition-all duration-200 text-sm"
               >
-                <option value="">Choose a doctor</option>
+                <option value="">Any available doctor</option>
                 {clinicInfo.doctors.map((doc) => (
                   <option key={doc.id} value={doc.id}>
-                    {doc.name}{doc.specialization ? ` â€” ${doc.specialization}` : ""}
+                    {doc.name}{doc.specialization ? ` — ${doc.specialization}` : ""}
                   </option>
                 ))}
               </select>

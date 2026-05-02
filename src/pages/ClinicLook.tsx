@@ -83,7 +83,7 @@ const ClinicLook = () => {
       if (response.ok) {
         const data = await response.json();
         setSearchResults(data.patients || []);
-        setSearchCount(data.count || 0);
+        setSearchCount(data.total || 0);
       }
     } catch (error) {
       setMessage({text: "Error searching patients", type: "error"});
@@ -237,7 +237,7 @@ const ClinicLook = () => {
                         ID: {patient.patient_id}
                       </p>
                       <p className="text-muted-foreground text-sm">
-                        {patient.patient_email} â€¢ {patient.patient_phone}
+                        {patient.patient_email} • {patient.patient_phone}
                       </p>
                     </div>
                     <span className="text-[#00555A] font-bold text-lg">{patient.appointment_token}</span>

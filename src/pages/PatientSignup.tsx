@@ -351,7 +351,7 @@ const OTPVerificationPage = ({ email, onBack }: {
               onClick={onBack}
               className="text-sm text-muted-foreground hover:text-foreground"
             >
-              â† Back to Signup
+              ← Back to Signup
             </Button>
           </div>
         </form>

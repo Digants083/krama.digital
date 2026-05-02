@@ -65,7 +65,7 @@ const ClinicLogin = () => {
         localStorage.setItem("clinic_id", data.clinic_id);
       }
 
-      // ðŸš€ Redirect to clinic dashboard immediately
+      // 🚀 Redirect to clinic dashboard immediately
       navigate("/clinic");
     } catch (err) {
       setError("Network error. Please try again.");
@@ -115,7 +115,15 @@ const ClinicLogin = () => {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  to="/clinic/forgot-password"
+                  className="text-xs text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
