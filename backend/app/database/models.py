@@ -76,6 +76,7 @@ class Appointment(Base):
     source = Column(String, default="online")
     slot_id = Column(Integer, nullable=True)
     push_count = Column(Integer, default=0)  # Number of times patient has been pushed to next slot
+    queue_position = Column(Integer, nullable=True)  # Position in queue for ordering
 
 class CompletedAppointment(Base):
     """Model for storing completed/served patient history"""
@@ -169,6 +170,7 @@ class QRAppointment(Base):
     status = Column(String, default="booked")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     slot_id = Column(Integer, nullable=True)
+    queue_position = Column(Integer, nullable=True)  # Position in queue for ordering
 
 class PendingClinicRegistration(Base):
     """Model for storing pending clinic registrations awaiting admin approval"""

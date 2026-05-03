@@ -292,10 +292,22 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE appointments "
             "ADD COLUMN IF NOT EXISTS slot_id INTEGER"
         )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS push_count INTEGER DEFAULT 0"
+        )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS queue_position INTEGER"
+        )
 
         await safe_exec(
             "ALTER TABLE qr_appointments "
             "ADD COLUMN IF NOT EXISTS slot_id INTEGER"
+        )
+        await safe_exec(
+            "ALTER TABLE qr_appointments "
+            "ADD COLUMN IF NOT EXISTS queue_position INTEGER"
         )
 
         await safe_exec(
@@ -317,6 +329,14 @@ async def lifespan(app: FastAPI):
         await safe_exec(
             "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS outcome VARCHAR DEFAULT 'served'"
+        )
+        await safe_exec(
+            "ALTER TABLE completed_appointments "
+            "ADD COLUMN IF NOT EXISTS served BOOLEAN DEFAULT TRUE"
+        )
+        await safe_exec(
+            "ALTER TABLE completed_appointments "
+            "ADD COLUMN IF NOT EXISTS push_count INTEGER DEFAULT 0"
         )
         
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS category VARCHAR")

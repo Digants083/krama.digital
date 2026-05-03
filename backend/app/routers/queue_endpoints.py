@@ -453,7 +453,8 @@ async def get_clinic_active_status(
 ):
     """
     Get clinic active status.
-    Automatically deactivates clinic if all open slots have ended.
+    Automatically deactivates clinic if 15 minutes before last open slot ends.
+    NEVER automatically activates - only manual activation allowed.
     """
     result = await db.execute(
         select(Clinic).where(Clinic.clinic_id == clinic_id)
@@ -463,13 +464,9 @@ async def get_clinic_active_status(
     if not clinic:
         return {"is_active": False}
 
-    # Automatic Deactivation Logic
-    # Check if all slots have expired
-    if await all_slots_expired(clinic_id, db):
-        clinic.is_active = False
-        await db.commit()
-    else:
-        # Also check 15 minutes before last slot ends (existing logic)
+    # Only check if we should go offline - never auto online
+    if clinic.is_active:
+        # Check 15 minutes before last open slot ends
         last_slot_end = await get_last_open_slot_end(clinic_id, db)
         if last_slot_end is not None:
             now = datetime.now()
@@ -721,21 +718,23 @@ async def skip_patient(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Skip a patient - they go to the end of the queue.
-    Order: A,B,C,D,E -> Skip A -> B,C,D,E,A
+    Skip a patient - move them one position back in queue.
+    Order: A,B,C,D,E -> Skip A -> B,A,C,D,E
+    Uses queue_position to maintain order without deleting data.
     """
     clinic_id = request.get("clinic_id")
     appointment_id = request.get("appointment_id")
     source = request.get("source", "online")
-    
+
     if not all([clinic_id, appointment_id]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing clinic_id or appointment_id"
         )
-    
+
     model = QRAppointment if source == "walkin" else Appointment
 
+    # Get the appointment to skip
     result = await db.execute(
         select(model).where(
             model.id == appointment_id,
@@ -743,65 +742,90 @@ async def skip_patient(
         )
     )
     skipped_appointment = result.scalar_one_or_none()
-    
+
     if not skipped_appointment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Appointment not found"
         )
-    
+
+    # Get all appointments for this clinic ordered by queue_position
     result = await db.execute(
         select(model).where(
             model.clinic_id == clinic_id
-        ).order_by(model.id)
+        ).order_by(model.queue_position)
     )
     all_appointments = result.scalars().all()
-    
-    # Find the skipped appointment and move it to the end by updating its id
-    # We do this by deleting and re-inserting with a new higher id
-    if len(all_appointments) > 1:
-        # Delete the skipped appointment
-        await db.delete(skipped_appointment)
-        await db.commit()
-        
-        # Re-create it at the end (new id will be highest)
-        if source == "walkin":
-            new_appointment = QRAppointment(
-                appointment_token=skipped_appointment.appointment_token,
-                clinic_id=skipped_appointment.clinic_id,
-                patient_name=skipped_appointment.patient_name,
-                patient_phone=skipped_appointment.patient_phone,
-                doctor_name=skipped_appointment.doctor_name,
-                date=skipped_appointment.date,
-                status="skipped"
-            )
-        else:
-            new_appointment = Appointment(
-                appointment_token=skipped_appointment.appointment_token,
-                clinic_id=skipped_appointment.clinic_id,
-                patient_id=skipped_appointment.patient_id,
-                patient_name=skipped_appointment.patient_name,
-                patient_email=skipped_appointment.patient_email,
-                patient_phone=skipped_appointment.patient_phone,
-                doctor_name=skipped_appointment.doctor_name,
-                date=skipped_appointment.date,
-                time=skipped_appointment.time,
-                status="skipped",
-                notification_stage=getattr(skipped_appointment, "notification_stage", "pending")
-            )
-        db.add(new_appointment)
-        await db.commit()
-        await db.refresh(new_appointment)
-    
-    return {
-        "message": "Patient skipped and moved to end of queue",
-        "skipped_patient": {
-            "id": new_appointment.id if len(all_appointments) > 1 else skipped_appointment.id,
-            "token": skipped_appointment.appointment_token,
-            "patient_name": skipped_appointment.patient_name,
-            "new_position": "end of queue"
+
+    if len(all_appointments) <= 1:
+        # Only one patient, nothing to skip
+        return {
+            "message": "Only one patient in queue, cannot skip",
+            "skipped_patient": {
+                "id": skipped_appointment.id,
+                "token": skipped_appointment.appointment_token,
+                "patient_name": skipped_appointment.patient_name,
+                "position": 1
+            }
         }
-    }
+
+    # Initialize queue positions if not set
+    for idx, apt in enumerate(all_appointments):
+        if apt.queue_position is None:
+            apt.queue_position = idx + 1
+
+    # Find the current position of the appointment to skip
+    current_position = skipped_appointment.queue_position
+
+    # If already at the end, nothing to skip
+    if current_position >= len(all_appointments):
+        return {
+            "message": "Patient already at end of queue",
+            "skipped_patient": {
+                "id": skipped_appointment.id,
+                "token": skipped_appointment.appointment_token,
+                "patient_name": skipped_appointment.patient_name,
+                "position": current_position
+            }
+        }
+
+    # Move the skipped patient one position back
+    # Swap positions with the next patient
+    next_position = current_position + 1
+
+    # Find the patient at the next position
+    next_patient = None
+    for apt in all_appointments:
+        if apt.queue_position == next_position:
+            next_patient = apt
+            break
+
+    if next_patient:
+        # Swap positions
+        skipped_appointment.queue_position = next_position
+        next_patient.queue_position = current_position
+
+        # Update status to skipped
+        skipped_appointment.status = "skipped"
+
+        await db.commit()
+        await db.refresh(skipped_appointment)
+
+        return {
+            "message": "Patient skipped and moved one position back",
+            "skipped_patient": {
+                "id": skipped_appointment.id,
+                "token": skipped_appointment.appointment_token,
+                "patient_name": skipped_appointment.patient_name,
+                "previous_position": current_position,
+                "new_position": next_position
+            }
+        }
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to find next patient in queue"
+        )
 
 
 @router.post("/clinic/push-patient-to-next-slot")
@@ -1221,7 +1245,7 @@ async def get_patient_dashboard(
             )
             if slot_id_filter is not None:
                 query = query.where(Appointment.slot_id == slot_id_filter)
-            result = await db.execute(query.order_by(Appointment.id))
+            result = await db.execute(query.order_by(Appointment.queue_position))
         
         appointments = result.scalars().all()
         
@@ -1229,7 +1253,7 @@ async def get_patient_dashboard(
             return {"your_token": None, "status": "not_found", "patients_ahead": 0}
         
         appointments = list(appointments)
-        appointments.sort(key=lambda item: item.id)
+        appointments.sort(key=lambda item: item.queue_position if item.queue_position is not None else item.id)
         apt = appointments[0]
         clinic = clinic_lookup.get(apt.clinic_id)
         
@@ -1444,7 +1468,8 @@ async def join_queue(
         doctor_name=payload.doctor_id,
         date=today,
         status="booked",
-        slot_id=slot_id
+        slot_id=slot_id,
+        queue_position=total_appointments + 1
     )
     db.add(walkin)
     await db.commit()
