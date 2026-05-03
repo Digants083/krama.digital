@@ -3,6 +3,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 import logging
+from typing import Optional
 from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables (ensure we pick up backend/.env when running uvicorn)
@@ -95,11 +96,11 @@ class EmailService:
         patient_name: str,
         clinic_name: str,
         alert_type: str,
-        token_number: str | None = None,
-        doctor_name: str | None = None,
-        clinic_location: str | None = None,
-        latitude: str | None = None,
-        longitude: str | None = None,
+        token_number: Optional[str] = None,
+        doctor_name: Optional[str] = None,
+        clinic_location: Optional[str] = None,
+        latitude: Optional[str] = None,
+        longitude: Optional[str] = None,
     ) -> bool:
         """Send queue progress alerts for patients nearing their turn."""
         safe_name = patient_name or "Patient"
@@ -243,11 +244,11 @@ def send_queue_alert(
     patient_name: str,
     clinic_name: str,
     alert_type: str,
-    token_number: str | None = None,
-    doctor_name: str | None = None,
-    clinic_location: str | None = None,
-    latitude: str | None = None,
-    longitude: str | None = None,
+    token_number: Optional[str] = None,
+    doctor_name: Optional[str] = None,
+    clinic_location: Optional[str] = None,
+    latitude: Optional[str] = None,
+    longitude: Optional[str] = None,
 ) -> bool:
     """Convenience function to send queue alert email"""
     return email_service.send_queue_alert_email(
@@ -560,7 +561,7 @@ def send_patient_report_email(
     patient_name: str,
     clinic_name: str,
     pdf_path: str,
-    notes: str | None = None
+    notes: Optional[str] = None
 ) -> bool:
     """
     Send patient report email with PDF attachment.

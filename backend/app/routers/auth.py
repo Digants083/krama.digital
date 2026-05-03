@@ -4054,7 +4054,7 @@ async def get_today_appointments(
 
     clinic_id: str = Query(..., description="Clinic ID"),
 
-    slot_id: int | None = Query(None, description="Optional slot ID to view"),
+    slot_id: Optional[int] = Query(None, description="Optional slot ID to view"),
 
     db: AsyncSession = Depends(get_db)
 
@@ -4078,7 +4078,7 @@ async def get_today_appointments(
 
 
 
-    def _parse_slot_record(slot_record: ClinicTimeSlot | None):
+    def _parse_slot_record(slot_record: Optional[ClinicTimeSlot]):
 
         if not slot_record:
 
@@ -4110,7 +4110,7 @@ async def get_today_appointments(
 
 
 
-    def _current_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> int | None:
+    def _current_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> Optional[int]:
 
         for idx, slot in enumerate(slots or []):
 
@@ -4130,7 +4130,7 @@ async def get_today_appointments(
 
 
 
-    def _next_open_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> int | None:
+    def _next_open_slot_index(slots: list, slot_array: list, current_time_decimal: float) -> Optional[int]:
 
         candidates: list[tuple[float, int]] = []
 

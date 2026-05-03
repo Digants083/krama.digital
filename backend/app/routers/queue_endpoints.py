@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, and_, func
@@ -17,7 +18,7 @@ def _load_slots(raw_slots):
     return list(slots or [])
 
 
-def _can_modify_slots(last_change_date: datetime | None, current_slot_count: int) -> tuple[bool, str]:
+def _can_modify_slots(last_change_date: Optional[datetime], current_slot_count: int) -> tuple[bool, str]:
     """
     Check if clinic can modify their slots based on 7-day cooldown rule.
     Cooldown only applies when clinic has 3 slots (maximum allowed).
@@ -49,7 +50,7 @@ def _can_modify_slots(last_change_date: datetime | None, current_slot_count: int
     return True, "Slot modification allowed - 7-day cooldown period has passed"
 
 
-def _can_toggle_slot(last_toggle_date: datetime | None, slot_toggle_counts: list, slot_index: int) -> tuple[bool, str]:
+def _can_toggle_slot(last_toggle_date: Optional[datetime], slot_toggle_counts: list, slot_index: int) -> tuple[bool, str]:
     """
     Check if clinic can toggle a specific slot open/close based on daily limit (2 times per slot).
 
@@ -190,7 +191,7 @@ async def all_slots_expired(clinic_id: str, db: AsyncSession) -> bool:
 
     return True
 
-def _token_number(token: str | None) -> int:
+def _token_number(token: Optional[str]) -> int:
     if not token:
         return 0
     digits = "".join(ch for ch in token if ch.isdigit())
@@ -1310,7 +1311,6 @@ async def get_patient_dashboard(
 # ─────────────────────────────────────────────────────────────────────────────
 
 from pydantic import BaseModel
-from typing import Optional
 
 class QueueJoinRequest(BaseModel):
     clinic_id: str
@@ -1981,4 +1981,3 @@ async def get_slot_queue_counts(
         "clinic_id": clinic_id,
         "slot_counts": slot_counts
     }
-

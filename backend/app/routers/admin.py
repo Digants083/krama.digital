@@ -6,7 +6,7 @@ import random
 import string
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import Optional, List, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Header
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ from app.services.email_service import (
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_SESSION_HOURS = 24
-admin_sessions: dict[str, dict[str, str | datetime]] = {}
+admin_sessions: dict[str, dict[str, Union[str, datetime]]] = {}
 
 
 def generate_clinic_id():
