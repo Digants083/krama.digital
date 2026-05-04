@@ -8,6 +8,7 @@ from sqlalchemy import text, select
 from sqlalchemy.exc import DBAPIError
 from app.database.db import engine, AsyncSessionLocal
 from app.database.models import Base, Appointment, Clinic, ClinicTimeSlot
+from app.database.schema_checks import ensure_required_schema
 from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports
 from app.services.email_service import send_queue_alert
 import json
@@ -357,6 +358,7 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE")
 
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS daily_toggle_counts JSON DEFAULT '[]'")
+        await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS last_slot_change_date TIMESTAMP")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS last_toggle_date TIMESTAMP")
 
         await safe_exec("ALTER TABLE pending_clinic_registrations ADD COLUMN IF NOT EXISTS category VARCHAR")
@@ -464,6 +466,8 @@ async def lifespan(app: FastAPI):
                 """)
             )
             logger.info("Created admin accounts: admin1 and admin2")
+
+        await ensure_required_schema(conn)
     
     # Start background scheduled tasks
     pre_slot_task = asyncio.create_task(scheduled_pre_slot_notifications())
