@@ -4236,7 +4236,7 @@ async def get_today_appointments(
 
             Appointment.slot_id == viewing_slot_id
 
-        ).order_by(Appointment.id)
+        ).order_by(Appointment.queue_position)
 
     )
 
@@ -4256,7 +4256,7 @@ async def get_today_appointments(
 
             QRAppointment.slot_id == viewing_slot_id
 
-        ).order_by(QRAppointment.id)
+        ).order_by(QRAppointment.queue_position)
 
     )
 
@@ -4302,6 +4302,8 @@ async def get_today_appointments(
 
             "created_at": apt.created_at,
 
+            "queue_position": apt.queue_position,
+
             "source": apt.source or "online"
 
         })
@@ -4340,15 +4342,17 @@ async def get_today_appointments(
 
             "created_at": apt.created_at,
 
+            "queue_position": apt.queue_position,
+
             "source": "walkin"
 
         })
 
 
 
-    # Sort by created_at time
+    # Sort by queue_position (not created_at) to respect skip/reorder operations
 
-    appointment_list.sort(key=lambda x: x["created_at"] or datetime.min)
+    appointment_list.sort(key=lambda x: x.get("queue_position") or float('inf'))
 
 
 

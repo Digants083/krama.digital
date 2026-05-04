@@ -8,6 +8,8 @@ type QueueItem = {
   source: "online" | "desk" | "walkin" | "skipped";
   clinic_id: string;
   appointment_id?: number;
+  queue_position?: number;
+  slot_id?: number;
 };
 
 type QueueStats = {
@@ -107,6 +109,8 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
           source: apt.source === "walkin" ? "walkin" : "online",
           clinic_id: apt.clinic_id,
           appointment_id: apt.id,
+          queue_position: apt.queue_position,
+          slot_id: apt.slot_id,
         }));
 
         setQueue(queueItems);
