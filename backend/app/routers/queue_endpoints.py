@@ -838,6 +838,7 @@ async def push_patient_to_next_slot(
     Push an unserved patient from their current slot to the end of the next available slot's queue.
     Sends email notification to the patient.
     If already in the last slot, auto-finishes with outcome='not_served' instead.
+    For walkin/QR patients, always auto-finish with 'not_served' (no slot pushing).
     """
     import logging
     from datetime import timezone
@@ -846,6 +847,7 @@ async def push_patient_to_next_slot(
 
     clinic_id = request.get("clinic_id")
     appointment_id = request.get("appointment_id")
+    source = request.get("source", "online")  # "online" or "walkin"
 
     if not all([clinic_id, appointment_id]):
         raise HTTPException(
@@ -853,20 +855,69 @@ async def push_patient_to_next_slot(
             detail="Missing clinic_id or appointment_id"
         )
 
-    # Get the appointment
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.id == appointment_id,
-            Appointment.clinic_id == clinic_id
+    # Get the appointment from the correct table based on source
+    if source == "walkin":
+        result = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.id == appointment_id,
+                QRAppointment.clinic_id == clinic_id
+            )
         )
-    )
-    appointment = result.scalar_one_or_none()
+        appointment = result.scalar_one_or_none()
+    else:
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.id == appointment_id,
+                Appointment.clinic_id == clinic_id
+            )
+        )
+        appointment = result.scalar_one_or_none()
 
     if not appointment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Appointment not found"
         )
+
+    # For walkin/QR patients, always auto-finish with not_served
+    if source == "walkin":
+        served_at = appointment.created_at
+        if served_at.tzinfo is None:
+            served_at = served_at.replace(tzinfo=timezone.utc)
+        finished_at = datetime.now(timezone.utc)
+        wait_time = int((finished_at - served_at).total_seconds() / 60)
+
+        # Get current push_count and increment it
+        current_push_count = getattr(appointment, 'push_count', 0)
+
+        completed = CompletedAppointment(
+            appointment_token=appointment.appointment_token,
+            clinic_id=appointment.clinic_id,
+            patient_id=f"qr-{appointment.id}",  # QR appointments don't have patient_id
+            patient_name=appointment.patient_name,
+            patient_email="",  # QR appointments don't have email
+            patient_phone=appointment.patient_phone,
+            doctor_name=appointment.doctor_name,
+            date=appointment.date,
+            time="walk-in",
+            slot_id=appointment.slot_id,
+            served_at=served_at,
+            finished_at=finished_at,
+            status="auto_finished",
+            wait_time_minutes=wait_time,
+            outcome="not_served",
+            served=False,  # Not served - walkin patient was pushed
+            push_count=current_push_count + 1  # Increment push count
+        )
+        db.add(completed)
+        await db.delete(appointment)
+        await db.commit()
+
+        return {
+            "message": "Walk-in patient marked as not served",
+            "action": "auto_finished",
+            "outcome": "not_served"
+        }
 
     # Get clinic time slots
     slot_result = await db.execute(

@@ -396,7 +396,7 @@ const ClinicControlQueue = () => {
     }
   };
 
-  const pushPatientToNextSlot = async (appointmentId: number, token: string) => {
+  const pushPatientToNextSlot = async (appointmentId: number, token: string, source: string) => {
     if (!window.confirm(`Push patient ${token} to the next available slot? They will be added to the end of the queue and receive an email notification.`)) {
       return;
     }
@@ -408,7 +408,8 @@ const ClinicControlQueue = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clinic_id: clinicId,
-          appointment_id: appointmentId
+          appointment_id: appointmentId,
+          source: source
         })
       });
 
@@ -780,7 +781,7 @@ const ClinicControlQueue = () => {
                             size="sm"
                             variant="outline"
                             className="h-8 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
-                            onClick={() => pushPatientToNextSlot(p.appointment_id, p.token)}
+                            onClick={() => pushPatientToNextSlot(p.appointment_id, p.token, p.source)}
                             disabled={pushingToken === p.token}
                           >
                             <MoveRight className="h-3 w-3 mr-1" />
