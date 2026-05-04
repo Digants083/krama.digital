@@ -157,37 +157,53 @@ const ClinicControlQueue = () => {
           const now = new Date();
           const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-          // Check if all slots have expired
-          let allExpired = true;
-          for (const slot of slots) {
-            if (slot.is_open) {
+          // Check if there are future slots available today
+          const hasFutureSlots = () => {
+            for (const slot of slots) {
+              if (!slot.is_open) continue;
+
               const endMinutes = slot.time_range[1] * 60;
               if (currentMinutes < endMinutes) {
-                allExpired = false;
-                break;
+                return true; // There are future slots
               }
             }
-          }
+            return false; // No future slots
+          };
 
-          // If all slots expired, auto deactivate
-          if (allExpired) {
-            handleDeactivate();
-          } else {
-            // Also check 15 minutes before last OPEN slot ends (existing logic)
-            let latestEndMinutes = 0;
+          // Only auto-deactivate if no future slots available
+          if (!hasFutureSlots()) {
+            // Check if all slots have expired
+            let allExpired = true;
             for (const slot of slots) {
               if (slot.is_open) {
                 const endMinutes = slot.time_range[1] * 60;
-                if (endMinutes > latestEndMinutes) {
-                  latestEndMinutes = endMinutes;
+                if (currentMinutes < endMinutes) {
+                  allExpired = false;
+                  break;
                 }
               }
             }
 
-            // If current time is past (end - 15min), auto deactivate
-            const cutoffMinutes = latestEndMinutes - 15;
-            if (currentMinutes >= cutoffMinutes && latestEndMinutes > 0) {
+            // If all slots expired, auto deactivate
+            if (allExpired) {
               handleDeactivate();
+            } else {
+              // Also check 15 minutes before last OPEN slot ends
+              let latestEndMinutes = 0;
+              for (const slot of slots) {
+                if (slot.is_open) {
+                  const endMinutes = slot.time_range[1] * 60;
+                  if (endMinutes > latestEndMinutes) {
+                    latestEndMinutes = endMinutes;
+                  }
+                }
+              }
+
+              // If current time is past (end - 15min), auto deactivate
+              const cutoffMinutes = latestEndMinutes - 15;
+              if (currentMinutes >= cutoffMinutes && latestEndMinutes > 0) {
+                handleDeactivate();
+              }
             }
           }
         }
@@ -322,21 +338,32 @@ const ClinicControlQueue = () => {
 
   // Check if current time is past the viewing slot's start time
   const canServeInCurrentSlot = () => {
-    const slotToCheck = selectedSlotId ?? viewingSlotId;
-    if (slotToCheck === null || timeSlots.length === 0) return false;
-    
-    const slotIndex = slotToCheck - 1; // Convert to 0-based index
-    if (slotIndex < 0 || slotIndex >= timeSlots.length) return false;
-    
-    const slot = timeSlots[slotIndex];
-    
+    if (timeSlots.length === 0) return false;
+
     const now = new Date();
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
     const currentTimeDecimal = currentHour + currentMinute / 60.0;
-    
-    // Can serve if current time is >= slot start time
-    return currentTimeDecimal >= slot.time_range[0];
+
+    // Check if can serve in ANY available slot
+    for (const slot of timeSlots) {
+      if (!slot.is_open) continue;
+
+      const [startHour, endHour] = slot.time_range;
+
+      // Can serve if current time is >= (slot start - 7.5 minutes)
+      const startThreshold = startHour - 7.5 / 60; // 7.5 minutes in hours
+      if (currentTimeDecimal >= startThreshold && currentTimeDecimal < endHour) {
+        return true;
+      }
+    }
+
+    // Can serve if there are patients in queue (even after all slot end times)
+    if (queue.length > 0) {
+      return true;
+    }
+
+    return false;
   };
 
   // Check if a slot is currently available based on time
