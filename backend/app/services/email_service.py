@@ -1,6 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 import os
 import logging
 from typing import Optional
@@ -484,6 +485,76 @@ def send_slot_push_email(to_email: str, patient_name: str, clinic_name: str, old
     return email_service._send_email(to_email, subject, text_content, html_content)
 
 
+def send_not_served_email(to_email: str, patient_name: str, clinic_name: str, slot_name: str = None) -> bool:
+    """Send email to patient when they are marked as not served (no more slots available)."""
+    slot_info = f"<p><strong>Your slot:</strong> {slot_name}</p>" if slot_name else ""
+    slot_info_plain = f"Your slot: {slot_name}\n" if slot_name else ""
+
+    subject = f"Appointment Update - {clinic_name}"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .card {{ background: #fff5f5; border: 1px solid #ffcccc; border-radius: 10px; padding: 24px; }}
+        .title {{ color: #dc3545; margin-bottom: 12px; }}
+        .footer {{ font-size: 12px; color: #777; margin-top: 20px; }}
+        .info-box {{ background: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; border-radius: 4px; margin: 15px 0; }}
+        .button {{ display: inline-block; padding: 12px 24px; background: #00555A; color: white; text-decoration: none; border-radius: 6px; margin-top: 15px; }}
+    </style>
+    </head>
+    <body>
+    <div class="container">
+    <div class="card">
+        <h2 class="title">Appointment Could Not Be Completed</h2>
+        <p>Hello {patient_name},</p>
+        <p>Unfortunately, we were unable to serve your appointment today as there are no more available time slots.</p>
+        {slot_info}
+        <div class="info-box">
+            <p><strong>What this means:</strong></p>
+            <ul>
+                <li>Your appointment has been marked as not served</li>
+                <li>All time slots for today have ended or are fully booked</li>
+                <li>You'll need to book a new appointment for your next visit</li>
+            </ul>
+        </div>
+        <p>We're sorry for any inconvenience. Please try booking again tomorrow or contact the clinic directly.</p>
+        <p><strong>Clinic:</strong> {clinic_name}</p>
+    </div>
+    <div class="footer">Krama Care</div>
+    </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+Appointment Could Not Be Completed
+===================================
+
+Hello {patient_name},
+
+Unfortunately, we were unable to serve your appointment today as there are no more available time slots.
+
+{slot_info_plain}
+What this means:
+- Your appointment has been marked as not served
+- All time slots for today have ended or are fully booked
+- You'll need to book a new appointment for your next visit
+
+We're sorry for any inconvenience. Please try booking again tomorrow or contact the clinic directly.
+
+Clinic: {clinic_name}
+
+Thank you,
+Krama Care
+"""
+
+    return email_service._send_email(to_email, subject, text_content, html_content)
+
+
 def send_clinic_rejection_email(to_email: str, clinic_name: str, reason: str = None) -> bool:
     """
     Send email to clinic informing them their registration has been rejected.
@@ -577,6 +648,12 @@ def send_patient_report_email(
         bool: True if email sent successfully, False otherwise
     """
     try:
+        if not email_service.smtp_user or not email_service.smtp_password:
+            logger.warning(
+                "SMTP credentials not configured (SMTP_USERNAME/SMTP_PASSWORD). Patient report email not sent."
+            )
+            return False
+
         subject = f"Your Medical Report from {clinic_name}"
 
         # HTML email content
@@ -661,10 +738,15 @@ def send_patient_report_email(
         """
 
         # Create email with attachment
-        msg = MIMEMultipart()
+        msg = MIMEMultipart("mixed")
         msg['From'] = email_service.sender_email
         msg['To'] = patient_email
         msg['Subject'] = subject
+
+        body = MIMEMultipart("alternative")
+        body.attach(MIMEText(text_content, "plain"))
+        body.attach(MIMEText(html_content, "html"))
+        msg.attach(body)
 
         # Attach the PDF file
         if os.path.exists(pdf_path):
@@ -678,12 +760,6 @@ def send_patient_report_email(
         else:
             logger.error(f"PDF file not found: {pdf_path}")
             return False
-
-        # Attach HTML and text parts
-        part1 = MIMEText(text_content, "plain")
-        part2 = MIMEText(html_content, "html")
-        msg.attach(part1)
-        msg.attach(part2)
 
         # Connect to SMTP server and send
         with smtplib.SMTP(email_service.smtp_host, email_service.smtp_port, timeout=20) as server:

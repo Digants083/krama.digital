@@ -57,6 +57,7 @@ const ClinicControlQueue = () => {
   const [clinicId, setClinicId] = useState("");
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isClinicActive, setIsClinicActive] = useState(false);
+  const [manualStopLocked, setManualStopLocked] = useState(false);
   const [activating, setActivating] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
@@ -119,6 +120,7 @@ const ClinicControlQueue = () => {
   const walkinCount = queue.filter((p) => p.source === "walkin").length;
 
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [slotStatus, setSlotStatus] = useState<string[]>([]); // "open" or "close" for each slot
   const [loadingSlots, setLoadingSlots] = useState(false);
 
   useEffect(() => {
@@ -151,6 +153,7 @@ const ClinicControlQueue = () => {
         const data = await response.json();
         const slots = data.slots || [];
         setTimeSlots(slots);
+        setSlotStatus(data.slot || []); // Set the slot status array (open/close)
 
         // Auto-logout: check if current time is past all slot end times
         if (isClinicActive && slots.length > 0) {
@@ -186,7 +189,7 @@ const ClinicControlQueue = () => {
 
             // If all slots expired, auto deactivate
             if (allExpired) {
-              handleDeactivate();
+              handleDeactivate(false);
             } else {
               // Also check 15 minutes before last OPEN slot ends
               let latestEndMinutes = 0;
@@ -202,7 +205,7 @@ const ClinicControlQueue = () => {
               // If current time is past (end - 15min), auto deactivate
               const cutoffMinutes = latestEndMinutes - 15;
               if (currentMinutes >= cutoffMinutes && latestEndMinutes > 0) {
-                handleDeactivate();
+                handleDeactivate(false);
               }
             }
           }
@@ -219,7 +222,10 @@ const ClinicControlQueue = () => {
     if (clinicId) {
       fetch(`/api/auth/clinic/active-status?clinic_id=${clinicId}`)
         .then(res => res.json())
-        .then(data => setIsClinicActive(data.is_active || false))
+        .then(data => {
+          setIsClinicActive(data.is_active || false);
+          setManualStopLocked(data.manual_stop_locked || false);
+        })
         .catch(console.error);
     }
   }, [clinicId]);
@@ -234,6 +240,7 @@ const ClinicControlQueue = () => {
       });
       if (response.ok) {
         setIsClinicActive(true);
+        setManualStopLocked(false);
         setMessage({ text: "Clinic is now live.", type: "success" });
         fetchTimeSlots();
       } else {
@@ -248,17 +255,22 @@ const ClinicControlQueue = () => {
     }
   };
 
-  const handleDeactivate = async () => {
+  const handleDeactivate = async (manualStop = true) => {
     setActivating(true);
     try {
       const response = await fetch("/api/auth/clinic/set-active", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clinic_id: clinicId, is_active: false })
+        body: JSON.stringify({ clinic_id: clinicId, is_active: false, manual_stop: manualStop })
       });
       if (response.ok) {
+        const data = await response.json().catch(() => ({}));
         setIsClinicActive(false);
-        setMessage({ text: "Clinic is now offline.", type: "success" });
+        setManualStopLocked(data.manual_stop_date ? manualStop : false);
+        setMessage({
+          text: manualStop ? "Clinic is offline for today." : "Clinic is now offline.",
+          type: "success"
+        });
       } else {
         const error = await response.json().catch(() => ({}));
         setMessage({ text: error.detail || "Could not stop clinic.", type: "error" });
@@ -366,8 +378,11 @@ const ClinicControlQueue = () => {
     return false;
   };
 
-  // Check if a slot is currently available based on time
-  const isSlotCurrentlyAvailable = (slot: TimeSlot): boolean => {
+  // Check if a slot is currently available based on time and status
+  const isSlotCurrentlyAvailable = (slot: TimeSlot, index: number): boolean => {
+    // Check if slot is marked as "close" in the slotStatus array
+    if (slotStatus[index] === "close") return false;
+    
     if (!slot.is_open) return false;
 
     const now = new Date();
@@ -521,14 +536,14 @@ const ClinicControlQueue = () => {
             <div className="flex gap-3">
               <Button
                 onClick={handleActivate}
-                disabled={activating || isClinicActive || allSlotsExpired() || !canActivateNow()}
+                disabled={activating || isClinicActive || manualStopLocked || allSlotsExpired() || !canActivateNow()}
                 className="bg-green-500 hover:bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all"
               >
                 <Play className="h-4 w-4 mr-2" />
                 Start
               </Button>
               <Button
-                onClick={handleDeactivate}
+                onClick={() => handleDeactivate(true)}
                 disabled={activating || !isClinicActive}
                 variant="outline"
                 className="border-red-300 text-red-500 hover:bg-red-50 px-6 py-2.5 rounded-lg font-medium transition-all"
@@ -564,7 +579,9 @@ const ClinicControlQueue = () => {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {timeSlots.map((slot, index) => {
-                    const isCurrentlyAvailable = isSlotCurrentlyAvailable(slot);
+                    const isCurrentlyAvailable = isSlotCurrentlyAvailable(slot, index);
+                    const isSlotClosed = slotStatus[index] === "close";
+                    const isExpired = !isCurrentlyAvailable && !isSlotClosed && slot.is_open;
                     return (
                       <button
                         type="button"
@@ -577,7 +594,7 @@ const ClinicControlQueue = () => {
                               ? "bg-gradient-to-r from-green-50 to-white border-green-200"
                               : "bg-slate-50 border-slate-200"
                         }`}
-                        disabled={!slot.is_open}
+                        disabled={isSlotClosed || !slot.is_open || isExpired}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -586,8 +603,8 @@ const ClinicControlQueue = () => {
                               {formatTimeRange(slot.time_range)}
                             </p>
                           </div>
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isCurrentlyAvailable ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
-                            {isCurrentlyAvailable ? 'Available' : 'Unavailable'}
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isExpired ? 'bg-red-100 text-red-700' : isCurrentlyAvailable ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+                            {isExpired ? 'Expired' : (isSlotClosed ? 'Not Available' : (isCurrentlyAvailable ? 'Available' : 'Unavailable'))}
                           </span>
                         </div>
                       </button>

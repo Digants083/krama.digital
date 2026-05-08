@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, FileText, Upload, Send, CheckCircle, XCircle, Clock, Mail, Phone, User, RefreshCw, Download, Package } from "lucide-react";
+import { ArrowLeft, FileText, Upload, Send, CheckCircle, XCircle, Clock, Mail, Phone, User, RefreshCw, Download, Package, ChevronDown, ChevronUp, Calendar, FileUp } from "lucide-react";
 import { toast } from "sonner";
 
 interface PendingReport {
@@ -14,6 +14,197 @@ interface PendingReport {
   report_pdf: string | null;
   report_type: string | null;
 }
+
+// Expandable Card Component
+const PendingReportCard = ({ 
+  report, 
+  processing, 
+  selectedFiles, 
+  onProcess, 
+  onFileSelect,
+  onUploadPdf,
+  uploadingPdf 
+}: {
+  report: PendingReport;
+  processing: number | null;
+  selectedFiles: Record<number, File | undefined>;
+  onProcess: (report: PendingReport, action: "send" | "collected" | "no_report", pdfPath?: string) => void;
+  onFileSelect: (e: React.ChangeEvent<HTMLInputElement>, reportId: number) => void;
+  onUploadPdf: (report: PendingReport) => Promise<string>;
+  uploadingPdf: number | null;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [pdfPath, setPdfPath] = useState<string | null>(report.report_pdf);
+  const selectedFile = selectedFiles[report.report_id];
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  };
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#00555A]/10 bg-white shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)]">
+      {/* Header - always visible */}
+      <div 
+        className="cursor-pointer p-4 transition-colors hover:bg-[#00555A]/5"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-[#00555A]/10 p-2">
+              <User className="h-5 w-5 text-[#00555A]" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-[#0F172A]">{report.patient_name}</h3>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Mail className="h-3 w-3" />
+                  {report.patient_email}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Phone className="h-3 w-3" />
+                  {report.patient_phone}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-[#FFC107]/40 bg-[#FFC107]/20 px-3 py-1 text-xs font-semibold text-[#7A5800]">
+              Pending
+            </span>
+            {expanded ? (
+                <ChevronUp className="h-5 w-5 text-[#00555A]" />
+            ) : (
+                <ChevronDown className="h-5 w-5 text-[#00555A]" />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded Content */}
+      {expanded && (
+        <div className="border-t border-[#00555A]/10 bg-secondary/50 p-4">
+          {/* Booking Details */}
+          <div className="mb-4">
+            <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#00555A]">
+              <Calendar className="h-4 w-4" />
+              Appointment Details
+            </h4>
+            <div className="rounded-lg border border-[#00555A]/10 bg-white p-3 text-sm">
+              <p className="text-[#0F172A]">
+                <span className="font-medium">Booked on:</span> {formatDate(report.created_at)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Patient ID: {report.patient_id}
+              </p>
+            </div>
+          </div>
+
+          {/* PDF Upload Section */}
+          <div className="mb-4">
+            <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#00555A]">
+              <FileUp className="h-4 w-4" />
+              Upload Report PDF
+            </h4>
+            <div className="flex gap-2 items-center">
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={(e) => onFileSelect(e, report.report_id)}
+                className="flex-1 text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-[#00555A] file:px-4 file:py-2 file:text-white hover:file:bg-[#004448]"
+              />
+              {selectedFile && !pdfPath && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    setUploading(true);
+                    try {
+                      const path = await onUploadPdf(report);
+                      setPdfPath(path);
+                      toast.success("PDF uploaded successfully!");
+                    } catch (error: any) {
+                      toast.error(error.message || "Failed to upload PDF");
+                    } finally {
+                      setUploading(false);
+                    }
+                  }}
+                  disabled={uploading || uploadingPdf === report.report_id}
+                  className="border-[#00555A] text-[#00555A] hover:bg-[#00555A]/10"
+                >
+                  {uploading || uploadingPdf === report.report_id ? (
+                    <div className="animate-spin h-4 w-4 border-2 border-[#00555A] border-t-transparent rounded-full" />
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" />
+                      Upload
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+            {selectedFile && (
+              <p className="mt-2 text-xs text-[#00555A]">
+                Selected: {selectedFile.name}
+              </p>
+            )}
+            {pdfPath && (
+              <p className="mt-2 text-xs font-medium text-[#00555A]">
+                PDF uploaded: {pdfPath.split('/').pop()}
+              </p>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => onProcess(report, "send", pdfPath || undefined)}
+              disabled={processing === report.report_id || uploading || (!pdfPath && !selectedFile)}
+              size="sm"
+              className="gap-1 bg-[#00555A] text-white hover:bg-[#004448]"
+            >
+              {processing === report.report_id ? (
+                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+              ) : (
+                <>
+                  <Send className="h-4 w-4" />
+                  {selectedFile && !pdfPath ? "Upload & Send" : "Send PDF"}
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={() => onProcess(report, "collected")}
+              disabled={processing === report.report_id}
+              size="sm"
+              variant="outline"
+              className="gap-1 border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"
+            >
+              <CheckCircle className="h-4 w-4" />
+              Collected
+            </Button>
+            <Button
+              onClick={() => onProcess(report, "no_report")}
+              disabled={processing === report.report_id}
+              size="sm"
+              variant="outline"
+              className="gap-1 border-border text-muted-foreground hover:bg-secondary"
+            >
+              <XCircle className="h-4 w-4" />
+              No Report
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface CompletedReport {
   report_id: number;
@@ -47,7 +238,7 @@ const ClinicPatientReports = () => {
   const [loading, setLoading] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState<number | null>(null);
   const [processing, setProcessing] = useState<number | null>(null);
-  const [selectedFiles, setSelectedFiles] = useState<Record<number, File>>({});
+  const [selectedFiles, setSelectedFiles] = useState<Record<number, File | undefined>>({});
   const [notesMap, setNotesMap] = useState<Record<number, string>>({});
   const [activeTab, setActiveTab] = useState<"pending" | "completed">("pending");
 
@@ -121,7 +312,7 @@ const ClinicPatientReports = () => {
     const selectedFile = selectedFiles[report.report_id];
     if (!selectedFile) {
       toast.error("Please select a PDF file first");
-      return;
+      throw new Error("Please select a PDF file first");
     }
 
     setUploadingPdf(report.report_id);
@@ -131,7 +322,7 @@ const ClinicPatientReports = () => {
       const formData = new FormData();
       formData.append("file", selectedFile);
 
-      const uploadResponse = await fetch(`/api/clinic/reports/upload-pdf?clinic_id=${clinicId}&patient_id=${report.patient_id}`, {
+      const uploadResponse = await fetch(`/api/clinic/reports/upload-pdf?clinic_id=${clinicId}&patient_id=${report.patient_id}&report_id=${report.report_id}`, {
         method: "POST",
         body: formData,
       });
@@ -143,7 +334,11 @@ const ClinicPatientReports = () => {
 
       const uploadData = await uploadResponse.json();
       toast.success("PDF uploaded successfully");
-      setSelectedFiles(prev => ({ ...prev, [report.report_id]: null }));
+      setSelectedFiles(prev => {
+        const next = { ...prev };
+        delete next[report.report_id];
+        return next;
+      });
 
       // Update the report with the PDF path
       return uploadData.file_path;
@@ -157,17 +352,22 @@ const ClinicPatientReports = () => {
     }
   };
 
-  const handleProcessReport = async (report: PendingReport, action: "send" | "collected" | "no_report") => {
+  const handleProcessReport = async (report: PendingReport, action: "send" | "collected" | "no_report", pdfPath?: string) => {
     setProcessing(report.report_id);
 
     try {
-      let pdfPath = report.report_pdf;
+      let finalPdfPath = pdfPath || report.report_pdf;
       const selectedFile = selectedFiles[report.report_id];
       const notes = notesMap[report.report_id] || "";
 
-      // If action is "send" and no PDF uploaded, upload it first
-      if (action === "send" && !pdfPath && selectedFile) {
-        pdfPath = await handleUploadPdf(report);
+      // Send must include a PDF. If the clinic selected one, upload it first.
+      if (action === "send" && selectedFile) {
+        finalPdfPath = await handleUploadPdf(report);
+      }
+
+      if (action === "send" && !finalPdfPath) {
+        toast.error("Please upload a PDF before sending");
+        return;
       }
 
       const response = await fetch("/api/clinic/reports/process", {
@@ -176,15 +376,19 @@ const ClinicPatientReports = () => {
         body: JSON.stringify({
           report_id: report.report_id,
           action: action,
-          pdf_path: pdfPath,
+          pdf_path: finalPdfPath,
           notes: notes
         }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        toast.success(`Report ${action} successfully`);
-        setSelectedFiles(prev => ({ ...prev, [report.report_id]: null }));
+        toast.success(action === "send" ? "PDF sent to patient email" : `Report ${action} successfully`);
+        setSelectedFiles(prev => {
+          const next = { ...prev };
+          delete next[report.report_id];
+          return next;
+        });
         setNotesMap(prev => ({ ...prev, [report.report_id]: "" }));
         await fetchPendingReports();
         await fetchCompletedReports();
@@ -216,9 +420,9 @@ const ClinicPatientReports = () => {
     if (!reportType) return null;
 
     const styles = {
-      sent: "bg-green-100 text-green-700 border-green-200",
-      collected: "bg-blue-100 text-blue-700 border-blue-200",
-      no_report: "bg-slate-100 text-slate-700 border-slate-200"
+      sent: "bg-[#00555A]/10 text-[#00555A] border-[#00555A]/20",
+      collected: "bg-[#00555A]/10 text-[#00555A] border-[#00555A]/20",
+      no_report: "bg-[#FFC107]/20 text-[#7A5800] border-[#FFC107]/40"
     };
     const labels = {
       sent: "Email Sent",
@@ -234,32 +438,32 @@ const ClinicPatientReports = () => {
 
   const getStatusIcon = (status: boolean) => {
     return status ? (
-      <CheckCircle className="h-5 w-5 text-green-600" />
+      <CheckCircle className="h-5 w-5 text-[#00555A]" />
     ) : (
-      <XCircle className="h-5 w-5 text-slate-400" />
+      <XCircle className="h-5 w-5 text-[#7A5800]" />
     );
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
+      <header className="sticky top-0 z-50 border-b border-[#00555A]/20 bg-white/95 shadow-sm backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate("/clinic")}
-              className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+              className="rounded-lg bg-[#00555A]/10 p-2 text-[#00555A] transition-colors hover:bg-[#00555A]/15"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
             <div>
-              <h1 className="text-xl font-bold text-slate-800">Patient Reports</h1>
-              <p className="text-xs text-slate-500">Manage and send medical reports</p>
+              <h1 className="text-xl font-bold text-[#0F172A]">Patient Reports</h1>
+              <p className="text-xs text-muted-foreground">Manage and send medical reports</p>
             </div>
           </div>
           <Button
             variant="outline"
-            className="border-slate-300 text-slate-600 hover:bg-slate-100 px-4 py-2 rounded-lg font-medium transition-all"
+            className="rounded-lg border-[#00555A]/30 px-4 py-2 font-medium text-[#00555A] transition-all hover:bg-[#00555A]/10"
             onClick={() => {
               fetchPendingReports();
               fetchCompletedReports();
@@ -276,33 +480,33 @@ const ClinicPatientReports = () => {
         {/* Stats Cards */}
         {stats && (
           <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
-              <div className="bg-slate-100 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
-                <FileText className="h-5 w-5 text-slate-600" />
+            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
+                <FileText className="h-5 w-5 text-[#00555A]" />
               </div>
-              <p className="text-xs text-slate-500 font-medium mb-1">Pending</p>
-              <p className="text-3xl font-bold text-slate-800">{stats.pending}</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Pending</p>
+              <p className="text-3xl font-bold text-[#0F172A]">{stats.pending}</p>
             </div>
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
-              <div className="bg-green-100 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
-                <CheckCircle className="h-5 w-5 text-green-600" />
+            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
+                <CheckCircle className="h-5 w-5 text-[#00555A]" />
               </div>
-              <p className="text-xs text-slate-500 font-medium mb-1">Provided</p>
-              <p className="text-3xl font-bold text-green-600">{stats.provided}</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Provided</p>
+              <p className="text-3xl font-bold text-[#00555A]">{stats.provided}</p>
             </div>
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
-              <div className="bg-slate-100 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
-                <XCircle className="h-5 w-5 text-slate-600" />
+            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFC107]/20">
+                <XCircle className="h-5 w-5 text-[#7A5800]" />
               </div>
-              <p className="text-xs text-slate-500 font-medium mb-1">No Report</p>
-              <p className="text-3xl font-bold text-slate-600">{stats.no_report}</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">No Report</p>
+              <p className="text-3xl font-bold text-[#7A5800]">{stats.no_report}</p>
             </div>
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 text-center">
-              <div className="bg-blue-100 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
-                <Package className="h-5 w-5 text-blue-600" />
+            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
+                <Package className="h-5 w-5 text-[#00555A]" />
               </div>
-              <p className="text-xs text-slate-500 font-medium mb-1">Completed</p>
-              <p className="text-3xl font-bold text-blue-600">{stats.completed}</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Completed</p>
+              <p className="text-3xl font-bold text-[#00555A]">{stats.completed}</p>
             </div>
           </div>
         )}
@@ -312,14 +516,14 @@ const ClinicPatientReports = () => {
           <Button
             variant={activeTab === "pending" ? "default" : "outline"}
             onClick={() => setActiveTab("pending")}
-            className={activeTab === "pending" ? "bg-[#00555A] text-white" : "border-slate-300 text-slate-600"}
+            className={activeTab === "pending" ? "bg-[#00555A] text-white hover:bg-[#004448]" : "border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"}
           >
             Pending Reports ({stats?.pending || 0})
           </Button>
           <Button
             variant={activeTab === "completed" ? "default" : "outline"}
             onClick={() => setActiveTab("completed")}
-            className={activeTab === "completed" ? "bg-[#00555A] text-white" : "border-slate-300 text-slate-600"}
+            className={activeTab === "completed" ? "bg-[#00555A] text-white hover:bg-[#004448]" : "border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"}
           >
             Completed Reports ({stats?.completed || 0})
           </Button>
@@ -327,168 +531,30 @@ const ClinicPatientReports = () => {
 
         {/* Pending Reports */}
         {activeTab === "pending" && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {loading ? (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-8 text-center">
+              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <div className="animate-spin h-8 w-8 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto mb-4"></div>
-                <p className="text-slate-600">Loading pending reports...</p>
+                <p className="text-muted-foreground">Loading pending reports...</p>
               </div>
             ) : pendingReports.length === 0 ? (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-8 text-center">
-                <FileText className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-600 font-medium mb-2">No pending reports</p>
-                <p className="text-sm text-slate-500">All patients have been processed</p>
+              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+                <FileText className="mx-auto mb-4 h-12 w-12 text-[#00555A]/35" />
+                <p className="mb-2 font-medium text-[#0F172A]">No pending reports</p>
+                <p className="text-sm text-muted-foreground">All patients have been processed</p>
               </div>
             ) : (
               pendingReports.map((report) => (
-                <div
-                  key={report.report_id}
-                  className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden hover:shadow-md transition-shadow"
-                >
-                  {/* Patient Header */}
-                  <div className="bg-gradient-to-r from-slate-50 to-white px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-slate-100 p-2 rounded-lg">
-                        <User className="h-5 w-5 text-slate-600" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-slate-800">{report.patient_name}</h3>
-                        <p className="text-xs text-slate-500">ID: {report.patient_id}</p>
-                      </div>
-                    </div>
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border-amber-200">
-                      Pending
-                    </span>
-                  </div>
-
-                  {/* Patient Content */}
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Mail className="h-4 w-4 text-slate-400" />
-                        <span className="text-slate-600">{report.patient_email}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Phone className="h-4 w-4 text-slate-400" />
-                        <span className="text-slate-600">{report.patient_phone}</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 rounded-xl p-4 mb-4">
-                      <p className="text-xs text-slate-500 mb-1">Created at:</p>
-                      <p className="text-sm text-slate-700">{formatDate(report.created_at)}</p>
-                    </div>
-
-                    {/* PDF Upload Section */}
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Upload Report PDF (for email)
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="file"
-                          accept=".pdf"
-                          onChange={(e) => handleFileSelect(e, report.report_id)}
-                          className="flex-1 text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100"
-                        />
-                        {report.report_pdf && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-2"
-                            onClick={() => {
-                              // Download PDF logic here if needed
-                              toast.info("PDF already uploaded");
-                            }}
-                          >
-                            <Download className="h-4 w-4" />
-                            View PDF
-                          </Button>
-                        )}
-                      </div>
-                      {report.report_pdf && (
-                        <p className="text-xs text-green-600 mt-2">
-                          ✓ PDF uploaded: {report.report_pdf.split('/').pop()}
-                        </p>
-                      )}
-                      {selectedFiles[report.report_id] && (
-                        <p className="text-xs text-blue-600 mt-2">
-                          Selected: {selectedFiles[report.report_id].name}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Notes Section */}
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Notes (optional)
-                      </label>
-                      <textarea
-                        value={notesMap[report.report_id] || ""}
-                        onChange={(e) => setNotesMap(prev => ({ ...prev, [report.report_id]: e.target.value }))}
-                        placeholder="Add any notes about this report..."
-                        className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 resize-none"
-                        rows={2}
-                      />
-                    </div>
-
-                    {/* Action Buttons - 3 Small Buttons */}
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        onClick={() => handleProcessReport(report, "send")}
-                        disabled={processing === report.report_id}
-                        className="flex-1 bg-green-500 hover:bg-green-600 text-white gap-2"
-                      >
-                        {processing === report.report_id ? (
-                          <>
-                            <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                            Processing...
-                          </>
-                        ) : (
-                          <>
-                            <Send className="h-4 w-4" />
-                            Send
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        onClick={() => handleProcessReport(report, "collected")}
-                        disabled={processing === report.report_id}
-                        className="flex-1 bg-blue-500 hover:bg-blue-600 text-white gap-2"
-                      >
-                        {processing === report.report_id ? (
-                          <>
-                            <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                            Processing...
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle className="h-4 w-4" />
-                            Collected
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        onClick={() => handleProcessReport(report, "no_report")}
-                        disabled={processing === report.report_id}
-                        variant="outline"
-                        className="flex-1 border-slate-300 text-slate-600 hover:bg-slate-50 gap-2"
-                      >
-                        {processing === report.report_id ? (
-                          <>
-                            <div className="animate-spin h-4 w-4 border-2 border-slate-300 border-t-transparent rounded-full" />
-                            Processing...
-                          </>
-                        ) : (
-                          <>
-                            <XCircle className="h-4 w-4" />
-                            No Report
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                <PendingReportCard 
+                  key={report.report_id} 
+                  report={report}
+                  processing={processing}
+                  selectedFiles={selectedFiles}
+                  onProcess={handleProcessReport}
+                  onFileSelect={handleFileSelect}
+                  onUploadPdf={handleUploadPdf}
+                  uploadingPdf={uploadingPdf}
+                />
               ))
             )}
           </div>
@@ -498,31 +564,31 @@ const ClinicPatientReports = () => {
         {activeTab === "completed" && (
           <div className="space-y-4">
             {loading ? (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-8 text-center">
+              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <div className="animate-spin h-8 w-8 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto mb-4"></div>
-                <p className="text-slate-600">Loading completed reports...</p>
+                <p className="text-muted-foreground">Loading completed reports...</p>
               </div>
             ) : completedReports.length === 0 ? (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-8 text-center">
-                <Package className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-600 font-medium mb-2">No completed reports</p>
-                <p className="text-sm text-slate-500">Processed reports will appear here</p>
+              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+                <Package className="mx-auto mb-4 h-12 w-12 text-[#00555A]/35" />
+                <p className="mb-2 font-medium text-[#0F172A]">No completed reports</p>
+                <p className="text-sm text-muted-foreground">Processed reports will appear here</p>
               </div>
             ) : (
               completedReports.map((report) => (
                 <div
                   key={report.report_id}
-                  className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden hover:shadow-md transition-shadow"
+                  className="overflow-hidden rounded-2xl border border-[#00555A]/10 bg-white shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)] transition-shadow hover:shadow-[0_20px_60px_-30px_rgba(19,55,50,0.55)]"
                 >
                   {/* Patient Header */}
-                  <div className="bg-gradient-to-r from-slate-50 to-white px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center justify-between border-b border-[#00555A]/10 bg-gradient-to-r from-[#00555A]/5 to-white px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="bg-slate-100 p-2 rounded-lg">
-                        <User className="h-5 w-5 text-slate-600" />
+                      <div className="rounded-lg bg-[#00555A]/10 p-2">
+                        <User className="h-5 w-5 text-[#00555A]" />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-slate-800">{report.patient_name}</h3>
-                        <p className="text-xs text-slate-500">ID: {report.patient_id}</p>
+                        <h3 className="font-semibold text-[#0F172A]">{report.patient_name}</h3>
+                        <p className="text-xs text-muted-foreground">ID: {report.patient_id}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -535,25 +601,25 @@ const ClinicPatientReports = () => {
                   <div className="p-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                       <div className="flex items-center gap-2 text-sm">
-                        <Mail className="h-4 w-4 text-slate-400" />
-                        <span className="text-slate-600">{report.patient_email}</span>
+                        <Mail className="h-4 w-4 text-[#00555A]" />
+                        <span className="text-muted-foreground">{report.patient_email}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm">
-                        <Phone className="h-4 w-4 text-slate-400" />
-                        <span className="text-slate-600">{report.patient_phone}</span>
+                        <Phone className="h-4 w-4 text-[#00555A]" />
+                        <span className="text-muted-foreground">{report.patient_phone}</span>
                       </div>
                     </div>
 
-                    <div className="bg-slate-50 rounded-xl p-4">
-                      <p className="text-xs text-slate-500 mb-1">Completed at:</p>
-                      <p className="text-sm text-slate-700">{formatDate(report.completed_at)}</p>
+                    <div className="rounded-xl border border-[#00555A]/10 bg-secondary/50 p-4">
+                      <p className="mb-1 text-xs text-muted-foreground">Completed at:</p>
+                      <p className="text-sm text-[#0F172A]">{formatDate(report.completed_at)}</p>
                     </div>
 
                     {/* Report Details */}
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-xs text-slate-500 mb-1">Report Status:</p>
-                        <p className="text-sm font-medium text-slate-700">
+                        <p className="mb-1 text-xs text-muted-foreground">Report Status:</p>
+                        <p className="text-sm font-medium text-[#0F172A]">
                           {report.status ? "Report Provided" : "No Report Needed"}
                         </p>
                       </div>

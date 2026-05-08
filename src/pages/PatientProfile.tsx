@@ -46,7 +46,13 @@ const PatientProfile = () => {
   const [otpSending, setOtpSending] = useState(false);
   const [otpSubmitting, setOtpSubmitting] = useState(false);
   const [otpDialogOpen, setOtpDialogOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"phone" | "password" | "delete" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"phone" | "password_forgot" | "delete" | null>(null);
+  const [passwordVerified, setPasswordVerified] = useState(false);
+  const [verifyingPassword, setVerifyingPassword] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordOtpVerified, setForgotPasswordOtpVerified] = useState(false);
+  const [deletePasswordVerified, setDeletePasswordVerified] = useState(false);
 
   const passwordChecks = getPasswordChecks(newPassword);
   const isNewPasswordStrong = Object.values(passwordChecks).every(Boolean);
@@ -57,6 +63,45 @@ const PatientProfile = () => {
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  // OTP Cooldown timer
+  useEffect(() => {
+    if (otpCooldown > 0) {
+      const timer = setTimeout(() => setOtpCooldown(otpCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [otpCooldown]);
+
+  const verifyCurrentPassword = async () => {
+    if (!loggedInEmail || !currentPassword) {
+      setMessage({ text: "Please enter current password", type: "error" });
+      return;
+    }
+
+    setVerifyingPassword(true);
+    try {
+      const response = await fetch("/api/auth/patient/verify-current-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patient_email: loggedInEmail,
+          current_password: currentPassword
+        }),
+      });
+
+      if (response.ok) {
+        setPasswordVerified(true);
+        setMessage({ text: "Password verified! You can now set a new password.", type: "success" });
+      } else {
+        const error = await response.json();
+        setMessage({ text: error.detail || "Password is incorrect", type: "error" });
+      }
+    } catch {
+      setMessage({ text: "Network error. Please try again.", type: "error" });
+    } finally {
+      setVerifyingPassword(false);
+    }
+  };
 
   const refreshPatientProfile = async () => {
     if (!loggedInEmail) return;
@@ -97,7 +142,7 @@ const PatientProfile = () => {
     navigate("/");
   };
 
-  const sendProfileOtp = async (action: "phone" | "password" | "delete") => {
+  const sendProfileOtp = async (action: "phone" | "password_forgot" | "delete") => {
     if (!loggedInEmail) {
       setMessage({ text: "No logged-in user found", type: "error" });
       return;
@@ -108,8 +153,8 @@ const PatientProfile = () => {
       return;
     }
 
-    if (action === "password") {
-      if (!currentPassword || !newPassword || newPassword !== confirmPassword) {
+    if (action === "password_forgot") {
+      if (!newPassword || newPassword !== confirmPassword) {
         setMessage({ text: "Please fill all password fields correctly", type: "error" });
         return;
       }
@@ -143,6 +188,7 @@ const PatientProfile = () => {
         setPendingAction(action);
         setOtpCode("");
         setOtpDialogOpen(true);
+        setOtpCooldown(60); // Start 60 second cooldown
         setMessage({ text: "OTP sent to your email", type: "success" });
       } else {
         const error = await response.json();
@@ -180,17 +226,37 @@ const PatientProfile = () => {
             otp_code: otpCode,
           }),
         });
-      } else if (pendingAction === "password") {
-        response = await fetch("/api/auth/patient/change-password", {
+      } else if (pendingAction === "password_forgot") {
+        // For forgot password: verify OTP and change password in one step
+        const response = await fetch("/api/auth/patient/change-password", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            current_password: currentPassword,
+            current_password: "FORGOT_PASSWORD_PLACEHOLDER", // Special marker for forgot flow
             new_password: newPassword,
             patient_email: loggedInEmail,
             otp_code: otpCode,
           }),
         });
+        
+        if (response.ok) {
+          setCurrentPassword("");
+          setNewPassword("");
+          setConfirmPassword("");
+          setShowForgotPassword(false);
+          setForgotPasswordOtpVerified(false);
+          setOtpDialogOpen(false);
+          setOtpCode("");
+          setPendingAction(null);
+          setMessage({ text: "Password changed successfully!", type: "success" });
+          setOtpSubmitting(false);
+          return;
+        } else {
+          const error = await response.json();
+          setMessage({ text: error.detail || "Invalid OTP or password error", type: "error" });
+          setOtpSubmitting(false);
+          return;
+        }
       } else {
         response = await fetch("/api/auth/patient/delete-account", {
           method: "DELETE",
@@ -213,11 +279,6 @@ const PatientProfile = () => {
       if (pendingAction === "phone") {
         await refreshPatientProfile();
         setMessage({ text: "Phone number updated successfully!", type: "success" });
-      } else if (pendingAction === "password") {
-        setCurrentPassword("");
-        setNewPassword("");
-        setConfirmPassword("");
-        setMessage({ text: "Password changed successfully!", type: "success" });
       } else {
         setMessage({ text: "Account deleted successfully!", type: "success" });
         localStorage.clear();
@@ -293,68 +354,221 @@ const PatientProfile = () => {
 
         <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
-            <div>
-              <Label htmlFor="phone">New Phone Number</Label>
-              <Input
-                id="phone"
-                type="tel"
-                placeholder="+91 98765 43210"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="mt-2"
-              />
+            <div className="flex gap-2">
+              <div className="w-20">
+                <Label htmlFor="countryCode">Code</Label>
+                <Input
+                  id="countryCode"
+                  type="tel"
+                  value="+91"
+                  disabled
+                  className="mt-2 bg-slate-100"
+                />
+              </div>
+              <div className="flex-1">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="9876543210"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="mt-2"
+                />
+              </div>
             </div>
-            <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full">
+            <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full mt-4">
               {otpSending && pendingAction === "phone" ? "Sending OTP..." : "Verify OTP and Update"}
             </Button>
           </ProfileCard>
 
           <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
-            <div>
-              <Label htmlFor="current-pw">Current Password</Label>
-              <Input id="current-pw" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="mt-2" />
-            </div>
-            <div>
-              <Label htmlFor="new-pw">New Password</Label>
-              <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
-            </div>
-            {newPassword && <PasswordRules checks={passwordChecks} />}
-            <div>
-              <Label htmlFor="confirm-pw">Confirm New Password</Label>
-              <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
-            </div>
-            <Button
-              onClick={() => void sendProfileOtp("password")}
-              disabled={!currentPassword || !newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
-              className="w-full"
-            >
-              Verify OTP and Change Password
-            </Button>
+            {!showForgotPassword ? (
+              // Normal password change - verify current password first, no OTP
+              <>
+                <div>
+                  <Label htmlFor="current-pw">Current Password</Label>
+                  <Input 
+                    id="current-pw" 
+                    type="password" 
+                    value={currentPassword} 
+                    onChange={(e) => {
+                      setCurrentPassword(e.target.value);
+                      setPasswordVerified(false);
+                    }} 
+                    className="mt-2" 
+                  />
+                </div>
+                {passwordVerified ? (
+                  // Password verified - show new password fields
+                  <>
+                    <div>
+                      <Label htmlFor="new-pw">New Password</Label>
+                      <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+                    </div>
+                    {newPassword && <PasswordRules checks={passwordChecks} />}
+                    <div>
+                      <Label htmlFor="confirm-pw">Confirm New Password</Label>
+                      <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                    </div>
+                    <Button
+                      onClick={async () => {
+                        if (!loggedInEmail || !newPassword || !isNewPasswordStrong || newPassword !== confirmPassword) {
+                          setMessage({ text: "Please fill all fields correctly", type: "error" });
+                          return;
+                        }
+                        setOtpSubmitting(true);
+                        try {
+                          const response = await fetch("/api/auth/patient/change-password-direct", {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              patient_email: loggedInEmail,
+                              current_password: currentPassword,
+                              new_password: newPassword,
+                            }),
+                          });
+                          if (response.ok) {
+                            setCurrentPassword("");
+                            setNewPassword("");
+                            setConfirmPassword("");
+                            setPasswordVerified(false);
+                            setMessage({ text: "Password changed successfully!", type: "success" });
+                          } else {
+                            const error = await response.json();
+                            setMessage({ text: error.detail || "Failed to change password", type: "error" });
+                          }
+                        } catch {
+                          setMessage({ text: "Network error", type: "error" });
+                        } finally {
+                          setOtpSubmitting(false);
+                        }
+                      }}
+                      disabled={!newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSubmitting}
+                      className="w-full"
+                    >
+                      {otpSubmitting ? "Changing..." : "Change Password"}
+                    </Button>
+                  </>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={verifyCurrentPassword}
+                      disabled={!currentPassword || verifyingPassword}
+                      className="flex-1"
+                    >
+                      {verifyingPassword ? "Verifying..." : "Verify Password"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowForgotPassword(true)}
+                    >
+                      Forgot?
+                    </Button>
+                  </div>
+                )}
+              </>
+            ) : (
+              // Forgot password - send OTP, verify, and change password in one flow
+              <>
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-sm text-amber-800">
+                    <strong>Forgot Password?</strong> We'll send an OTP to your email to verify your identity.
+                  </p>
+                </div>
+                <div>
+                  <Label htmlFor="new-pw">New Password</Label>
+                  <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+                </div>
+                {newPassword && <PasswordRules checks={passwordChecks} />}
+                <div>
+                  <Label htmlFor="confirm-pw">Confirm New Password</Label>
+                  <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => void sendProfileOtp("password_forgot")}
+                    disabled={!newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
+                    className="flex-1"
+                  >
+                    {otpSending ? "Sending..." : "Send OTP"}
+                  </Button>
+                  <Button variant="outline" onClick={() => { setShowForgotPassword(false); setForgotPasswordOtpVerified(false); setNewPassword(""); setConfirmPassword(""); }}>
+                    Back
+                  </Button>
+                </div>
+              </>
+            )}
           </ProfileCard>
 
           <div className="lg:col-span-2">
             <ProfileCard icon={Trash2} title="Delete Account" description="Permanently delete your account and all data" danger>
-              <div>
-                <Label htmlFor="delete-pw">Enter Password to Confirm</Label>
-                <Input
-                  id="delete-pw"
-                  type="password"
-                  value={deletePassword}
-                  onChange={(e) => setDeletePassword(e.target.value)}
-                  placeholder="Enter your password"
-                  className="mt-2"
-                />
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={() => void sendProfileOtp("delete")} disabled={!deletePassword || otpSending} className="bg-red-600 text-white hover:bg-red-700">
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Verify OTP and Delete
-                </Button>
-                <Button variant="outline" onClick={handleLogout}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Sign Out
-                </Button>
-              </div>
+              {!deletePasswordVerified ? (
+                // Step 1: Verify password first
+                <>
+                  <div>
+                    <Label htmlFor="delete-pw">Enter Password to Confirm</Label>
+                    <Input
+                      id="delete-pw"
+                      type="password"
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="mt-2"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button 
+                      onClick={async () => {
+                        if (!loggedInEmail || !deletePassword) return;
+                        setVerifyingPassword(true);
+                        try {
+                          const response = await fetch("/api/auth/patient/verify-current-password", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              patient_email: loggedInEmail,
+                              current_password: deletePassword
+                            }),
+                          });
+                          if (response.ok) {
+                            setDeletePasswordVerified(true);
+                            // Now send OTP
+                            void sendProfileOtp("delete");
+                          } else {
+                            const error = await response.json();
+                            setMessage({ text: error.detail || "Password is incorrect", type: "error" });
+                          }
+                        } catch {
+                          setMessage({ text: "Network error", type: "error" });
+                        } finally {
+                          setVerifyingPassword(false);
+                        }
+                      }} 
+                      disabled={!deletePassword || verifyingPassword} 
+                      className="bg-red-600 text-white hover:bg-red-700"
+                    >
+                      {verifyingPassword ? "Verifying..." : "Verify Password"}
+                    </Button>
+                    <Button variant="outline" onClick={handleLogout}>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Sign Out
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                // Step 2: Password verified, waiting for OTP verification
+                <>
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-sm text-amber-800">
+                      ✓ Password verified! We've sent an OTP to your email. Verify to delete your account.
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={() => { setDeletePasswordVerified(false); setDeletePassword(""); }}>
+                    Cancel
+                  </Button>
+                </>
+              )}
             </ProfileCard>
           </div>
         </section>
@@ -367,14 +581,27 @@ const PatientProfile = () => {
           if (!open) {
             setOtpCode("");
             setPendingAction(null);
+            setDeletePasswordVerified(false);
           }
         }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Verify OTP</DialogTitle>
+            <DialogTitle>
+              {pendingAction === "phone" ? "Verify OTP for Phone Change" : 
+               pendingAction === "password_forgot" ? "Verify OTP for Password Reset" : 
+               pendingAction === "delete" ? "Verify OTP for Account Deletion" :
+               "Verify OTP"}
+            </DialogTitle>
             <DialogDescription>
-              Enter the OTP sent to {loggedInEmail} to continue.
+              {pendingAction === "phone" 
+                ? `Enter the OTP sent to ${loggedInEmail} to verify your new phone number.`
+                : pendingAction === "password_forgot"
+                ? `Enter the OTP sent to ${loggedInEmail} to reset your password.`
+                : pendingAction === "delete"
+                ? `Enter the OTP sent to ${loggedInEmail} to delete your account. This action cannot be undone.`
+                : `Enter the OTP sent to ${loggedInEmail} to continue.`
+              }
             </DialogDescription>
           </DialogHeader>
           <div>
@@ -390,9 +617,15 @@ const PatientProfile = () => {
             />
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
-            <Button variant="outline" onClick={() => pendingAction && void sendProfileOtp(pendingAction)} disabled={otpSending || otpSubmitting || !pendingAction}>
-              Resend OTP
-            </Button>
+            {otpCooldown > 0 ? (
+              <Button variant="outline" disabled className="text-gray-400">
+                Resend in {otpCooldown}s
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => pendingAction && void sendProfileOtp(pendingAction)} disabled={otpSending || otpSubmitting || !pendingAction}>
+                {otpSending ? "Sending..." : "Resend OTP"}
+              </Button>
+            )}
             <Button onClick={() => void handleVerifiedAction()} disabled={!otpCode || otpSubmitting}>
               {otpSubmitting ? "Verifying..." : "Verify and Continue"}
             </Button>

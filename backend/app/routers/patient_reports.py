@@ -4,21 +4,29 @@ Provides endpoints for managing patient reports and sending PDF reports via emai
 """
 import os
 import shutil
+import re
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_
 from app.database.db import get_db
-from app.database.models import Report, CompletedReport, CompletedAppointment, Clinic
+from app.database.models import Report, CompletedReport, Clinic
 from pydantic import BaseModel
-import mimetypes
 
 router = APIRouter(prefix="/clinic/reports", tags=["patient_reports"])
 
 # Directory for storing PDF reports
 REPORTS_DIR = "patient_reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
+
+
+def _safe_pdf_filename(filename: str) -> str:
+    name = os.path.basename(filename or "report.pdf")
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    if not name.lower().endswith(".pdf"):
+        name = f"{name}.pdf"
+    return name or "report.pdf"
 
 
 class ReportProcessRequest(BaseModel):
@@ -38,29 +46,6 @@ async def get_pending_reports(
     Only shows online patients (not QR/walk-in).
     """
     try:
-        # Check if clinic is diagnostic or scanning center
-        clinic_result = await db.execute(
-            select(Clinic).where(Clinic.clinic_id == clinic_id)
-        )
-        clinic = clinic_result.scalar_one_or_none()
-
-        if not clinic:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Clinic not found"
-            )
-
-        # Check if clinic is diagnostic or scanning center (more flexible check)
-        categories = clinic.categories or []
-        valid_categories = ["diagnostic_center", "scanning_center", "diagnostic", "scanning", "lab", "x-ray", "mri", "ct_scan"]
-        is_diagnostic = any(cat in valid_categories for cat in categories)
-
-        if not is_diagnostic:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Reports feature is only available for diagnostic and scanning centers"
-            )
-
         # Get pending reports for this clinic
         result = await db.execute(
             select(Report).where(
@@ -145,18 +130,38 @@ async def get_completed_reports(
 async def upload_report_pdf(
     clinic_id: str = Query(..., description="Clinic ID"),
     patient_id: str = Query(..., description="Patient ID"),
+    report_id: int = Query(..., description="Report ID"),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Upload a PDF report for a patient.
+    Upload a PDF report for a patient and save to database.
     """
     try:
         # Validate file type
-        if not file.filename.lower().endswith('.pdf'):
+        if not (file.filename or "").lower().endswith(".pdf"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only PDF files are allowed"
+            )
+
+        # Get the report from database
+        result = await db.execute(
+            select(Report).where(
+                and_(
+                    Report.id == report_id,
+                    Report.clinic_id == clinic_id,
+                    Report.patient_id == patient_id,
+                    Report.status == "pending"
+                )
+            )
+        )
+        report = result.scalar_one_or_none()
+        
+        if not report:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Report not found"
             )
 
         # Create clinic-specific directory
@@ -165,7 +170,7 @@ async def upload_report_pdf(
 
         # Generate unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{patient_id}_{timestamp}_{file.filename}"
+        filename = f"{patient_id}_{timestamp}_{_safe_pdf_filename(file.filename)}"
         file_path = os.path.join(clinic_dir, filename)
 
         # Save file
@@ -174,6 +179,10 @@ async def upload_report_pdf(
 
         # Return the relative path for storage
         relative_path = os.path.join(clinic_id, filename).replace("\\", "/")
+        
+        # Update the report with PDF path in database
+        report.report_pdf = relative_path
+        await db.commit()
 
         return {
             "message": "PDF uploaded successfully",
@@ -184,6 +193,7 @@ async def upload_report_pdf(
     except HTTPException:
         raise
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload PDF: {str(e)}"
@@ -222,43 +232,71 @@ async def process_report(
 
         # Determine status and report_type
         if request.action == "send":
-            status = True  # Report provided (via email)
+            report_provided = True  # Report provided (via email)
             report_type = "sent"
             pdf_path = request.pdf_path or report.report_pdf
 
-            # Send email if PDF is provided
-            if pdf_path:
-                from app.services.email_service import send_patient_report_email
-
-                # Get clinic details
-                clinic_result = await db.execute(
-                    select(Clinic).where(Clinic.clinic_id == report.clinic_id)
+            if not pdf_path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Please upload a PDF report before sending email"
                 )
-                clinic = clinic_result.scalar_one_or_none()
 
-                if clinic:
-                    # Convert path separators for cross-platform compatibility
-                    pdf_path_normalized = pdf_path.replace("/", os.sep)
-                    full_pdf_path = os.path.join(REPORTS_DIR, pdf_path_normalized)
-                    if os.path.exists(full_pdf_path):
-                        email_sent = send_patient_report_email(
-                            patient_email=report.patient_email,
-                            patient_name=report.patient_name,
-                            clinic_name=clinic.clinic_name,
-                            pdf_path=full_pdf_path,
-                            notes=request.notes
-                        )
-                        if not email_sent:
-                            raise HTTPException(
-                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Failed to send email"
-                            )
+            # Send email with PDF attachment before moving the report to completed.
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Processing send action for report {request.report_id}, pdf_path: {pdf_path}")
+            
+            from app.services.email_service import send_patient_report_email
+
+            # Get clinic details
+            clinic_result = await db.execute(
+                select(Clinic).where(Clinic.clinic_id == report.clinic_id)
+            )
+            clinic = clinic_result.scalar_one_or_none()
+
+            if not clinic:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Clinic not found"
+                )
+
+            pdf_path_normalized = os.path.normpath(pdf_path.replace("/", os.sep))
+            if os.path.isabs(pdf_path_normalized) or pdf_path_normalized.startswith(f"..{os.sep}") or pdf_path_normalized == "..":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid PDF path"
+                )
+
+            full_pdf_path = os.path.join(REPORTS_DIR, pdf_path_normalized)
+            logger.info(f"Full PDF path: {full_pdf_path}, exists: {os.path.exists(full_pdf_path)}")
+
+            if not os.path.exists(full_pdf_path):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Uploaded PDF file was not found. Please upload it again."
+                )
+
+            logger.info(f"Sending email to {report.patient_email} with PDF")
+            email_sent = send_patient_report_email(
+                patient_email=report.patient_email,
+                patient_name=report.patient_name,
+                clinic_name=clinic.clinic_name,
+                pdf_path=full_pdf_path,
+                notes=request.notes
+            )
+            logger.info(f"Email sent result: {email_sent}")
+            if not email_sent:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to send report email. Please check SMTP settings and try again."
+                )
         elif request.action == "collected":
-            status = True  # Report provided (physical)
+            report_provided = True  # Report provided (physical)
             report_type = "collected"
             pdf_path = None
         else:  # no_report
-            status = False  # No report provided
+            report_provided = False  # No report provided
             report_type = "no_report"
             pdf_path = None
 
@@ -269,7 +307,7 @@ async def process_report(
             patient_name=report.patient_name,
             patient_email=report.patient_email,
             patient_phone=report.patient_phone,
-            status=status,
+            status=report_provided,
             report_pdf=pdf_path,
             report_type=report_type,
             completed_at=datetime.now(timezone.utc)
@@ -284,7 +322,7 @@ async def process_report(
         return {
             "message": f"Report processed successfully ({request.action})",
             "report_id": completed_report.id,
-            "status": status,
+            "status": report_provided,
             "report_type": report_type
         }
 
@@ -360,34 +398,13 @@ async def auto_add_patient_to_reports(
 ):
     """
     Internal function to automatically add patient to reports table.
-    Called when patient completes appointment at diagnostic/scanning center.
+    Called when patient completes appointment.
     """
     import logging
     logger = logging.getLogger(__name__)
 
     try:
         logger.info(f"auto_add_patient_to_reports called: clinic_id={clinic_id}, patient_id={patient_id}")
-
-        # Check if clinic is diagnostic or scanning center
-        clinic_result = await db.execute(
-            select(Clinic).where(Clinic.clinic_id == clinic_id)
-        )
-        clinic = clinic_result.scalar_one_or_none()
-
-        if not clinic:
-            logger.warning(f"Clinic not found: {clinic_id}")
-            return {"message": "Clinic not found", "added": False}
-
-        # Check if clinic is diagnostic or scanning center
-        categories = clinic.categories or []
-        valid_categories = ["diagnostic_center", "scanning_center", "diagnostic", "scanning", "lab", "x-ray", "mri", "ct_scan"]
-        is_diagnostic = any(cat in valid_categories for cat in categories)
-
-        logger.info(f"Clinic categories: {categories}, is_diagnostic: {is_diagnostic}")
-
-        if not is_diagnostic:
-            logger.info(f"Not a diagnostic/scanning center: {clinic_id}")
-            return {"message": "Not a diagnostic/scanning center", "added": False}
 
         # Check if report already exists for this patient
         existing_result = await db.execute(

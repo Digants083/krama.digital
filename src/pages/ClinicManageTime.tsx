@@ -22,16 +22,14 @@ interface Slot {
 
 const MAX_SLOTS = 3;
 
-// Generate 12-hour time options
-const generateTimeOptions = () => {
-  const times = [];
-  for (let h = 1; h <= 12; h++) {
-    times.push({ value: h, label: `${h}:00` });
-  }
-  return times;
-};
+// Hour options: 12, 1, 2, ..., 11
+const hourOptions = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
-const timeOptions = generateTimeOptions();
+// Minute options: only 00 and 30
+const minuteOptions = [0, 30];
+
+// AM/PM options
+const ampmOptions = ['AM', 'PM'];
 
 
 
@@ -49,13 +47,15 @@ const ClinicManageTime = () => {
 
   
 
-  // Form state for new slot - using 12-hour format
+  // Form state for new slot - using hour : minute AM/PM format
   const [newSlot, setNewSlot] = useState({
     slot_name: "",
     start_hour: 8,
+    start_minute: 0,
     start_ampm: "AM",
     end_hour: 11,
-    end_ampm: "AM"
+    end_minute: 0,
+    end_ampm: "AM",
   });
 
 
@@ -113,20 +113,18 @@ const ClinicManageTime = () => {
 
 
 
-  // Convert 12-hour to 24-hour format
-  const convertTo24Hour = (hour: number, ampm: string) => {
-    if (ampm === "AM") {
-      return hour === 12 ? 0 : hour;
-    } else {
-      return hour === 12 ? 12 : hour + 12;
-    }
+  // Convert stored time value to 24-hour format for backend
+  const convertTo24Hour = (timeValue: number) => {
+    return Math.floor(timeValue / 2);
   };
 
-  // Convert 24-hour to 12-hour format for display
+  // Convert 24-hour to 12-hour format for display (handles overnight times)
   const convertTo12Hour = (hour24: number) => {
+    // Handle overnight times (e.g., 25 = 1 AM next day, 26 = 2 AM next day)
+    const normalizedHour = hour24 > 24 ? hour24 - 24 : hour24;
     return {
-      hour: hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24,
-      ampm: hour24 >= 12 ? "PM" : "AM"
+      hour: normalizedHour === 0 ? 12 : normalizedHour > 12 ? normalizedHour - 12 : normalizedHour,
+      ampm: normalizedHour >= 12 ? "PM" : "AM"
     };
   };
 
@@ -136,11 +134,22 @@ const ClinicManageTime = () => {
 
     if (slots.length >= MAX_SLOTS) return;
 
-    // Convert 12-hour to 24-hour for backend
-    const startHour24 = convertTo24Hour(newSlot.start_hour, newSlot.start_ampm);
-    const endHour24 = convertTo24Hour(newSlot.end_hour, newSlot.end_ampm);
+    // Convert hour:minute:ampm to 24-hour for backend (supports overnight slots)
+    const convertTo24 = (hour: number, minute: number, ampm: string) => {
+      let h = hour === 12 ? 0 : hour;
+      if (ampm === 'PM') h = hour === 12 ? 12 : hour + 12;
+      // Handle overnight: if PM to AM transition (e.g., 11 PM to 2 AM), add 24
+      return h + (minute / 60);
+    };
+    const startHour24 = convertTo24(newSlot.start_hour, newSlot.start_minute, newSlot.start_ampm);
+    let endHour24 = convertTo24(newSlot.end_hour, newSlot.end_minute, newSlot.end_ampm);
+    
+    // If end time is less than start time, it means it crosses midnight (next day)
+    if (endHour24 <= startHour24) {
+      endHour24 += 24; // Add 24 hours for overnight slot
+    }
 
-    // Validate: end must be after start
+    // Validate: end must be after start (now handles overnight)
     if (endHour24 <= startHour24) {
       alert("End time must be after start time");
       return;
@@ -174,7 +183,7 @@ const ClinicManageTime = () => {
 
         setShowAddForm(false);
 
-        setNewSlot({ slot_name: "", start_hour: 8, start_ampm: "AM", end_hour: 11, end_ampm: "AM" });
+        setNewSlot({ slot_name: "", start_hour: 8, start_minute: 0, start_ampm: "AM", end_hour: 11, end_minute: 0, end_ampm: "AM" });
 
         fetchTimeSlots();
 
@@ -398,7 +407,7 @@ const ClinicManageTime = () => {
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">Start Time</label>
 
-                <div className="flex gap-2">
+                <div className="flex items-center gap-1">
 
                   <select
 
@@ -408,13 +417,35 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_hour: parseInt(e.target.value) })}
 
-                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white transition-all"
+                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
-                    {timeOptions.map(t => (
+                    {hourOptions.map(h => (
 
-                      <option key={t.value} value={t.value}>{t.label}</option>
+                      <option key={h} value={h}>{h}</option>
+
+                    ))}
+
+                  </select>
+
+                  <span className="text-2xl font-bold text-slate-400">:</span>
+
+                  <select
+
+                    title="Start minute"
+
+                    value={newSlot.start_minute}
+
+                    onChange={(e) => setNewSlot({ ...newSlot, start_minute: parseInt(e.target.value) })}
+
+                    className="w-20 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+
+                  >
+
+                    {minuteOptions.map(m => (
+
+                      <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
 
                     ))}
 
@@ -428,13 +459,15 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_ampm: e.target.value })}
 
-                    className="w-20 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white transition-all font-medium"
+                    className="w-24 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
-                    <option value="AM">AM</option>
+                    {ampmOptions.map(a => (
 
-                    <option value="PM">PM</option>
+                      <option key={a} value={a}>{a}</option>
+
+                    ))}
 
                   </select>
 
@@ -446,7 +479,7 @@ const ClinicManageTime = () => {
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">End Time</label>
 
-                <div className="flex gap-2">
+                <div className="flex items-center gap-1">
 
                   <select
 
@@ -456,13 +489,35 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_hour: parseInt(e.target.value) })}
 
-                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white transition-all"
+                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
-                    {timeOptions.map(t => (
+                    {hourOptions.map(h => (
 
-                      <option key={t.value} value={t.value}>{t.label}</option>
+                      <option key={h} value={h}>{h}</option>
+
+                    ))}
+
+                  </select>
+
+                  <span className="text-2xl font-bold text-slate-400">:</span>
+
+                  <select
+
+                    title="End minute"
+
+                    value={newSlot.end_minute}
+
+                    onChange={(e) => setNewSlot({ ...newSlot, end_minute: parseInt(e.target.value) })}
+
+                    className="w-20 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+
+                  >
+
+                    {minuteOptions.map(m => (
+
+                      <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
 
                     ))}
 
@@ -476,13 +531,15 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_ampm: e.target.value })}
 
-                    className="w-20 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white transition-all font-medium"
+                    className="w-24 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
-                    <option value="AM">AM</option>
+                    {ampmOptions.map(a => (
 
-                    <option value="PM">PM</option>
+                      <option key={a} value={a}>{a}</option>
+
+                    ))}
 
                   </select>
 

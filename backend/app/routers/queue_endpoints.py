@@ -18,36 +18,6 @@ def _load_slots(raw_slots):
     return list(slots or [])
 
 
-def _can_modify_slots(last_change_date: Optional[datetime], current_slot_count: int) -> tuple[bool, str]:
-    """
-    Check if clinic can modify their slots based on 7-day cooldown rule.
-    Cooldown only applies when clinic has 3 slots (maximum allowed).
-
-    Args:
-        last_change_date: The date when slots were last modified
-        current_slot_count: Current number of slots the clinic has
-
-    Returns:
-        (can_modify, message): Tuple indicating if modification is allowed and why
-    """
-    # No cooldown restriction if clinic has less than 3 slots
-    if current_slot_count < 3:
-        return True, f"Can modify slots (currently have {current_slot_count}/3 slots)"
-
-    if last_change_date is None:
-        return True, "No previous slot changes - first modification allowed"
-
-    # Ensure last_change_date has timezone info
-    if last_change_date.tzinfo is None:
-        last_change_date = last_change_date.replace(tzinfo=timezone.utc)
-
-    now = datetime.now(timezone.utc)
-    days_since_change = (now - last_change_date).days
-
-    if days_since_change < 7:
-        return False, f"Slot changes are limited to once per week. You can modify slots again in {7 - days_since_change} day(s)."
-
-    return True, "Slot modification allowed - 7-day cooldown period has passed"
 
 
 def _can_toggle_slot(last_toggle_date: Optional[datetime], slot_toggle_counts: list, slot_index: int) -> tuple[bool, str]:
@@ -318,6 +288,7 @@ async def set_clinic_active(
     """
     clinic_id = request.get("clinic_id")
     is_active = request.get("is_active", True)
+    manual_stop = request.get("manual_stop", False)
 
     if not clinic_id:
         raise HTTPException(
@@ -337,6 +308,13 @@ async def set_clinic_active(
         )
 
     if is_active:
+        today = datetime.now().strftime("%Y-%m-%d")
+        if clinic.manual_stop_date == today:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Clinic was manually stopped for today. You can start again tomorrow during the allowed start window."
+            )
+
         # Check if all slots have expired
         if await all_slots_expired(clinic_id, db):
             raise HTTPException(
@@ -440,11 +418,80 @@ async def set_clinic_active(
                 )
 
     clinic.is_active = is_active
+    if not is_active and manual_stop:
+        clinic.manual_stop_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # Clean up yesterday's appointments - mark as not served and remove from queue
+    if is_active:
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        # Get yesterday's appointments that are not completed
+        yesterday_appointments = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.date == yesterday,
+                Appointment.status.notin_(["completed", "not_served"])
+            )
+        )
+        
+        for apt in yesterday_appointments.scalars().all():
+            # Move to completed_appointments with not_served status
+            completed = CompletedAppointment(
+                appointment_token=apt.appointment_token,
+                clinic_id=apt.clinic_id,
+                patient_id=getattr(apt, 'patient_id', f"online-{apt.id}"),
+                patient_name=apt.patient_name,
+                patient_phone=apt.patient_phone,
+                patient_email=getattr(apt, 'patient_email', ""),
+                status="not_served",
+                wait_time_minutes=0,
+                date=apt.date,
+                time=getattr(apt, 'time', ""),
+                slot_id=getattr(apt, 'slot_id', None),
+                doctor_name=getattr(apt, 'doctor_name', None),
+                created_at=apt.created_at,
+                served_at=datetime.now()
+            )
+            db.add(completed)
+            # Delete from appointments
+            await db.delete(apt)
+        
+        # Same for QR appointments
+        yesterday_qr = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.clinic_id == clinic_id,
+                QRAppointment.date == yesterday,
+                QRAppointment.status.notin_(["completed", "not_served"])
+            )
+        )
+        
+        for apt in yesterday_qr.scalars().all():
+            completed = CompletedAppointment(
+                appointment_token=apt.appointment_token,
+                clinic_id=apt.clinic_id,
+                patient_id=getattr(apt, 'patient_id', f"qr-{apt.id}"),
+                patient_name=apt.patient_name,
+                patient_phone=apt.patient_phone,
+                patient_email=getattr(apt, 'patient_email', ""),
+                status="not_served",
+                wait_time_minutes=0,
+                date=apt.date,
+                time=getattr(apt, 'time', ""),
+                slot_id=getattr(apt, 'slot_id', None),
+                created_at=apt.created_at,
+                served_at=datetime.now()
+            )
+            db.add(completed)
+            await db.delete(apt)
+        
+        await db.commit()
+    
     await db.commit()
 
     return {
         "message": f"Clinic {'activated' if is_active else 'deactivated'}",
-        "is_active": is_active
+        "is_active": is_active,
+        "manual_stop_date": clinic.manual_stop_date
     }
 
 @router.get("/clinic/active-status")
@@ -477,7 +524,12 @@ async def get_clinic_active_status(
                 clinic.is_active = False
                 await db.commit()
 
-    return {"is_active": clinic.is_active}
+    today = datetime.now().strftime("%Y-%m-%d")
+    return {
+        "is_active": clinic.is_active,
+        "manual_stop_locked": clinic.manual_stop_date == today,
+        "manual_stop_date": clinic.manual_stop_date,
+    }
 
 @router.post("/clinic/serve-patient")
 async def serve_patient(
@@ -659,45 +711,23 @@ async def finish_patient(
     await _send_queue_notifications(clinic_id, db)
     await db.commit()
 
-    # Auto-add to reports table for diagnostic/scanning centers (online patients only)
+    # Auto-add to reports table for all served patients (online patients only)
     if source == "online":
         try:
-            from app.database.models import Clinic
-            clinic_result = await db.execute(
-                select(Clinic).where(Clinic.clinic_id == clinic_id)
+            from app.routers.patient_reports import auto_add_patient_to_reports
+            
+            patient_id = getattr(appointment, 'patient_id', f"online-{appointment.id}")
+            logger.info(f"Adding to reports: patient_id={patient_id}, patient_name={appointment.patient_name}")
+
+            result = await auto_add_patient_to_reports(
+                patient_id=patient_id,
+                clinic_id=clinic_id,
+                patient_name=appointment.patient_name,
+                patient_email=appointment.patient_email,
+                patient_phone=appointment.patient_phone,
+                db=db
             )
-            clinic = clinic_result.scalar_one_or_none()
-
-            if clinic:
-                # Check if clinic is diagnostic or scanning center
-                categories = clinic.categories or []
-                valid_categories = ["diagnostic_center", "scanning_center", "diagnostic", "scanning", "lab", "x-ray", "mri", "ct_scan"]
-                is_diagnostic = any(cat in valid_categories for cat in categories)
-
-                logger.info(f"Report check: clinic_id={clinic_id}, categories={categories}, is_diagnostic={is_diagnostic}, source={source}")
-
-                if is_diagnostic:
-                    # Add patient to reports table
-                    from app.routers.patient_reports import auto_add_patient_to_reports
-
-                    patient_id = getattr(appointment, 'patient_id', f"online-{appointment.id}")
-                    logger.info(f"Adding to reports: patient_id={patient_id}, patient_name={appointment.patient_name}")
-
-                    result = await auto_add_patient_to_reports(
-                        patient_id=patient_id,
-                        clinic_id=clinic_id,
-                        patient_name=appointment.patient_name,
-                        patient_email=getattr(appointment, 'patient_email', ""),
-                        patient_phone=appointment.patient_phone,
-                        db=db
-                    )
-                    logger.info(f"Auto-add to reports result: {result}")
-                    if not result.get("added"):
-                        logger.warning(f"Patient not added to reports: {result.get('message')}")
-                else:
-                    logger.info(f"Skipping reports - clinic is not diagnostic/scanning center")
-            else:
-                logger.warning(f"Clinic not found for reports: {clinic_id}")
+            logger.info(f"Auto-add to reports result: {result}")
         except Exception as e:
             logger.error(f"Failed to auto-add patient to reports: {e}", exc_info=True)
 
@@ -726,6 +756,7 @@ async def skip_patient(
     clinic_id = request.get("clinic_id")
     appointment_id = request.get("appointment_id")
     source = request.get("source", "online")
+    today = datetime.now().strftime("%Y-%m-%d")
 
     if not all([clinic_id, appointment_id]):
         raise HTTPException(
@@ -735,11 +766,11 @@ async def skip_patient(
 
     model = QRAppointment if source == "walkin" else Appointment
 
-    # Get the appointment to skip
     result = await db.execute(
         select(model).where(
             model.id == appointment_id,
-            model.clinic_id == clinic_id
+            model.clinic_id == clinic_id,
+            model.date == today
         )
     )
     skipped_appointment = result.scalar_one_or_none()
@@ -750,16 +781,46 @@ async def skip_patient(
             detail="Appointment not found"
         )
 
-    # Get all appointments for this clinic ordered by queue_position
-    result = await db.execute(
-        select(model).where(
-            model.clinic_id == clinic_id
-        ).order_by(model.queue_position)
-    )
-    all_appointments = result.scalars().all()
+    slot_id = getattr(skipped_appointment, "slot_id", None)
 
-    if len(all_appointments) <= 1:
-        # Only one patient, nothing to skip
+    online_filters = [
+        Appointment.clinic_id == clinic_id,
+        Appointment.date == today,
+        Appointment.status != "serving",
+    ]
+    walkin_filters = [
+        QRAppointment.clinic_id == clinic_id,
+        QRAppointment.date == today,
+        QRAppointment.status != "serving",
+    ]
+
+    if slot_id is not None:
+        online_filters.append(Appointment.slot_id == slot_id)
+        walkin_filters.append(QRAppointment.slot_id == slot_id)
+
+    online_result = await db.execute(select(Appointment).where(and_(*online_filters)))
+    walkin_result = await db.execute(select(QRAppointment).where(and_(*walkin_filters)))
+
+    queue_items = [
+        {"model": "online", "appointment": apt}
+        for apt in online_result.scalars().all()
+    ] + [
+        {"model": "walkin", "appointment": apt}
+        for apt in walkin_result.scalars().all()
+    ]
+
+    queue_items.sort(
+        key=lambda item: (
+            item["appointment"].queue_position
+            if item["appointment"].queue_position is not None
+            else 10**9,
+            item["appointment"].created_at or datetime.min,
+            0 if item["model"] == "online" else 1,
+            item["appointment"].id,
+        )
+    )
+
+    if len(queue_items) <= 1:
         return {
             "message": "Only one patient in queue, cannot skip",
             "skipped_patient": {
@@ -770,63 +831,56 @@ async def skip_patient(
             }
         }
 
-    # Initialize queue positions if not set
-    for idx, apt in enumerate(all_appointments):
-        if apt.queue_position is None:
-            apt.queue_position = idx + 1
+    for idx, item in enumerate(queue_items, start=1):
+        item["appointment"].queue_position = idx
 
-    # Find the current position of the appointment to skip
-    current_position = skipped_appointment.queue_position
+    skipped_index = next(
+        (
+            idx
+            for idx, item in enumerate(queue_items)
+            if item["model"] == source and item["appointment"].id == appointment_id
+        ),
+        None,
+    )
 
-    # If already at the end, nothing to skip
-    if current_position >= len(all_appointments):
+    if skipped_index is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Appointment not found in current slot queue"
+        )
+
+    if skipped_index >= len(queue_items) - 1:
         return {
             "message": "Patient already at end of queue",
             "skipped_patient": {
                 "id": skipped_appointment.id,
                 "token": skipped_appointment.appointment_token,
                 "patient_name": skipped_appointment.patient_name,
-                "position": current_position
+                "position": skipped_index + 1
             }
         }
 
-    # Move the skipped patient one position back
-    # Swap positions with the next patient
+    current_position = skipped_index + 1
     next_position = current_position + 1
+    next_patient = queue_items[skipped_index + 1]["appointment"]
 
-    # Find the patient at the next position
-    next_patient = None
-    for apt in all_appointments:
-        if apt.queue_position == next_position:
-            next_patient = apt
-            break
+    skipped_appointment.queue_position = next_position
+    next_patient.queue_position = current_position
+    skipped_appointment.status = "skipped"
 
-    if next_patient:
-        # Swap positions
-        skipped_appointment.queue_position = next_position
-        next_patient.queue_position = current_position
+    await db.commit()
+    await db.refresh(skipped_appointment)
 
-        # Update status to skipped
-        skipped_appointment.status = "skipped"
-
-        await db.commit()
-        await db.refresh(skipped_appointment)
-
-        return {
-            "message": "Patient skipped and moved one position back",
-            "skipped_patient": {
-                "id": skipped_appointment.id,
-                "token": skipped_appointment.appointment_token,
-                "patient_name": skipped_appointment.patient_name,
-                "previous_position": current_position,
-                "new_position": next_position
-            }
+    return {
+        "message": "Patient skipped and moved one position back",
+        "skipped_patient": {
+            "id": skipped_appointment.id,
+            "token": skipped_appointment.appointment_token,
+            "patient_name": skipped_appointment.patient_name,
+            "previous_position": current_position,
+            "new_position": next_position
         }
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to find next patient in queue"
-        )
+    }
 
 
 @router.post("/clinic/push-patient-to-next-slot")
@@ -983,6 +1037,16 @@ async def push_patient_to_next_slot(
         await db.delete(appointment)
         await db.commit()
 
+        # Send not-served email for last slot
+        patient_email_last_slot = getattr(appointment, 'patient_email', '').strip()
+        if patient_email_last_slot:
+            from app.services.email_service import send_not_served_email
+            clinic_result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+            clinic = clinic_result.scalar_one_or_none()
+            clinic_name = clinic.clinic_name if clinic else clinic_id
+            slot_name_info = slots[current_slot_index].get('slot_name', f'Slot {current_slot_index + 1}') if current_slot_index < len(slots) else None
+            send_not_served_email(patient_email_last_slot, appointment.patient_name, clinic_name, slot_name_info)
+
         return {
             "message": "Patient was in last slot - auto-finished with not_served outcome",
             "action": "auto_finished",
@@ -992,12 +1056,17 @@ async def push_patient_to_next_slot(
     # Find the next open slot
     next_slot_index = None
     for i in range(current_slot_index + 1, len(slots)):
-        if slots[i].get("is_open"):
+        slot = slots[i]
+        if not slot.get("is_open"):
+            continue
+        time_range = slot.get("time_range", [0, 0])
+        current_time = datetime.now().hour + datetime.now().minute / 60.0
+        if len(time_range) >= 2 and current_time < time_range[1]:
             next_slot_index = i
             break
 
     if next_slot_index is None:
-        # No more open slots - auto-finish
+        # No more open slots or all remaining slots have expired - auto-finish
         served_at = appointment.created_at
         if served_at.tzinfo is None:
             served_at = served_at.replace(tzinfo=timezone.utc)
@@ -1029,6 +1098,16 @@ async def push_patient_to_next_slot(
         db.add(completed)
         await db.delete(appointment)
         await db.commit()
+
+        # Send not-served email if patient has email
+        patient_email_for_not_served = getattr(appointment, 'patient_email', '').strip()
+        if patient_email_for_not_served:
+            from app.services.email_service import send_not_served_email
+            clinic_result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+            clinic = clinic_result.scalar_one_or_none()
+            clinic_name = clinic.clinic_name if clinic else clinic_id
+            slot_name_info = slots[current_slot_index].get('slot_name', f'Slot {current_slot_id}') if current_slot_index < len(slots) else None
+            send_not_served_email(patient_email_for_not_served, appointment.patient_name, clinic_name, slot_name_info)
 
         return {
             "message": "No more open slots - auto-finished with not_served outcome",
@@ -1540,6 +1619,199 @@ async def join_queue(
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Lookup appointment by phone number (for Your Details feature)
+# Works for both online appointments and walk-in/QR appointments
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/queue/lookup-by-phone")
+async def lookup_by_phone(
+    phone: str = Query(..., description="Patient phone number"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Look up appointment details by phone number.
+    Searches both online appointments and QR/walk-in appointments.
+    Returns all active appointments for today (supports multiple appointments).
+    """
+    # Normalize phone number - remove +91 or 91 prefix only if at start
+    phone_clean = phone.strip()
+    if phone_clean.startswith("+91"):
+        phone_normalized = phone_clean[3:]
+    elif phone_clean.startswith("91") and len(phone_clean) > 10:
+        phone_normalized = phone_clean[2:]
+    else:
+        phone_normalized = phone_clean
+    
+    # Simple search - check Appointment table with any status for today
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    # Search all appointments for this phone number today
+    result = await db.execute(
+        select(Appointment).where(
+            Appointment.patient_phone == phone_normalized,
+            Appointment.date == today
+        ).order_by(Appointment.created_at.desc())
+    )
+    appointments = list(result.scalars().all())
+    
+    # Also check with +91 prefix
+    if not appointments:
+        result = await db.execute(
+            select(Appointment).where(
+                Appointment.patient_phone == f"+91{phone_normalized}",
+                Appointment.date == today
+            ).order_by(Appointment.created_at.desc())
+        )
+        appointments = list(result.scalars().all())
+    
+    if not appointments:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No appointment found for this phone number today"
+        )
+    
+    # Helper function to get slot name
+    async def get_slot_name(clinic_id: str, slot_id: int | None):
+        if not slot_id:
+            return None
+        slot_result = await db.execute(
+            select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+        )
+        slot_record = slot_result.scalar_one_or_none()
+        if slot_record:
+            slots = _load_slots(slot_record.slots)
+            slot_idx = slot_id - 1
+            if 0 <= slot_idx < len(slots):
+                return slots[slot_idx].get("slot_name", f"Slot {slot_id}")
+        return None
+    
+    # Helper function to get clinic info
+    async def get_clinic_info(clinic_id: str):
+        clinic_result = await db.execute(
+            select(Clinic).where(Clinic.clinic_id == clinic_id)
+        )
+        clinic = clinic_result.scalar_one_or_none()
+        return {
+            "name": clinic.clinic_name if clinic else clinic_id,
+            "address": clinic.address if clinic else None
+        }
+    
+    # Helper function to calculate queue position
+    async def get_queue_position(clinic_id: str, slot_id: int | None, appointment_token: str, appointment_id: int):
+        active_statuses = ["booked", "serving", "pending"]
+
+        if not slot_id:
+            return {
+                "position": "1/1",
+                "patients_ahead": 0,
+                "estimated_wait_minutes": 0,
+                "now_serving_token": appointment_token,
+            }
+
+        online_result = await db.execute(
+            select(Appointment).where(
+                Appointment.clinic_id == clinic_id,
+                Appointment.date == today,
+                Appointment.slot_id == slot_id,
+                Appointment.status.in_(active_statuses),
+            ).order_by(Appointment.id.asc())
+        )
+        online_in_slot = list(online_result.scalars().all())
+
+        qr_result = await db.execute(
+            select(QRAppointment).where(
+                QRAppointment.clinic_id == clinic_id,
+                QRAppointment.date == today,
+                QRAppointment.slot_id == slot_id,
+                QRAppointment.status.in_(active_statuses),
+            ).order_by(QRAppointment.id.asc())
+        )
+        qr_in_slot = list(qr_result.scalars().all())
+
+        queue_items: list[dict] = []
+        for apt in online_in_slot:
+            queue_items.append({
+                "id": apt.id,
+                "token": apt.appointment_token,
+                "status": apt.status,
+                "source": "online",
+                "created_at": apt.created_at,
+            })
+        for apt in qr_in_slot:
+            queue_items.append({
+                "id": apt.id,
+                "token": apt.appointment_token,
+                "status": apt.status,
+                "source": "walkin",
+                "created_at": apt.created_at,
+            })
+
+        queue_items.sort(key=lambda item: item["id"])
+
+        total_in_queue = len(queue_items)
+        total_for_display = total_in_queue if total_in_queue > 0 else 1
+
+        your_position = 1
+        patients_ahead = 0
+        for index, item in enumerate(queue_items):
+            if item["source"] == "online" and item["id"] == appointment_id:
+                your_position = index + 1
+                patients_ahead = index
+                break
+
+        if total_in_queue > 0:
+            serving_item = next((item for item in queue_items if item["status"] == "serving"), None)
+            if serving_item:
+                now_serving_token = serving_item["token"]
+            elif your_position > 1:
+                now_serving_token = queue_items[your_position - 2]["token"]
+            else:
+                now_serving_token = queue_items[0]["token"]
+        else:
+            now_serving_token = appointment_token
+
+        estimated_wait_minutes = patients_ahead * 15
+
+        return {
+            "position": f"{your_position}/{total_for_display}",
+            "patients_ahead": patients_ahead,
+            "estimated_wait_minutes": estimated_wait_minutes,
+            "now_serving_token": now_serving_token,
+        }
+    
+    # Build list of appointments
+    appointments_list = []
+    
+    # Process all appointments
+    for apt in appointments:
+        clinic_info = await get_clinic_info(apt.clinic_id)
+        slot_name = await get_slot_name(apt.clinic_id, apt.slot_id)
+        queue_pos = await get_queue_position(apt.clinic_id, apt.slot_id, apt.appointment_token, apt.id)
+        
+        appointments_list.append({
+            "token_label": apt.appointment_token,
+            "patient_name": apt.patient_name,
+            "clinic_name": clinic_info["name"],
+            "clinic_address": clinic_info["address"],
+            "doctor_name": apt.doctor_name,
+            "date": apt.date,
+            "time": apt.time,
+            "slot_name": slot_name,
+            "position": queue_pos["position"],
+            "patients_ahead": queue_pos["patients_ahead"],
+            "estimated_wait_minutes": queue_pos["estimated_wait_minutes"],
+            "now_serving_token": queue_pos["now_serving_token"],
+            "status": apt.status,
+            "source": "online"
+        })
+    
+    return {
+        "count": len(appointments_list),
+        "appointments": appointments_list
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Clinic Time Slot Management Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 # One row per clinic - all slots stored as JSON array
@@ -1572,20 +1844,12 @@ async def get_time_slots(
     if isinstance(slot_array, str):
         slot_array = json.loads(slot_array) if slot_array else []
 
-    # Calculate when they can next modify slots
-    can_modify_next = None
-    if record.last_slot_change_date:
-        if record.last_slot_change_date.tzinfo is None:
-            record.last_slot_change_date = record.last_slot_change_date.replace(tzinfo=timezone.utc)
-        next_modify_date = record.last_slot_change_date + timedelta(days=7)
-        can_modify_next = next_modify_date.isoformat()
-
+    
     return {
         "clinic_id": clinic_id,
         "slots": slots or [],
         "slot": slot_array or [],
-        "last_slot_change_date": record.last_slot_change_date.isoformat() if record.last_slot_change_date else None,
-        "can_modify_next": can_modify_next
+        "last_slot_change_date": record.last_slot_change_date.isoformat() if record.last_slot_change_date else None
     }
 
 @router.post("/clinic/time-slots")
@@ -1596,7 +1860,6 @@ async def add_time_slot(
     """
     Add a new time slot to a clinic.
     Creates clinic record if doesn't exist.
-    Enforces 7-day cooldown on slot modifications (only when 3 slots exist).
     Request: {clinic_id, slot_name, time_range: [start, end]}
     """
     clinic_id = request.get("clinic_id")
@@ -1614,21 +1877,6 @@ async def add_time_slot(
         select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
     )
     record = result.scalar_one_or_none()
-
-    # Get current slot count for cooldown check
-    current_slot_count = 0
-    if record and record.slots:
-        slots = _load_slots(record.slots)
-        current_slot_count = len(slots)
-
-    # Check cooldown rule if record exists and has 3 slots
-    if record and current_slot_count >= 3:
-        can_modify, message = _can_modify_slots(record.last_slot_change_date, current_slot_count)
-        if not can_modify:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=message
-            )
 
     new_slot = {
         "slot_name": slot_name,
@@ -1668,9 +1916,8 @@ async def add_time_slot(
         slot_array.append("close")  # New slot defaults to "close"
         record.slot = slot_array
 
-        # Update last_slot_change_date only if we have 3 slots now
-        if len(current_slots) >= 3:
-            record.last_slot_change_date = datetime.now(timezone.utc)
+        # Update last_slot_change_date when slots are modified
+        record.last_slot_change_date = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(record)
@@ -1691,7 +1938,6 @@ async def update_time_slot(
 ):
     """
     Update a time slot by index (0-based).
-    Enforces 7-day cooldown on structural modifications (only when 3 slots exist).
     Enforces daily limit (2 times) for open/close toggle operations.
     Request: {clinic_id, slot_name?, time_range?, is_open?, slot?}
     """
@@ -1713,21 +1959,8 @@ async def update_time_slot(
             detail="Time slot not found"
         )
 
-    # Get current slot count for cooldown check
-    current_slot_count = len(record.slots)
-
-    # Check if this is a toggle operation (open/close) or structural change
+    # Check if this is a toggle operation (open/close)
     is_toggle_operation = "is_open" in request or "slot" in request
-    is_structural_change = "slot_name" in request or "time_range" in request
-
-    # For structural changes, check cooldown rule (only when 3 slots exist)
-    if is_structural_change and current_slot_count >= 3:
-        can_modify, message = _can_modify_slots(record.last_slot_change_date, current_slot_count)
-        if not can_modify:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=message
-            )
 
     # For toggle operations, check daily limit per slot
     if is_toggle_operation:
@@ -1797,9 +2030,8 @@ async def update_time_slot(
 
     record.slots = slots
 
-    # Update last_slot_change_date only for structural changes when we have 3 slots
-    if is_structural_change and current_slot_count >= 3:
-        record.last_slot_change_date = datetime.now(timezone.utc)
+    # Update last_slot_change_date when slots are modified
+    record.last_slot_change_date = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(record)
@@ -1822,7 +2054,6 @@ async def delete_time_slot(
 ):
     """
     Delete a time slot by index (0-based).
-    Enforces 7-day cooldown on slot modifications.
     """
     result = await db.execute(
         select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
@@ -1835,18 +2066,6 @@ async def delete_time_slot(
             detail="Time slot not found"
         )
 
-    # Get current slot count for cooldown check
-    current_slot_count = len(record.slots)
-
-    # Check cooldown rule before allowing deletion (only when 3 slots exist)
-    if current_slot_count >= 3:
-        can_modify, message = _can_modify_slots(record.last_slot_change_date, current_slot_count)
-        if not can_modify:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=message
-            )
-
     # Remove slot at index
     import json
     slots = record.slots
@@ -1856,9 +2075,8 @@ async def delete_time_slot(
     slots.pop(slot_index)
     record.slots = slots
 
-    # Update last_slot_change_date only if we still have 3 slots after deletion
-    if len(slots) >= 3:
-        record.last_slot_change_date = datetime.now(timezone.utc)
+    # Update last_slot_change_date when slots are modified
+    record.last_slot_change_date = datetime.now(timezone.utc)
 
     await db.commit()
 

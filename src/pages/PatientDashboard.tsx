@@ -28,9 +28,22 @@ const PatientDashboard = () => {
   useEffect(() => {
     const userStr = localStorage.getItem("user");
     if (userStr) {
-      const user = JSON.parse(userStr);
-      if (user.email) {
-        fetchAppointments(user.email);
+      try {
+        const user = JSON.parse(userStr);
+        if (user.email) {
+          fetchAppointments(user.email);
+        } else if (typeof userStr === 'string' && userStr.includes('@')) {
+          // Handle case where user is stored as plain email string
+          fetchAppointments(userStr);
+        } else {
+          setLoading(false);
+        }
+      } catch (e) {
+        // Handle corrupted data - clear and redirect to login
+        localStorage.removeItem("user");
+        localStorage.removeItem("patient_email");
+        localStorage.removeItem("patientData");
+        setLoading(false);
       }
     } else {
       setLoading(false);

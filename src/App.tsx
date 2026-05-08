@@ -38,6 +38,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminFeedbackPage from "./pages/AdminFeedbackPage";
 import FeedbackPage from "./pages/FeedbackPage";
 import AboutUs from "./pages/AboutUs";
+import YourDetails from "./pages/YourDetails";
 import NotFound from "./pages/NotFound";
 
 
@@ -51,6 +52,7 @@ function App() {
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
             <Route path="/about" element={<MainLayout><AboutUs /></MainLayout>} />
             <Route path="/feedback" element={<MainLayout><FeedbackPage /></MainLayout>} />
+            <Route path="/your-details" element={<MainLayout><YourDetails /></MainLayout>} />
 
             {/* Patient Auth with Header */}
             <Route path="/patient/login" element={<MainLayout><PatientLogin /></MainLayout>} />

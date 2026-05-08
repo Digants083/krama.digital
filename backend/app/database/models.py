@@ -34,6 +34,7 @@ class Clinic(Base):
     end = Column(Integer, nullable=True)
     booking_cutoff_minutes = Column(Integer, default=15)
     is_active = Column(Boolean, default=False)
+    manual_stop_date = Column(String, nullable=True)
     has_pinned_location = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -72,6 +73,7 @@ class Appointment(Base):
     time = Column(String, nullable=False)
     status = Column(String, default="booked")
     notification_stage = Column(String, default="pending")
+    last_email_sent_at = Column(DateTime(timezone=True), nullable=True)  # Track when email was actually sent
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     source = Column(String, default="online")
     slot_id = Column(Integer, nullable=True)

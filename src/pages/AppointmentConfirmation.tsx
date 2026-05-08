@@ -65,15 +65,19 @@ const AppointmentConfirmation = () => {
         }
 
         const data = await response.json();
-        const today = new Date().toISOString().split("T")[0];
-        const todayAppointments = (data.appointments || []).filter((apt: any) => apt.date === today);
-
-        if (todayAppointments.length > 0) {
-          const latestAppointment = todayAppointments[0];
-          setAppointmentDetails(latestAppointment);
+        const allAppointments = data.appointments || [];
+        
+        // Use most recent appointment (last one in the list)
+        let selectedAppointment = null;
+        if (allAppointments.length > 0) {
+          selectedAppointment = allAppointments[allAppointments.length - 1];
+        }
+        
+        if (selectedAppointment) {
+          setAppointmentDetails(selectedAppointment);
 
           const queueResponse = await fetch(
-            `/api/auth/appointments/queue-position?clinic_id=${latestAppointment.clinic_id}&appointment_token=${latestAppointment.appointment_token}&appointment_id=${latestAppointment.id}`
+            `/api/auth/appointments/queue-position?clinic_id=${selectedAppointment.clinic_id}&appointment_token=${selectedAppointment.appointment_token}&appointment_id=${selectedAppointment.id}`
           );
           if (queueResponse.ok) {
             const queueData = await queueResponse.json();
@@ -92,7 +96,7 @@ const AppointmentConfirmation = () => {
 
   const token = state?.token || appointmentDetails?.appointment_token || "T-1";
   const clinicName = state?.clinic || appointmentDetails?.clinic_name || "Unknown Clinic";
-  const clinicAddress = state?.address || appointmentDetails?.address || "Clinic Address";
+  const clinicAddress = state?.address || appointmentDetails?.address || "";
   const doctorName = state?.doctor || appointmentDetails?.doctor_name || "Available Doctor";
   const dateText = state?.date || appointmentDetails?.date || "";
   const timeText = state?.time || appointmentDetails?.time || "";

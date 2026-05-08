@@ -61,9 +61,14 @@ const ClinicProfile = () => {
   const [otpSending, setOtpSending] = useState(false);
   const [otpSubmitting, setOtpSubmitting] = useState(false);
   const [otpDialogOpen, setOtpDialogOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"phone" | "password" | "delete" | "address" | null>(null);
+  const [otpCooldown, setOtpCooldown] = useState(0);
+  const [verifyingPassword, setVerifyingPassword] = useState(false);
+  const [passwordVerified, setPasswordVerified] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"phone" | "password" | "password_forgot" | "delete" | "address" | null>(null);
   const [showQrDialog, setShowQrDialog] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordOtpVerified, setForgotPasswordOtpVerified] = useState(false);
 
   const passwordChecks = getPasswordChecks(newPassword);
   const isNewPasswordStrong = Object.values(passwordChecks).every(Boolean);
@@ -74,6 +79,14 @@ const ClinicProfile = () => {
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  // OTP Cooldown timer
+  useEffect(() => {
+    if (otpCooldown > 0) {
+      const timer = setTimeout(() => setOtpCooldown(otpCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [otpCooldown]);
 
   useEffect(() => {
     const fetchClinicData = async () => {
@@ -90,13 +103,6 @@ const ClinicProfile = () => {
           setDbProfile(data);
           setPhone(data.phone || "");
           setAddress(data.full_formatted_address || data.address || "");
-          // Load structured address fields
-          setStreetAddress(data.street_address || "");
-          setRoad(data.road || "");
-          setLayout(data.layout || "");
-          setSection(data.section || "");
-          setCity(data.city || "");
-          setPincode(data.pincode || "");
           setLocationCoords(
             data.latitude && data.longitude
               ? { latitude: data.latitude, longitude: data.longitude }
@@ -132,12 +138,6 @@ const ClinicProfile = () => {
     setDbProfile(data);
     setPhone(data.phone || "");
     setAddress(data.full_formatted_address || data.address || "");
-    setStreetAddress(data.street_address || "");
-    setRoad(data.road || "");
-    setLayout(data.layout || "");
-    setSection(data.section || "");
-    setCity(data.city || "");
-    setPincode(data.pincode || "");
     setLocationCoords(
       data.latitude && data.longitude
         ? { latitude: data.latitude, longitude: data.longitude }
@@ -146,7 +146,38 @@ const ClinicProfile = () => {
     setImageUrls(data.image_urls || []);
   };
 
-  const sendProfileOtp = async (action: "phone" | "password" | "delete" | "address") => {
+  const verifyCurrentPassword = async () => {
+    if (!loggedInClinicId || !currentPassword) {
+      setMessage({ text: "Please enter current password", type: "error" });
+      return;
+    }
+
+    setVerifyingPassword(true);
+    try {
+      const response = await fetch("/api/auth/clinic/verify-current-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clinic_id: loggedInClinicId,
+          password: currentPassword,
+        }),
+      });
+
+      if (response.ok) {
+        setPasswordVerified(true);
+        setMessage({ text: "Password verified! Enter new password.", type: "success" });
+      } else {
+        const error = await response.json();
+        setMessage({ text: error.detail || "Current password is incorrect", type: "error" });
+      }
+    } catch {
+      setMessage({ text: "Network error. Please try again.", type: "error" });
+    } finally {
+      setVerifyingPassword(false);
+    }
+  };
+
+  const sendProfileOtp = async (action: "phone" | "password" | "password_forgot" | "delete" | "address") => {
     if (!loggedInClinicId) {
       setMessage({ text: "No logged-in clinic found", type: "error" });
       return;
@@ -159,6 +190,17 @@ const ClinicProfile = () => {
 
     if (action === "password") {
       if (!currentPassword || !newPassword || newPassword !== confirmPassword) {
+        setMessage({ text: "Please fill all password fields correctly", type: "error" });
+        return;
+      }
+      if (!isNewPasswordStrong) {
+        setMessage({ text: "New password must match the signup password rules", type: "error" });
+        return;
+      }
+    }
+
+    if (action === "password_forgot") {
+      if (!newPassword || newPassword !== confirmPassword) {
         setMessage({ text: "Please fill all password fields correctly", type: "error" });
         return;
       }
@@ -195,6 +237,7 @@ const ClinicProfile = () => {
         setPendingAction(action);
         setOtpCode("");
         setOtpDialogOpen(true);
+        setOtpCooldown(60); // Start 60 second cooldown
         setMessage({ text: "OTP sent to your email", type: "success" });
       } else {
         const error = await response.json();
@@ -450,6 +493,18 @@ const ClinicProfile = () => {
             otp_code: otpCode,
           }),
         });
+      } else if (pendingAction === "password_forgot") {
+        // For forgot password: verify OTP and change password in one step (no current password needed)
+        response = await fetch("/api/auth/clinic/change-password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clinic_id: loggedInClinicId,
+            current_password: "FORGOT_PASSWORD_PLACEHOLDER",
+            new_password: newPassword,
+            otp_code: otpCode,
+          }),
+        });
       } else if (pendingAction === "address") {
         const success = await handleUpdateProfile(otpCode);
         if (success) {
@@ -485,6 +540,12 @@ const ClinicProfile = () => {
         setCurrentPassword("");
         setNewPassword("");
         setConfirmPassword("");
+      } else if (pendingAction === "password_forgot") {
+        setMessage({ text: "Password reset successfully!", type: "success" });
+        setNewPassword("");
+        setConfirmPassword("");
+        setShowForgotPassword(false);
+        setForgotPasswordOtpVerified(false);
       } else {
         setMessage({ text: "Account deleted successfully", type: "success" });
         localStorage.clear();
@@ -512,7 +573,7 @@ const ClinicProfile = () => {
 
   const getClinicQrUrl = () => {
     if (!dbProfile?.clinic_id) return "";
-    return `${window.location.origin}/walkin?clinic_id=${dbProfile.clinic_id}`;
+    return `${window.location.origin}/join?clinic_id=${dbProfile.clinic_id}`;
   };
 
   const downloadClinicQr = async () => {
@@ -717,11 +778,23 @@ const ClinicProfile = () => {
         <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
           <div className="lg:col-span-4">
             <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
-              <div>
-                <Label htmlFor="phone">New Phone Number</Label>
-                <Input id="phone" type="tel" placeholder="+91 98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-2" />
+              <div className="flex gap-2">
+                <div className="w-20">
+                  <Label htmlFor="countryCode">Code</Label>
+                  <Input
+                    id="countryCode"
+                    type="tel"
+                    value="+91"
+                    disabled
+                    className="mt-2 bg-slate-100"
+                  />
+                </div>
+                <div className="flex-1">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input id="phone" type="tel" placeholder="9876543210" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-2" />
+                </div>
               </div>
-              <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full">
+              <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full mt-4">
                 Verify OTP and Update
               </Button>
             </ProfileCard>
@@ -781,17 +854,6 @@ const ClinicProfile = () => {
 
               <Button onClick={() => void sendProfileOtp("address")} disabled={!streetAddress || !road || !city || !pincode || otpSending} className="w-full">
                 Verify OTP and Update Address
-              </Button>
-
-              <div className="my-2 border-t border-border"></div>
-              {dbProfile?.address && !locationCoords && (
-                <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                  <span className="font-semibold">Action needed:</span> You have an address but no map location. Please pin your coordinates.
-                </div>
-              )}
-              <Button onClick={() => setShowLocationModal(true)} variant={dbProfile?.address && !locationCoords ? "default" : "outline"} className="w-full">
-                <MapPinned className="mr-2 h-4 w-4" />
-                {locationCoords ? "Update Map Location" : "Pin Location on Map"}
               </Button>
             </ProfileCard>
           </div>
@@ -859,26 +921,114 @@ const ClinicProfile = () => {
 
           <div className="lg:col-span-7">
             <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
-              <div>
-                <Label htmlFor="current-pw">Current Password</Label>
-                <Input id="current-pw" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="mt-2" />
-              </div>
-              <div>
-                <Label htmlFor="new-pw">New Password</Label>
-                <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
-              </div>
-              {newPassword && <PasswordRules checks={passwordChecks} />}
-              <div>
-                <Label htmlFor="confirm-pw">Confirm New Password</Label>
-                <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
-              </div>
-              <Button
-                onClick={() => void sendProfileOtp("password")}
-                disabled={!currentPassword || !newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
-                className="w-full"
-              >
-                Verify OTP and Change Password
-              </Button>
+              {!showForgotPassword ? (
+                // Normal password change - verify current password first
+                <>
+                  <div>
+                    <Label htmlFor="current-pw">Current Password</Label>
+                    <Input 
+                      id="current-pw" 
+                      type="password" 
+                      value={currentPassword} 
+                      onChange={(e) => setCurrentPassword(e.target.value)} 
+                      className="mt-2" 
+                    />
+                  </div>
+                  {passwordVerified ? (
+                    // Password verified - show new password fields
+                    <>
+                      <div>
+                        <Label htmlFor="new-pw">New Password</Label>
+                        <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+                      </div>
+                      {newPassword && <PasswordRules checks={passwordChecks} />}
+                      <div>
+                        <Label htmlFor="confirm-pw">Confirm New Password</Label>
+                        <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                      </div>
+                      <Button
+                        onClick={async () => {
+                          if (!newPassword || !isNewPasswordStrong || newPassword !== confirmPassword) {
+                            setMessage({ text: "Please fill all fields correctly", type: "error" });
+                            return;
+                          }
+                          setVerifyingPassword(true);
+                          try {
+                            const response = await fetch("/api/auth/clinic/change-password-direct", {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                clinic_id: loggedInClinicId,
+                                current_password: currentPassword,
+                                new_password: newPassword,
+                              }),
+                            });
+                            if (response.ok) {
+                              setCurrentPassword("");
+                              setNewPassword("");
+                              setConfirmPassword("");
+                              setPasswordVerified(false);
+                              setMessage({ text: "Password changed successfully!", type: "success" });
+                            } else {
+                              const error = await response.json();
+                              setMessage({ text: error.detail || "Failed to change password", type: "error" });
+                            }
+                          } catch {
+                            setMessage({ text: "Network error", type: "error" });
+                          } finally {
+                            setVerifyingPassword(false);
+                          }
+                        }}
+                        disabled={!newPassword || !isNewPasswordStrong || newPassword !== confirmPassword || verifyingPassword}
+                        className="w-full mt-4"
+                      >
+                        {verifyingPassword ? "Changing..." : "Change Password"}
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex gap-2 mt-4">
+                      <Button
+                        onClick={() => void verifyCurrentPassword()}
+                        disabled={!currentPassword || verifyingPassword}
+                        className="flex-1"
+                      >
+                        {verifyingPassword ? "Verifying..." : "Verify Password"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowForgotPassword(true)}
+                      >
+                        Forgot?
+                      </Button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                // Forgot password - use OTP to reset
+                <>
+                  <div>
+                    <Label htmlFor="new-pw-forgot">New Password</Label>
+                    <Input id="new-pw-forgot" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+                  </div>
+                  {newPassword && <PasswordRules checks={passwordChecks} />}
+                  <div>
+                    <Label htmlFor="confirm-pw-forgot">Confirm New Password</Label>
+                    <Input id="confirm-pw-forgot" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <Button
+                      onClick={() => void sendProfileOtp("password_forgot")}
+                      disabled={!newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
+                      className="flex-1"
+                    >
+                      {otpSending ? "Sending..." : "Send OTP"}
+                    </Button>
+                    <Button variant="outline" onClick={() => { setShowForgotPassword(false); setForgotPasswordOtpVerified(false); setNewPassword(""); setConfirmPassword(""); }}>
+                      Back
+                    </Button>
+                  </div>
+                </>
+              )}
             </ProfileCard>
           </div>
 
@@ -957,9 +1107,23 @@ const ClinicProfile = () => {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Verify OTP</DialogTitle>
+            <DialogTitle>
+              {pendingAction === "phone" ? "Verify OTP for Phone Change" : 
+               pendingAction === "password_forgot" ? "Verify OTP for Password Reset" : 
+               pendingAction === "delete" ? "Verify OTP for Account Deletion" :
+               pendingAction === "address" ? "Verify OTP for Address Change" :
+               "Verify OTP"}
+            </DialogTitle>
             <DialogDescription>
-              Enter the OTP sent to {dbProfile?.email || "your email"} to continue.
+              {pendingAction === "phone" 
+                ? `Enter the OTP sent to ${dbProfile?.email || "your email"} to verify your new phone number.`
+                : pendingAction === "password_forgot"
+                ? `Enter the OTP sent to ${dbProfile?.email || "your email"} to reset your password.`
+                : pendingAction === "delete"
+                ? `Enter the OTP sent to ${dbProfile?.email || "your email"} to delete your account. This action cannot be undone.`
+                : pendingAction === "address"
+                ? `Enter the OTP sent to ${dbProfile?.email || "your email"} to verify your new address.`
+                : `Enter the OTP sent to ${dbProfile?.email || "your email"} to continue.`}
             </DialogDescription>
           </DialogHeader>
           <div>
@@ -975,9 +1139,15 @@ const ClinicProfile = () => {
             />
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
-            <Button variant="outline" onClick={() => pendingAction && void sendProfileOtp(pendingAction)} disabled={otpSending || otpSubmitting || !pendingAction}>
-              Resend OTP
-            </Button>
+            {otpCooldown > 0 ? (
+              <Button variant="outline" disabled className="text-gray-400">
+                Resend in {otpCooldown}s
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => pendingAction && void sendProfileOtp(pendingAction)} disabled={otpSending || otpSubmitting || !pendingAction}>
+                Resend OTP
+              </Button>
+            )}
             <Button onClick={() => void handleVerifiedAction()} disabled={!otpCode || otpSubmitting}>
               {otpSubmitting ? "Verifying..." : "Verify and Continue"}
             </Button>

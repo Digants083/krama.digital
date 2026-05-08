@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,8 @@ const Requirement = ({ met, label }: { met: boolean; label: string }) => (
 
 const PatientSignup = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromJoinQueue = location.state as { fromJoinQueue?: boolean; clinic_id?: string } | null;
   const [step, setStep] = useState<"form" | "otp">("form");
   const [form, setForm] = useState({ name: "", phone: "", email: "", password: "", confirm: "" });
   const [error, setError] = useState("");
@@ -97,6 +99,8 @@ const PatientSignup = () => {
       <OTPVerificationPage 
         email={form.email}
         onBack={() => setStep("form")}
+        fromJoinQueue={fromJoinQueue}
+        userData={{ name: form.name, phone: form.phone }}
       />
     );
   }
@@ -130,7 +134,7 @@ const PatientSignup = () => {
               <Label htmlFor="phone">Phone Number</Label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="phone" placeholder="+91 98765 43210" value={form.phone} onChange={(e) => update("phone", e.target.value)} className="pl-9" />
+                <Input id="phone" placeholder="9876543210" value={form.phone} onChange={(e) => update("phone", e.target.value)} className="pl-9" />
               </div>
             </div>
             <div className="space-y-1.5">
@@ -192,9 +196,11 @@ const PatientSignup = () => {
 };
 
 // OTP Verification Page Component
-const OTPVerificationPage = ({ email, onBack }: { 
+const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: { 
   email: string, 
-  onBack: () => void
+  onBack: () => void,
+  fromJoinQueue?: { fromJoinQueue?: boolean; clinic_id?: string } | null,
+  userData?: { name: string; phone: string }
 }) => {
   const navigate = useNavigate();
   const [otp, setOtp] = useState("");
@@ -242,6 +248,15 @@ const OTPVerificationPage = ({ email, onBack }: {
         setLoading(false);
         return;
       }
+
+      // Auto-login after successful verification
+      localStorage.setItem("user", JSON.stringify({ email: email }));
+      localStorage.setItem("patient_email", email);
+      localStorage.setItem("patientData", JSON.stringify({
+        email: email,
+        name: userData?.name || "",
+        phone: userData?.phone || ""
+      }));
 
       setSuccess(true);
     } catch (err) {
@@ -291,9 +306,15 @@ const OTPVerificationPage = ({ email, onBack }: {
             </div>
             <h2 className="text-2xl font-bold text-green-600 mb-2">Account Created!</h2>
             <p className="text-muted-foreground mb-6">Your patient account has been successfully created.</p>
-            <Button onClick={() => navigate("/patient/login")} className="w-full">
-              Go to Patient Login <ArrowRight className="ml-1 h-4 w-4" />
-            </Button>
+            {fromJoinQueue?.clinic_id ? (
+              <Button onClick={() => navigate(`/clinic-details/${fromJoinQueue?.clinic_id}`)} className="w-full">
+                Book Appointment <ArrowRight className="ml-1 h-4 w-4" />
+              </Button>
+            ) : (
+              <Button onClick={() => navigate("/patient/login")} className="w-full">
+                Go to Patient Login <ArrowRight className="ml-1 h-4 w-4" />
+              </Button>
+            )}
           </div>
         </AuthCard>
       </div>

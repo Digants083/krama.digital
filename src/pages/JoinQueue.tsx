@@ -1,6 +1,15 @@
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
+
+// ─── Types ────────────────────────────────────────────────────────────────────────────────
+interface TimeSlot {
+  slot_name: string;
+  time_range: number[];
+  is_open: boolean;
+  is_expired: boolean;
+  display_status: string;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────────────────
 interface Doctor {
@@ -16,21 +25,57 @@ interface ClinicInfo {
   doctors: Doctor[];
 }
 
-type Step = "form" | "loading" | "success" | "error";
+type Step = "options" | "form" | "loading" | "success" | "error";
 
 // ─── Component ────────────────────────────────────────────────────────────────────────────────
 const JoinQueue = () => {
   // QR codes should link to /join?clinic_id=XYZ
   const [searchParams] = useSearchParams();
   const qrClinicId = searchParams.get("clinic_id") || "";
+  const navigate = useNavigate();
 
   const { addWalkinToQueue } = useQueue();
 
-  const [step, setStep] = useState<Step>("form");
+  const [step, setStep] = useState<Step>("options");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [selectedDoctorId, setSelectedDoctorId] = useState("");
+  const [selectedSlotId, setSelectedSlotId] = useState<number | "">("");
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
+
+  // Convert 24-hour to 12-hour format
+  const formatHour = (hour: number) => {
+    // Handle overnight times (e.g., 25 = 1 AM next day)
+    const h = Math.floor(hour);
+    const normalizedHour = h > 24 ? h - 24 : h;
+    const ampm = normalizedHour >= 12 ? 'PM' : 'AM';
+    const h12 = normalizedHour % 12 || 12;
+    return `${h12}:00 ${ampm}`;
+  };
+
+  const formatTimeRange = (start: number, end: number) => {
+    return `${formatHour(start)} - ${formatHour(end)}`;
+  };
+
+  // Check if a slot has expired based on current time (15 min before slot ends)
+  const isSlotExpired = (timeRange: number[]) => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const endTimeMinutes = timeRange[1] * 60;
+    const cutoffMinutes = endTimeMinutes - 15; // 15 min before slot ends
+
+    // Handle overnight slots (end > 24 means next day)
+    if (timeRange[1] > 24) {
+      const normalizedEndMinutes = (timeRange[1] - 24) * 60;
+      const normalizedCutoffMinutes = normalizedEndMinutes - 15;
+      return currentMinutes >= normalizedCutoffMinutes;
+    }
+
+    // Normal slot: check if current time is past cutoff (15 min before end)
+    return currentMinutes >= cutoffMinutes;
+  };
   const [clinicLoading, setClinicLoading] = useState(false);
   const [tokenResult, setTokenResult] = useState<{
     token_label: string;
@@ -42,12 +87,12 @@ const JoinQueue = () => {
   useEffect(() => {
     if (!qrClinicId) return;
     setClinicLoading(true);
-    fetch(`/api/auth/clinics/${qrClinicId}`)
-      .then((r) => r.json())
+    fetch(`/api/auth/clinic/data?clinic_id=${qrClinicId}`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
       .then((data) => {
         setClinicInfo({
-          id: data.id || qrClinicId,
-          name: data.name || "Clinic",
+          id: data.clinic_id || qrClinicId,
+          name: data.clinic_name || "Clinic",
           address: data.address,
           doctors: data.doctors || [],
         });
@@ -58,11 +103,48 @@ const JoinQueue = () => {
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
 
+  // ─── Fetch time slots ───────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!qrClinicId) return;
+    setSlotsLoading(true);
+    fetch(`/api/auth/clinic/time-slots?clinic_id=${qrClinicId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const slotArray = data.slot || [];
+        const slots = (data.slots || []).map((s: any, idx: number) => {
+          const isOpen = slotArray[idx] === "open";
+          const isExpired = isSlotExpired(s.time_range);
+          return {
+            ...s,
+            is_open: isOpen,
+            is_expired: isExpired,
+            display_status: isExpired ? "Expired" : (isOpen ? "Available" : "Not Available")
+          };
+        });
+        // Show ALL slots - open and closed (closed slots will be disabled)
+        setTimeSlots(slots);
+      })
+      .catch(() => setTimeSlots([]))
+      .finally(() => setSlotsLoading(false));
+  }, [qrClinicId]);
+
+  // ─── Handle sign up option ───────────────────────────────────────────────────────────────────
+  const handleSignUp = () => {
+    navigate("/patient/signup", { state: { fromJoinQueue: true, clinic_id: qrClinicId } });
+  };
+
+  // ─── Handle quick book option ───────────────────────────────────────────────────────────────
+  const handleQuickBook = () => {
+    setStep("form");
+  };
+
   // ─── Validation ────────────────────────────────────────────────────────────────────────────────
   const phoneRegex = /^[6-9]\d{9}$/;
   const isValid =
     name.trim().length >= 2 &&
-    phoneRegex.test(phone.trim());
+    phoneRegex.test(phone.trim()) &&
+    selectedSlotId !== "" &&
+    timeSlots.length > 0; // Ensure slots are loaded
 
   // ─── Submit ────────────────────────────────────────────────────────────────────────────────────
   const handleJoin = async () => {
@@ -79,6 +161,7 @@ const JoinQueue = () => {
           patient_name: name.trim(),
           phone: phone.trim(),
           source: "walkin",
+          slot_id: selectedSlotId || null,
         }),
       });
 
@@ -107,12 +190,51 @@ const JoinQueue = () => {
 
   // ─── Render ────────────────────────────────────────────────────────────────────────────────────
 
+  // Options screen - choose between Sign up or Quick book
+  if (step === "options") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary font-display text-2xl font-bold text-primary-foreground">
+            K
+          </div>
+          <h2 className="mb-2 text-xl font-semibold text-[#0F172A]">Join Queue</h2>
+          {clinicInfo && (
+            <p className="mb-6 text-sm font-medium text-primary">{clinicInfo.name}</p>
+          )}
+          
+          <p className="mb-6 text-sm text-muted-foreground">
+            Would you like to sign up for the full experience or continue with a quick booking?
+          </p>
+
+          {/* Sign up option */}
+          <button
+            onClick={handleSignUp}
+            className="mb-3 w-full rounded-xl bg-primary px-4 py-4 text-sm font-medium text-primary-foreground shadow-[0_14px_28px_-18px_rgba(31,92,84,0.9)] transition-all duration-200 hover:bg-primary/90"
+          >
+            <span className="block font-semibold">Sign Up for Full Experience</span>
+            <span className="block text-xs text-white/70 mt-1">Live queue tracking, appointment history & more</span>
+          </button>
+
+          {/* Quick book option */}
+          <button
+            onClick={handleQuickBook}
+            className="w-full rounded-xl border border-primary/25 bg-primary/5 px-4 py-4 text-sm font-medium text-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/10"
+          >
+            <span className="block font-semibold text-primary">Quick Book</span>
+            <span className="mt-1 block text-xs text-muted-foreground">Just book a slot - no account needed</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Invalid QR code
   if (!qrClinicId) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
-          <p className="text-gray-500 text-sm">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
+          <p className="text-sm text-muted-foreground">
             Invalid QR code. Please scan the clinic's QR code again.
           </p>
         </div>
@@ -123,10 +245,10 @@ const JoinQueue = () => {
   // Loading clinic info
   if (clinicLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
-          <div className="h-6 w-32 mx-auto rounded bg-gray-100 animate-pulse mb-2" />
-          <div className="h-4 w-24 mx-auto rounded bg-gray-100 animate-pulse" />
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
+          <div className="mx-auto mb-2 h-6 w-32 animate-pulse rounded bg-primary/10" />
+          <div className="mx-auto h-4 w-24 animate-pulse rounded bg-primary/10" />
         </div>
       </div>
     );
@@ -135,18 +257,18 @@ const JoinQueue = () => {
   // Success screen
   if (step === "success" && tokenResult) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
           {/* Tick icon */}
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#00555A]/10">
-            <svg className="h-7 w-7 text-[#00555A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+            <svg className="h-7 w-7 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>
 
           <h2 className="text-lg font-semibold text-[#0F172A] mb-1">You're in the queue!</h2>
           {clinicInfo && (
-            <p className="text-sm text-gray-500 mb-6">{clinicInfo.name}</p>
+            <p className="mb-6 text-sm font-medium text-primary">{clinicInfo.name}</p>
           )}
 
           {/* Token badge */}
@@ -159,18 +281,26 @@ const JoinQueue = () => {
             </p>
           </div>
 
-          <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-[#0F172A] mb-6">
-            <span className="text-gray-500">Patients ahead of you: </span>
+          <div className="mb-6 rounded-xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground">
+            <span className="text-muted-foreground">Patients ahead of you: </span>
             <span className="font-semibold">{Math.max(0, tokenResult.position - 1)}</span>
           </div>
 
-          <p className="text-xs text-gray-400 mb-4">
+          <p className="mb-4 text-xs text-muted-foreground">
             Please wait for your token to be called.
           </p>
 
+          {/* Info about Your Details */}
+          <div className="mb-4 rounded-xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-primary">
+            <p className="font-medium mb-1">Want to track your queue?</p>
+            <p className="text-xs text-primary/80">
+              Go to <strong>Your Details</strong> in the header and enter your number to see your position and wait time.
+            </p>
+          </div>
+
           <button
             onClick={handleGoHome}
-            className="w-full rounded-xl bg-[#00555A] px-4 py-3 text-sm font-medium text-white hover:opacity-90 transition-all duration-200"
+            className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-all duration-200 hover:bg-primary/90"
           >
             Back to Home
           </button>
@@ -182,18 +312,18 @@ const JoinQueue = () => {
   // Error screen
   if (step === "error") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
-            <svg className="h-7 w-7 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
+            <svg className="h-7 w-7 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </div>
           <h2 className="text-lg font-semibold text-[#0F172A] mb-2">Couldn't join queue</h2>
-          <p className="text-sm text-gray-500 mb-6">{errorMsg}</p>
+          <p className="mb-6 text-sm text-muted-foreground">{errorMsg}</p>
           <button
             onClick={() => { setStep("form"); setErrorMsg(""); }}
-            className="w-full rounded-xl bg-[#00555A] px-4 py-3 text-sm font-medium text-white hover:opacity-90 transition-all duration-200"
+            className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-all duration-200 hover:bg-primary/90"
           >
             Try Again
           </button>
@@ -204,56 +334,119 @@ const JoinQueue = () => {
 
   // Form screen
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+      <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
 
         {/* Header */}
         <div className="mb-6 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary font-display text-xl font-bold text-primary-foreground">
+            K
+          </div>
           <h1 className="text-lg font-semibold text-[#0F172A]">
             {clinicInfo?.name || "Join Queue"}
           </h1>
           {clinicInfo?.address && (
-            <p className="text-xs text-gray-400 mt-0.5">{clinicInfo.address}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{clinicInfo.address}</p>
           )}
-          <p className="text-sm text-gray-500 mt-2">Enter your details to get a token</p>
+          <p className="mt-2 text-sm text-muted-foreground">Enter your details to get a token</p>
         </div>
 
         <div className="space-y-4">
           {/* Name */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Full name</label>
+            <label className="mb-1 block text-xs font-medium text-primary">Full name</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Ravi Kumar"
-              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-[#0F172A] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00FFF0] transition-all duration-200 text-sm"
+              className="w-full rounded-lg border border-primary/20 bg-white px-4 py-3 text-sm text-foreground transition-all duration-200 placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
           </div>
 
           {/* Phone */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Mobile number</label>
+            <label className="mb-1 block text-xs font-medium text-primary">Mobile number</label>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
               placeholder="10-digit mobile number"
               type="tel"
               inputMode="numeric"
-              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-[#0F172A] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00FFF0] transition-all duration-200 text-sm"
+              className="w-full rounded-lg border border-primary/20 bg-white px-4 py-3 text-sm text-foreground transition-all duration-200 placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
             {phone.length > 0 && !phoneRegex.test(phone) && (
               <p className="text-xs text-red-500 mt-1">Enter a valid 10-digit mobile number</p>
             )}
           </div>
 
+          {/* Slot selector */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-primary">Select time slot</label>
+            {slotsLoading ? (
+              <div className="space-y-2">
+                <div className="h-14 animate-pulse rounded-xl bg-primary/10" />
+                <div className="h-14 animate-pulse rounded-xl bg-primary/10" />
+              </div>
+            ) : timeSlots.length > 0 ? (
+              <div className="space-y-2">
+                {timeSlots.map((slot, idx) => {
+                  const slotNum = idx + 1;
+                  const isDisabled = !slot.is_open || slot.is_expired;
+                  const isSelected = selectedSlotId === slotNum;
+
+                  return (
+                    <button
+                      key={slotNum}
+                      type="button"
+                      disabled={isDisabled}
+                      onClick={() => setSelectedSlotId(slotNum)}
+                      className={[
+                        "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-all duration-200",
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground shadow-[0_14px_30px_-22px_rgba(31,92,84,0.9)]"
+                          : "border-primary/15 bg-white text-foreground hover:border-primary/35 hover:bg-primary/5",
+                        isDisabled
+                          ? "cursor-not-allowed border-border bg-secondary/60 text-muted-foreground opacity-70 hover:border-border hover:bg-secondary/60"
+                          : ""
+                      ].join(" ")}
+                    >
+                      <span>
+                        <span className="block text-sm font-semibold">
+                          {slot.slot_name || `Slot ${slotNum}`}
+                        </span>
+                        <span className={isSelected ? "mt-0.5 block text-xs text-white/75" : "mt-0.5 block text-xs text-muted-foreground"}>
+                          {formatTimeRange(slot.time_range[0], slot.time_range[1])}
+                        </span>
+                      </span>
+                      <span
+                        className={[
+                          "rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                          isSelected
+                            ? "bg-white/15 text-white"
+                            : isDisabled
+                              ? "bg-[#FFC107]/20 text-[#7A5800]"
+                              : "bg-primary/10 text-primary"
+                        ].join(" ")}
+                      >
+                        {slot.display_status}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">No slots configured for this clinic</p>
+            )}
+          </div>
+
           {/* Doctor selector — shown only if clinic has multiple doctors */}
           {clinicInfo && clinicInfo.doctors.length > 1 && (
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Select doctor</label>
+              <label className="mb-1 block text-xs font-medium text-primary">Select doctor</label>
               <select
                 value={selectedDoctorId}
                 onChange={(e) => setSelectedDoctorId(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#00FFF0] transition-all duration-200 text-sm"
+                className="w-full rounded-lg border border-primary/20 bg-white px-4 py-3 text-sm text-foreground transition-all duration-200 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
                 <option value="">Any available doctor</option>
                 {clinicInfo.doctors.map((doc) => (
@@ -269,7 +462,7 @@ const JoinQueue = () => {
         <button
           onClick={handleJoin}
           disabled={!isValid || step === "loading"}
-          className="mt-8 w-full rounded-xl bg-[#00555A] px-4 py-3 text-sm font-medium text-white transition-all duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mt-8 w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-[0_14px_28px_-18px_rgba(31,92,84,0.9)] transition-all duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {step === "loading" ? (
             <span className="flex items-center justify-center gap-2">
@@ -282,6 +475,14 @@ const JoinQueue = () => {
           ) : (
             "Get Token & Join Queue"
           )}
+        </button>
+
+        {/* Back to options */}
+        <button
+          onClick={() => setStep("options")}
+          className="mt-3 w-full text-xs text-muted-foreground hover:text-primary"
+        >
+          ← Back to options
         </button>
       </div>
     </div>

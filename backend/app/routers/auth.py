@@ -234,20 +234,6 @@ async def _verify_profile_otp_or_raise(db: AsyncSession, email: str, otp_code: s
 
         )
 
-
-
-    normalized_category, normalized_categories = _normalize_clinic_categories(request.category, request.categories)
-
-    if not normalized_categories:
-
-        raise HTTPException(
-
-            status_code=status.HTTP_400_BAD_REQUEST,
-
-            detail="Please select at least one clinic category"
-
-        )
-
     await OTPService.delete_otp(db, email.strip().lower())
 
 
@@ -1699,28 +1685,93 @@ async def clinic_change_phone(
 async def clinic_change_password(
 
     request: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        if not request.clinic_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="clinic_id is required"
+            )
+
+        result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.clinic_id))
+
+        clinic = result.scalar_one_or_none()
+        
+        if not clinic:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clinic not found"
+            )
+        
+        # Verify current password (skip for forgot password flow)
+        is_forgot_flow = request.current_password == "FORGOT_PASSWORD_PLACEHOLDER"
+        
+        if not is_forgot_flow and not verify_password(request.current_password, clinic.password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Current password is incorrect"
+            )
+
+        valid, error_msg = validate_password_strength(request.new_password)
+
+        if not valid:
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+
+        await _verify_profile_otp_or_raise(db, clinic.email, request.otp_code)
+
+        clinic.password = hash_password(request.new_password)
+
+        await db.commit()
+        
+        return {"message": "Password changed successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error: {str(e)}"
+        )
+
+
+@router.post("/clinic/verify-current-password")
+
+async def clinic_verify_current_password(
+
+    request: dict,
 
     db: AsyncSession = Depends(get_db)
 
 ):
 
-    if not request.clinic_id:
+    clinic_id = request.get("clinic_id")
+
+    password = request.get("password")
+
+
+
+    if not clinic_id or not password:
 
         raise HTTPException(
 
             status_code=status.HTTP_400_BAD_REQUEST,
 
-            detail="clinic_id is required"
+            detail="clinic_id and password are required"
 
         )
 
 
 
-    result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.clinic_id))
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if not clinic:
 
@@ -1732,11 +1783,9 @@ async def clinic_change_password(
 
         )
 
-    
 
-    # Verify current password
 
-    if not verify_password(request.current_password, clinic.password):
+    if not verify_password(password, clinic.password):
 
         raise HTTPException(
 
@@ -1748,7 +1797,70 @@ async def clinic_change_password(
 
 
 
-    valid, error_msg = validate_password_strength(request.new_password)
+    return {"message": "Password verified successfully"}
+
+
+@router.put("/clinic/change-password-direct")
+
+async def clinic_change_password_direct(
+
+    request: dict,
+
+    db: AsyncSession = Depends(get_db)
+
+):
+
+    clinic_id = request.get("clinic_id")
+
+    current_password = request.get("current_password")
+
+    new_password = request.get("new_password")
+
+
+
+    if not clinic_id or not current_password or not new_password:
+
+        raise HTTPException(
+
+            status_code=status.HTTP_400_BAD_REQUEST,
+
+            detail="All fields are required"
+
+        )
+
+
+
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+
+    clinic = result.scalar_one_or_none()
+
+
+
+    if not clinic:
+
+        raise HTTPException(
+
+            status_code=status.HTTP_404_NOT_FOUND,
+
+            detail="Clinic not found"
+
+        )
+
+
+
+    if not verify_password(current_password, clinic.password):
+
+        raise HTTPException(
+
+            status_code=status.HTTP_401_UNAUTHORIZED,
+
+            detail="Current password is incorrect"
+
+        )
+
+
+
+    valid, error_msg = validate_password_strength(new_password)
 
     if not valid:
 
@@ -1762,18 +1874,13 @@ async def clinic_change_password(
 
 
 
-    await _verify_profile_otp_or_raise(db, clinic.email, request.otp_code)
-
-
-
-    clinic.password = hash_password(request.new_password)
+    clinic.password = hash_password(new_password)
 
     await db.commit()
 
-    
+
 
     return {"message": "Password changed successfully"}
-
 
 
 @router.put("/clinic/update-profile")
@@ -2660,16 +2767,13 @@ async def patient_change_password(
 
     
 
-    # Verify current password
-
-    if not verify_password(request.current_password, patient.password):
-
+    # Verify current password (skip for forgot password flow)
+    is_forgot_flow = request.current_password == "FORGOT_PASSWORD_PLACEHOLDER"
+    
+    if not is_forgot_flow and not verify_password(request.current_password, patient.password):
         raise HTTPException(
-
             status_code=status.HTTP_401_UNAUTHORIZED,
-
             detail="Current password is incorrect"
-
         )
 
 
@@ -3928,7 +4032,18 @@ async def get_patient_appointments_by_email(
 
                 clinic_name = clinic.clinic_name
 
-                
+                full_address_parts = [
+                    clinic.street_address,
+                    clinic.road,
+                    clinic.layout,
+                    clinic.section,
+                    clinic.city,
+                    clinic.pincode
+                ]
+                full_formatted_address = ", ".join(filter(None, full_address_parts)) or clinic.address or ""
+
+            else:
+                full_formatted_address = ""
 
             appointment_list.append({
 
@@ -3940,7 +4055,7 @@ async def get_patient_appointments_by_email(
 
                 "clinic_name": clinic_name,
 
-                "address": clinic.address if clinic else "",
+                "address": full_formatted_address,
 
                 "patient_id": apt.patient_id,
 
