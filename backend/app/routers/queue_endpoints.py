@@ -27,6 +27,12 @@ def _clinic_today_str() -> str:
 def _sort_datetime(value):
     if value is None:
         return datetime.min.replace(tzinfo=CLINIC_TIMEZONE)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=CLINIC_TIMEZONE)
+        except ValueError:
+            return datetime.min.replace(tzinfo=CLINIC_TIMEZONE)
     if value.tzinfo is None:
         return value.replace(tzinfo=CLINIC_TIMEZONE)
     return value
@@ -1701,6 +1707,7 @@ async def lookup_by_phone(
             detail={
                 "message": "Appointment lookup failed unexpectedly",
                 "error_type": type(exc).__name__,
+                "error": str(exc),
             },
         ) from exc
 
@@ -1721,8 +1728,8 @@ async def _lookup_by_phone_impl(
     phone_digits = "".join(ch for ch in phone.strip() if ch.isdigit())
     phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
     masked_phone = f"******{phone_last10[-4:]}" if phone_last10 else "empty"
-    def normalize_phone(value: str | None) -> str:
-        return "".join(ch for ch in (value or "") if ch.isdigit())[-10:]
+    def normalize_phone(value) -> str:
+        return "".join(ch for ch in str(value or "") if ch.isdigit())[-10:]
 
     today = _clinic_today_str()
     logger.info(
@@ -1815,6 +1822,7 @@ async def _lookup_by_phone_impl(
         if not slot_id:
             return None
         try:
+            slot_id = int(slot_id)
             slot_result = await db.execute(
                 select(ClinicTimeSlot.slots).where(ClinicTimeSlot.clinic_id == clinic_id)
             )
@@ -1843,104 +1851,6 @@ async def _lookup_by_phone_impl(
             logger.exception("YourDetails clinic lookup failed clinic_id=%s", clinic_id)
             return {"name": clinic_id, "address": None}
     
-    # Helper function to calculate queue position
-    async def get_queue_position(
-        clinic_id: str,
-        slot_id: int | None,
-        appointment_token: str,
-        appointment_id: int,
-        source: str,
-    ):
-        active_statuses = ["booked", "serving", "pending"]
-
-        if not slot_id:
-            return {
-                "position": "1/1",
-                "patients_ahead": 0,
-                "estimated_wait_minutes": 0,
-                "now_serving_token": appointment_token,
-            }
-
-        online_result = await db.execute(
-            select(Appointment).where(
-                Appointment.clinic_id == clinic_id,
-                Appointment.date == today,
-                Appointment.slot_id == slot_id,
-                Appointment.status.in_(active_statuses),
-            ).order_by(Appointment.id.asc())
-        )
-        online_in_slot = list(online_result.scalars().all())
-
-        qr_result = await db.execute(
-            select(QRAppointment).where(
-                QRAppointment.clinic_id == clinic_id,
-                QRAppointment.date == today,
-                QRAppointment.slot_id == slot_id,
-                QRAppointment.status.in_(active_statuses),
-            ).order_by(QRAppointment.id.asc())
-        )
-        qr_in_slot = list(qr_result.scalars().all())
-
-        queue_items: list[dict] = []
-        for apt in online_in_slot:
-            queue_items.append({
-                "id": apt.id,
-                "token": apt.appointment_token,
-                "status": apt.status,
-                "source": "online",
-                "queue_position": apt.queue_position,
-                "created_at": apt.created_at,
-            })
-        for apt in qr_in_slot:
-            queue_items.append({
-                "id": apt.id,
-                "token": apt.appointment_token,
-                "status": apt.status,
-                "source": "walkin",
-                "queue_position": apt.queue_position,
-                "created_at": apt.created_at,
-            })
-
-        queue_items.sort(
-            key=lambda item: (
-                item["queue_position"] if item["queue_position"] is not None else 10**9,
-                _sort_datetime(item["created_at"]),
-                0 if item["source"] == "online" else 1,
-                item["id"],
-            )
-        )
-
-        total_in_queue = len(queue_items)
-        total_for_display = total_in_queue if total_in_queue > 0 else 1
-
-        your_position = 1
-        patients_ahead = 0
-        for index, item in enumerate(queue_items):
-            if item["source"] == source and item["id"] == appointment_id:
-                your_position = index + 1
-                patients_ahead = index
-                break
-
-        if total_in_queue > 0:
-            serving_item = next((item for item in queue_items if item["status"] == "serving"), None)
-            if serving_item:
-                now_serving_token = serving_item["token"]
-            elif your_position > 1:
-                now_serving_token = queue_items[your_position - 2]["token"]
-            else:
-                now_serving_token = queue_items[0]["token"]
-        else:
-            now_serving_token = appointment_token
-
-        estimated_wait_minutes = patients_ahead * 15
-
-        return {
-            "position": f"{your_position}/{total_for_display}",
-            "patients_ahead": patients_ahead,
-            "estimated_wait_minutes": estimated_wait_minutes,
-            "now_serving_token": now_serving_token,
-        }
-    
     # Build list of appointments
     appointments_list = []
     
@@ -1950,21 +1860,11 @@ async def _lookup_by_phone_impl(
         source = item["source"]
         clinic_info = await get_clinic_info(apt.clinic_id)
         slot_name = await get_slot_name(apt.clinic_id, apt.slot_id)
+        queue_position = apt.queue_position if apt.queue_position is not None else 1
         try:
-            queue_pos = await get_queue_position(apt.clinic_id, apt.slot_id, apt.appointment_token, apt.id, source)
-        except Exception:
-            logger.exception(
-                "YourDetails queue position failed source=%s appointment_id=%s token=%s",
-                source,
-                apt.id,
-                apt.appointment_token,
-            )
-            queue_pos = {
-                "position": "1/1",
-                "patients_ahead": 0,
-                "estimated_wait_minutes": 0,
-                "now_serving_token": apt.appointment_token,
-            }
+            queue_position = int(queue_position)
+        except (TypeError, ValueError):
+            queue_position = 1
         
         appointments_list.append({
             "token_label": apt.appointment_token,
@@ -1975,10 +1875,10 @@ async def _lookup_by_phone_impl(
             "date": apt.date,
             "time": getattr(apt, "time", None) or slot_name or "Walk-in",
             "slot_name": slot_name,
-            "position": queue_pos["position"],
-            "patients_ahead": queue_pos["patients_ahead"],
-            "estimated_wait_minutes": queue_pos["estimated_wait_minutes"],
-            "now_serving_token": queue_pos["now_serving_token"],
+            "position": str(queue_position),
+            "patients_ahead": max(queue_position - 1, 0),
+            "estimated_wait_minutes": max(queue_position - 1, 0) * 15,
+            "now_serving_token": apt.appointment_token,
             "status": apt.status,
             "source": source
         })
