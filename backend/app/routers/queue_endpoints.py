@@ -9,6 +9,15 @@ from app.services.email_service import send_queue_alert
 import json
 
 router = APIRouter(prefix="/auth", tags=["queue"])
+CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+
+
+def _clinic_now() -> datetime:
+    return datetime.now(CLINIC_TIMEZONE)
+
+
+def _clinic_today_str() -> str:
+    return _clinic_now().strftime("%Y-%m-%d")
 
 
 def _load_slots(raw_slots):
@@ -80,7 +89,7 @@ async def get_clinic_current_slot(clinic_id: str, db: AsyncSession):
 
     slots = _load_slots(record.slots)
 
-    now = datetime.now()
+    now = _clinic_now()
     current_time_decimal = now.hour + now.minute / 60.0
     for idx, slot in enumerate(slots):
         if not slot.get("is_open"):
@@ -151,7 +160,7 @@ async def all_slots_expired(clinic_id: str, db: AsyncSession) -> bool:
 
     slots = _load_slots(record.slots)
 
-    now = datetime.now()
+    now = _clinic_now()
     current_time_decimal = now.hour + now.minute / 60.0
     for slot in slots:
         if slot.get("is_open"):
@@ -181,7 +190,7 @@ async def _send_queue_notifications(clinic_id: str, db: AsyncSession) -> None:
     import logging
 
     logger = logging.getLogger(__name__)
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _clinic_today_str()
 
     clinic_result = await db.execute(
         select(Clinic).where(Clinic.clinic_id == clinic_id)
@@ -308,7 +317,7 @@ async def set_clinic_active(
         )
 
     if is_active:
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = _clinic_today_str()
         if clinic.manual_stop_date == today:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -330,7 +339,7 @@ async def set_clinic_active(
                 detail="No open time slots configured for today."
             )
 
-        now = datetime.now()
+        now = _clinic_now()
         current_time_decimal = now.hour + now.minute / 60.0
         activation_threshold = first_slot_start - (45 / 60.0)
 
@@ -352,11 +361,11 @@ async def set_clinic_active(
 
     clinic.is_active = is_active
     if not is_active and manual_stop:
-        clinic.manual_stop_date = datetime.now().strftime("%Y-%m-%d")
+        clinic.manual_stop_date = _clinic_today_str()
     
     # Clean up yesterday's appointments - mark as not served and remove from queue
     if is_active:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        yesterday = (_clinic_now() - timedelta(days=1)).strftime("%Y-%m-%d")
         
         # Get yesterday's appointments that are not completed
         yesterday_appointments = await db.execute(
@@ -450,14 +459,14 @@ async def get_clinic_active_status(
         # Check 15 minutes before last open slot ends
         last_slot_end = await get_last_open_slot_end(clinic_id, db)
         if last_slot_end is not None:
-            now = datetime.now()
+            now = _clinic_now()
             current_time_decimal = now.hour + now.minute / 60.0
             auto_offline_time = last_slot_end - (15 / 60.0)
             if current_time_decimal >= auto_offline_time:
                 clinic.is_active = False
                 await db.commit()
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _clinic_today_str()
     return {
         "is_active": clinic.is_active,
         "manual_stop_locked": clinic.manual_stop_date == today,
@@ -522,7 +531,7 @@ async def serve_patient(
             slots = _load_slots(record.slots)
             if slot_index < len(slots):
                 slot_start = slots[slot_index].get("time_range", [0, 0])[0]
-                now = datetime.now()
+                now = _clinic_now()
                 current_time_decimal = now.hour + now.minute / 60.0
                 if current_time_decimal < slot_start:
                     raise HTTPException(
