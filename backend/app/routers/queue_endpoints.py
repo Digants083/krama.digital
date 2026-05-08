@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.database.db import get_db
 from app.database.models import Appointment, CompletedAppointment, QRAppointment, ClinicTimeSlot, Clinic
 from app.services.email_service import send_queue_alert
+from app.services.queue_metrics import get_live_queue_metrics
 import json
 import logging
 
@@ -1856,11 +1857,23 @@ async def _lookup_by_phone_impl(phone, db):
         source = item["source"]
         clinic_info = await get_clinic_info(apt.clinic_id)
         slot_name = await get_slot_name(apt.clinic_id, apt.slot_id)
-        queue_position = apt.queue_position if apt.queue_position is not None else 1
-        try:
-            queue_position = int(queue_position)
-        except (TypeError, ValueError):
-            queue_position = 1
+        metrics = await get_live_queue_metrics(
+            db,
+            apt.clinic_id,
+            apt.date,
+            source,
+            apt.id,
+            apt.appointment_token,
+            apt.slot_id,
+        )
+        if not metrics["found"]:
+            logger.warning(
+                "YourDetails queue metrics not found clinic_id=%s source=%s appointment_id=%s token=%s",
+                apt.clinic_id,
+                source,
+                apt.id,
+                apt.appointment_token,
+            )
         
         appointments_list.append({
             "token_label": apt.appointment_token,
@@ -1871,10 +1884,10 @@ async def _lookup_by_phone_impl(phone, db):
             "date": apt.date,
             "time": getattr(apt, "time", None) or slot_name or "Walk-in",
             "slot_name": slot_name,
-            "position": str(queue_position),
-            "patients_ahead": max(queue_position - 1, 0),
-            "estimated_wait_minutes": max(queue_position - 1, 0) * 15,
-            "now_serving_token": apt.appointment_token,
+            "position": metrics["position_label"],
+            "patients_ahead": metrics["patients_ahead"],
+            "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+            "now_serving_token": metrics["now_serving_token"],
             "status": apt.status,
             "source": source
         })

@@ -37,6 +37,7 @@ from app.database.models import (
 from app.services.email_service import send_clinic_registration_received_email
 
 from app.services.geocoding_service import get_coordinates_from_address, get_coordinates_from_structured_address
+from app.services.queue_metrics import get_live_queue_metrics
 
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
@@ -4760,7 +4761,7 @@ async def get_queue_position(
 
             Appointment.date == today,
 
-            Appointment.status.in_(["booked", "serving"]),
+            Appointment.status.in_(["booked", "pending", "serving"]),
 
             Appointment.id == appointment_id,
 
@@ -4782,7 +4783,7 @@ async def get_queue_position(
 
                 Appointment.date == today,
 
-                Appointment.status.in_(["booked", "serving"]),
+                Appointment.status.in_(["booked", "pending", "serving"]),
 
                 Appointment.appointment_token == appointment_token,
 
@@ -4806,123 +4807,17 @@ async def get_queue_position(
 
 
 
-    slot_id = current_appointment.slot_id
-
-
-
-    appointment_filters = [
-
-        Appointment.clinic_id == clinic_id,
-
-        Appointment.date == today,
-
-        Appointment.status.in_(["booked", "serving"]),
-
-    ]
-
-    qr_filters = [
-
-        QRAppointment.clinic_id == clinic_id,
-
-        QRAppointment.date == today,
-
-        QRAppointment.status.in_(["booked", "serving"]),
-
-    ]
-
-
-
-    if slot_id is not None:
-
-        appointment_filters.append(Appointment.slot_id == slot_id)
-
-        qr_filters.append(QRAppointment.slot_id == slot_id)
-
-
-
-    result = await db.execute(
-
-        select(Appointment).where(*appointment_filters).order_by(Appointment.created_at, Appointment.id)
-
+    metrics = await get_live_queue_metrics(
+        db,
+        clinic_id,
+        today,
+        "online",
+        current_appointment.id,
+        current_appointment.appointment_token,
+        current_appointment.slot_id,
     )
 
-    online_appointments = result.scalars().all()
-
-
-
-    result = await db.execute(
-
-        select(QRAppointment).where(*qr_filters).order_by(QRAppointment.created_at, QRAppointment.id)
-
-    )
-
-    walkin_appointments = result.scalars().all()
-
-
-
-    queue_items = []
-
-    for apt in online_appointments:
-
-        queue_items.append({
-
-            "id": apt.id,
-
-            "token": apt.appointment_token,
-
-            "status": apt.status,
-
-            "source": "online",
-
-            "created_at": apt.created_at,
-
-        })
-
-
-
-    for apt in walkin_appointments:
-
-        queue_items.append({
-
-            "id": apt.id,
-
-            "token": apt.appointment_token,
-
-            "status": apt.status,
-
-            "source": "walkin",
-
-            "created_at": apt.created_at,
-
-        })
-
-
-
-    queue_items.sort(key=lambda item: (_sort_datetime(item["created_at"]), item["id"]))
-
-
-
-    total_in_queue = len(queue_items)
-
-    your_position = 0
-
-    patients_ahead = 0
-
-
-
-    for index, item in enumerate(queue_items):
-
-        if item["source"] == "online" and item["id"] == current_appointment.id:
-
-            your_position = index + 1
-
-            patients_ahead = index
-
-            break
-
-
-
-    if your_position == 0:
+    if not metrics["found"]:
 
         raise HTTPException(
 
@@ -4932,45 +4827,19 @@ async def get_queue_position(
 
         )
 
-
-
-    serving_item = next((item for item in queue_items if item["status"] == "serving"), None)
-
-    if serving_item:
-
-        now_serving_token = serving_item["token"]
-
-    elif your_position > 1:
-
-        now_serving_token = queue_items[your_position - 2]["token"]
-
-    elif queue_items:
-
-        now_serving_token = queue_items[0]["token"]
-
-    else:
-
-        now_serving_token = appointment_token
-
-
-
-    estimated_wait_minutes = patients_ahead * 15
-
-
-
     return {
 
-        "patients_ahead": patients_ahead,
+        "patients_ahead": metrics["patients_ahead"],
 
-        "estimated_wait_minutes": estimated_wait_minutes,
+        "estimated_wait_minutes": metrics["estimated_wait_minutes"],
 
-        "your_position": your_position,
+        "your_position": metrics["your_position"],
 
-        "total_in_queue": total_in_queue,
+        "total_in_queue": metrics["total_in_queue"],
 
-        "current_token": your_position,
+        "current_token": metrics["your_position"],
 
-        "now_serving_token": now_serving_token,
+        "now_serving_token": metrics["now_serving_token"],
 
         "status": "in_queue"
 
