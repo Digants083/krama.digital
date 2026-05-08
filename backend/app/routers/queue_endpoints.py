@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, and_, func
+from sqlalchemy import select, delete, and_, func, or_
 from app.database.db import get_db
 from app.database.models import Appointment, CompletedAppointment, QRAppointment, ClinicTimeSlot, Clinic
 from app.services.email_service import send_queue_alert
@@ -570,6 +570,8 @@ async def finish_patient(
     This is called when clicking 'Completed' button.
     """
     import logging
+    from datetime import timezone
+
     logger = logging.getLogger(__name__)
     
     clinic_id = request.get("clinic_id")
@@ -1594,28 +1596,50 @@ async def lookup_by_phone(
     Searches both online appointments and QR/walk-in appointments.
     Returns all active appointments for today (supports multiple appointments).
     """
-    # Normalize phone number - remove +91 or 91 prefix only if at start
-    phone_clean = phone.strip()
-    if phone_clean.startswith("+91"):
-        phone_normalized = phone_clean[3:]
-    elif phone_clean.startswith("91") and len(phone_clean) > 10:
-        phone_normalized = phone_clean[2:]
-    else:
-        phone_normalized = phone_clean
-    
+    # Normalize phone number:
+    # - Keep only digits
+    # - Use last 10 digits as the canonical mobile
+    # This makes lookup resilient to stored formats like '+91 98765-43210', '091...', '0091...', etc.
+    phone_digits = "".join(ch for ch in phone.strip() if ch.isdigit())
+    phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
+
     today = _clinic_today_str()
-    phone_candidates = list(dict.fromkeys([phone_normalized, f"+91{phone_normalized}"]))
+
+    # Candidate exact matches for common stored formats
+    phone_candidates = list(
+        dict.fromkeys(
+            [
+                phone_last10,
+                f"+91{phone_last10}",
+                f"91{phone_last10}",
+                f"0{phone_last10}",
+            ]
+        )
+    )
+
+    # Also allow suffix match (e.g. stored with spaces or country code variants)
+    # NOTE: This is intentionally conservative by anchoring to last-10 digits.
+    phone_suffix_like = f"%{phone_last10}" if phone_last10 else None
+
+    online_phone_filter = or_(
+        Appointment.patient_phone.in_(phone_candidates),
+        Appointment.patient_phone.like(phone_suffix_like) if phone_suffix_like else False,
+    )
+    walkin_phone_filter = or_(
+        QRAppointment.patient_phone.in_(phone_candidates),
+        QRAppointment.patient_phone.like(phone_suffix_like) if phone_suffix_like else False,
+    )
 
     online_result = await db.execute(
         select(Appointment).where(
-            Appointment.patient_phone.in_(phone_candidates),
-            Appointment.date == today
+            online_phone_filter,
+            Appointment.date == today,
         )
     )
     walkin_result = await db.execute(
         select(QRAppointment).where(
-            QRAppointment.patient_phone.in_(phone_candidates),
-            QRAppointment.date == today
+            walkin_phone_filter,
+            QRAppointment.date == today,
         )
     )
 
