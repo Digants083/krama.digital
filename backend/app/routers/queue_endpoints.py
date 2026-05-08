@@ -698,7 +698,7 @@ async def skip_patient(
     clinic_id = request.get("clinic_id")
     appointment_id = request.get("appointment_id")
     source = request.get("source", "online")
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _clinic_today_str()
 
     if not all([clinic_id, appointment_id]):
         raise HTTPException(
@@ -724,6 +724,25 @@ async def skip_patient(
         )
 
     slot_id = getattr(skipped_appointment, "slot_id", None)
+    if slot_id is not None:
+        slot_index = int(slot_id) - 1
+        if slot_index < 0:
+            slot_index = 0
+        slot_result = await db.execute(
+            select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+        )
+        slot_record = slot_result.scalar_one_or_none()
+        if slot_record:
+            slots = _load_slots(slot_record.slots)
+            if slot_index < len(slots):
+                slot_start = slots[slot_index].get("time_range", [0, 0])[0]
+                now = _clinic_now()
+                current_time_decimal = now.hour + now.minute / 60.0
+                if current_time_decimal < slot_start:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Skipping cannot start until the official slot start time ({int(slot_start)}:00)."
+                    )
 
     online_filters = [
         Appointment.clinic_id == clinic_id,
@@ -1584,28 +1603,34 @@ async def lookup_by_phone(
     else:
         phone_normalized = phone_clean
     
-    # Simple search - check Appointment table with any status for today
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    # Search all appointments for this phone number today
-    result = await db.execute(
+    today = _clinic_today_str()
+    phone_candidates = list(dict.fromkeys([phone_normalized, f"+91{phone_normalized}"]))
+
+    online_result = await db.execute(
         select(Appointment).where(
-            Appointment.patient_phone == phone_normalized,
+            Appointment.patient_phone.in_(phone_candidates),
             Appointment.date == today
-        ).order_by(Appointment.created_at.desc())
-    )
-    appointments = list(result.scalars().all())
-    
-    # Also check with +91 prefix
-    if not appointments:
-        result = await db.execute(
-            select(Appointment).where(
-                Appointment.patient_phone == f"+91{phone_normalized}",
-                Appointment.date == today
-            ).order_by(Appointment.created_at.desc())
         )
-        appointments = list(result.scalars().all())
-    
+    )
+    walkin_result = await db.execute(
+        select(QRAppointment).where(
+            QRAppointment.patient_phone.in_(phone_candidates),
+            QRAppointment.date == today
+        )
+    )
+
+    appointments = [
+        {"appointment": apt, "source": "online"}
+        for apt in online_result.scalars().all()
+    ] + [
+        {"appointment": apt, "source": "walkin"}
+        for apt in walkin_result.scalars().all()
+    ]
+    appointments.sort(
+        key=lambda item: item["appointment"].created_at or datetime.min,
+        reverse=True,
+    )
+
     if not appointments:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1639,7 +1664,13 @@ async def lookup_by_phone(
         }
     
     # Helper function to calculate queue position
-    async def get_queue_position(clinic_id: str, slot_id: int | None, appointment_token: str, appointment_id: int):
+    async def get_queue_position(
+        clinic_id: str,
+        slot_id: int | None,
+        appointment_token: str,
+        appointment_id: int,
+        source: str,
+    ):
         active_statuses = ["booked", "serving", "pending"]
 
         if not slot_id:
@@ -1677,6 +1708,7 @@ async def lookup_by_phone(
                 "token": apt.appointment_token,
                 "status": apt.status,
                 "source": "online",
+                "queue_position": apt.queue_position,
                 "created_at": apt.created_at,
             })
         for apt in qr_in_slot:
@@ -1685,10 +1717,18 @@ async def lookup_by_phone(
                 "token": apt.appointment_token,
                 "status": apt.status,
                 "source": "walkin",
+                "queue_position": apt.queue_position,
                 "created_at": apt.created_at,
             })
 
-        queue_items.sort(key=lambda item: item["id"])
+        queue_items.sort(
+            key=lambda item: (
+                item["queue_position"] if item["queue_position"] is not None else 10**9,
+                item["created_at"] or datetime.min,
+                0 if item["source"] == "online" else 1,
+                item["id"],
+            )
+        )
 
         total_in_queue = len(queue_items)
         total_for_display = total_in_queue if total_in_queue > 0 else 1
@@ -1696,7 +1736,7 @@ async def lookup_by_phone(
         your_position = 1
         patients_ahead = 0
         for index, item in enumerate(queue_items):
-            if item["source"] == "online" and item["id"] == appointment_id:
+            if item["source"] == source and item["id"] == appointment_id:
                 your_position = index + 1
                 patients_ahead = index
                 break
@@ -1725,17 +1765,19 @@ async def lookup_by_phone(
     appointments_list = []
     
     # Process all appointments
-    for apt in appointments:
+    for item in appointments:
+        apt = item["appointment"]
+        source = item["source"]
         clinic_info = await get_clinic_info(apt.clinic_id)
         slot_name = await get_slot_name(apt.clinic_id, apt.slot_id)
-        queue_pos = await get_queue_position(apt.clinic_id, apt.slot_id, apt.appointment_token, apt.id)
+        queue_pos = await get_queue_position(apt.clinic_id, apt.slot_id, apt.appointment_token, apt.id, source)
         
         appointments_list.append({
             "token_label": apt.appointment_token,
             "patient_name": apt.patient_name,
             "clinic_name": clinic_info["name"],
             "clinic_address": clinic_info["address"],
-            "doctor_name": apt.doctor_name,
+            "doctor_name": getattr(apt, "doctor_name", None),
             "date": apt.date,
             "time": apt.time,
             "slot_name": slot_name,
@@ -1744,7 +1786,7 @@ async def lookup_by_phone(
             "estimated_wait_minutes": queue_pos["estimated_wait_minutes"],
             "now_serving_token": queue_pos["now_serving_token"],
             "status": apt.status,
-            "source": "online"
+            "source": source
         })
     
     return {

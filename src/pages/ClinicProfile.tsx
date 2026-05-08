@@ -53,6 +53,7 @@ const ClinicProfile = () => {
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<{ url: string; index: number } | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -865,7 +866,14 @@ const ClinicProfile = () => {
                   {imageUrls.map((url, idx) =>
                     url ? (
                       <div key={idx} className="relative">
-                        <img src={`/api${url}`} alt={`Clinic ${idx + 1}`} className="h-20 w-full rounded-lg object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setExpandedImage({ url, index: idx })}
+                          className="block w-full overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                          title={`Preview clinic image ${idx + 1}`}
+                        >
+                          <img src={`/api${url}`} alt={`Clinic ${idx + 1}`} className="h-20 w-full object-cover transition hover:scale-105" />
+                        </button>
                         <button
                           onClick={() => handleRemoveImage(idx)}
                           className="absolute -right-1 -top-1 rounded-full bg-red-500 p-0.5 text-white"
@@ -1092,6 +1100,20 @@ const ClinicProfile = () => {
               Download QR
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={expandedImage !== null} onOpenChange={(open) => !open && setExpandedImage(null)}>
+        <DialogContent className="max-w-4xl p-0">
+          {expandedImage && (
+            <div className="overflow-hidden rounded-lg bg-black">
+              <img
+                src={`/api${expandedImage.url}`}
+                alt={`Clinic ${expandedImage.index + 1}`}
+                className="max-h-[82vh] w-full object-contain"
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

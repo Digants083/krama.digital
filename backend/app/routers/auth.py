@@ -10,7 +10,7 @@ import os
 
 import uuid
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from typing import Optional
 
@@ -37,6 +37,8 @@ from app.database.models import (
 from app.services.email_service import send_clinic_registration_received_email
 
 from app.services.geocoding_service import get_coordinates_from_address, get_coordinates_from_structured_address
+
+CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
 from app.schemas import (
 
@@ -2805,6 +2807,150 @@ async def patient_change_password(
     return {"message": "Password changed successfully"}
 
 
+@router.post("/patient/verify-current-password")
+
+async def patient_verify_current_password(
+
+    request: dict,
+
+    db: AsyncSession = Depends(get_db)
+
+):
+
+    patient_email = request.get("patient_email")
+
+    password = request.get("current_password") or request.get("password")
+
+
+
+    if not patient_email or not password:
+
+        raise HTTPException(
+
+            status_code=status.HTTP_400_BAD_REQUEST,
+
+            detail="patient_email and current_password are required"
+
+        )
+
+
+
+    result = await db.execute(select(Patient).where(Patient.email == patient_email))
+
+    patient = result.scalar_one_or_none()
+
+
+
+    if not patient:
+
+        raise HTTPException(
+
+            status_code=status.HTTP_404_NOT_FOUND,
+
+            detail="Patient not found"
+
+        )
+
+
+
+    if not verify_password(password, patient.password):
+
+        raise HTTPException(
+
+            status_code=status.HTTP_401_UNAUTHORIZED,
+
+            detail="Current password is incorrect"
+
+        )
+
+
+
+    return {"message": "Password verified successfully"}
+
+
+@router.put("/patient/change-password-direct")
+
+async def patient_change_password_direct(
+
+    request: dict,
+
+    db: AsyncSession = Depends(get_db)
+
+):
+
+    patient_email = request.get("patient_email")
+
+    current_password = request.get("current_password")
+
+    new_password = request.get("new_password")
+
+
+
+    if not patient_email or not current_password or not new_password:
+
+        raise HTTPException(
+
+            status_code=status.HTTP_400_BAD_REQUEST,
+
+            detail="All fields are required"
+
+        )
+
+
+
+    result = await db.execute(select(Patient).where(Patient.email == patient_email))
+
+    patient = result.scalar_one_or_none()
+
+
+
+    if not patient:
+
+        raise HTTPException(
+
+            status_code=status.HTTP_404_NOT_FOUND,
+
+            detail="Patient not found"
+
+        )
+
+
+
+    if not verify_password(current_password, patient.password):
+
+        raise HTTPException(
+
+            status_code=status.HTTP_401_UNAUTHORIZED,
+
+            detail="Current password is incorrect"
+
+        )
+
+
+
+    valid, error_msg = validate_password_strength(new_password)
+
+    if not valid:
+
+        raise HTTPException(
+
+            status_code=status.HTTP_400_BAD_REQUEST,
+
+            detail=error_msg
+
+        )
+
+
+
+    patient.password = hash_password(new_password)
+
+    await db.commit()
+
+
+
+    return {"message": "Password changed successfully"}
+
+
 
 @router.put("/patient/change-phone")
 
@@ -3436,7 +3582,7 @@ async def create_appointment(
 
         if clinic.end is not None:
 
-            now = datetime.now()
+            now = datetime.now(CLINIC_TIMEZONE)
 
             cutoff_minutes = clinic.booking_cutoff_minutes or 15
 
@@ -4107,7 +4253,7 @@ async def get_clinic_appointments(
 
     from datetime import datetime
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
 
     
 
@@ -4186,8 +4332,6 @@ async def get_today_appointments(
     Returns combined list ordered by creation time.
 
     """
-
-    from datetime import datetime
 
     import json
 
@@ -4275,7 +4419,7 @@ async def get_today_appointments(
 
 
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
 
 
 
@@ -4291,7 +4435,7 @@ async def get_today_appointments(
 
 
 
-    now = datetime.now()
+    now = datetime.now(CLINIC_TIMEZONE)
 
     current_time_decimal = now.hour + now.minute / 60.0
 

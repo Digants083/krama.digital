@@ -102,13 +102,7 @@ const ClinicControlQueue = () => {
   }, [currentServing]);
 
   const handleRefreshQueue = () => {
-    if (
-      window.confirm(
-        "Refresh the queue? This will reload today's data from the server."
-      )
-    ) {
-      if (clinicId) fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
-    }
+    if (clinicId) fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
   };
 
   const formatTime = (seconds: number) => {
@@ -346,16 +340,16 @@ const ClinicControlQueue = () => {
 
       const [startHour, endHour] = slot.time_range;
 
-      // Can serve if current time is >= (slot start - 7.5 minutes)
-      const startThreshold = startHour - 7.5 / 60; // 7.5 minutes in hours
-      if (currentTimeDecimal >= startThreshold && currentTimeDecimal < endHour) {
+      if (currentTimeDecimal >= startHour && currentTimeDecimal < endHour) {
         return true;
       }
     }
 
     // Can serve if there are patients in queue (even after all slot end times)
     if (queue.length > 0) {
-      return true;
+      return timeSlots
+        .filter((slot) => slot.is_open)
+        .every((slot) => currentTimeDecimal >= slot.time_range[1]);
     }
 
     return false;
