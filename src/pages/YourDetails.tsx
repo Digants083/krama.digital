@@ -119,18 +119,26 @@ const YourDetails = () => {
 
       const response = await fetch(lookupUrl);
       
+      const responseText = await response.text();
+      let responseBody: any = {};
+      try {
+        responseBody = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        responseBody = { raw: responseText };
+      }
+
       if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
         console.error("[YourDetails] lookup failed", {
           url: lookupUrl,
           status: response.status,
           statusText: response.statusText,
-          response: err,
+          response: responseBody,
+          rawText: responseText,
         });
-        throw new Error(err.detail || "No appointment found for this number");
+        throw new Error(responseBody.detail || responseBody.raw || "No appointment found for this number");
       }
 
-      const data: LookupResponse = await response.json();
+      const data: LookupResponse = responseBody;
       console.info("[YourDetails] lookup success", {
         url: lookupUrl,
         count: data.count,

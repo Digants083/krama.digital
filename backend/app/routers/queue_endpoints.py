@@ -1731,15 +1731,18 @@ async def lookup_by_phone(
     async def get_slot_name(clinic_id: str, slot_id: int | None):
         if not slot_id:
             return None
-        slot_result = await db.execute(
-            select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
-        )
-        slot_record = slot_result.scalar_one_or_none()
-        if slot_record:
-            slots = _load_slots(slot_record.slots)
-            slot_idx = slot_id - 1
-            if 0 <= slot_idx < len(slots):
-                return slots[slot_idx].get("slot_name", f"Slot {slot_id}")
+        try:
+            slot_result = await db.execute(
+                select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+            )
+            slot_record = slot_result.scalar_one_or_none()
+            if slot_record:
+                slots = _load_slots(slot_record.slots)
+                slot_idx = slot_id - 1
+                if 0 <= slot_idx < len(slots):
+                    return slots[slot_idx].get("slot_name", f"Slot {slot_id}")
+        except Exception:
+            logger.exception("YourDetails slot lookup failed clinic_id=%s slot_id=%s", clinic_id, slot_id)
         return None
     
     # Helper function to get clinic info
@@ -1749,8 +1752,8 @@ async def lookup_by_phone(
         )
         clinic = clinic_result.scalar_one_or_none()
         return {
-            "name": clinic.clinic_name if clinic else clinic_id,
-            "address": clinic.address if clinic else None
+            "name": getattr(clinic, "clinic_name", None) or clinic_id,
+            "address": getattr(clinic, "address", None) if clinic else None
         }
     
     # Helper function to calculate queue position
@@ -1860,7 +1863,21 @@ async def lookup_by_phone(
         source = item["source"]
         clinic_info = await get_clinic_info(apt.clinic_id)
         slot_name = await get_slot_name(apt.clinic_id, apt.slot_id)
-        queue_pos = await get_queue_position(apt.clinic_id, apt.slot_id, apt.appointment_token, apt.id, source)
+        try:
+            queue_pos = await get_queue_position(apt.clinic_id, apt.slot_id, apt.appointment_token, apt.id, source)
+        except Exception:
+            logger.exception(
+                "YourDetails queue position failed source=%s appointment_id=%s token=%s",
+                source,
+                apt.id,
+                apt.appointment_token,
+            )
+            queue_pos = {
+                "position": "1/1",
+                "patients_ahead": 0,
+                "estimated_wait_minutes": 0,
+                "now_serving_token": apt.appointment_token,
+            }
         
         appointments_list.append({
             "token_label": apt.appointment_token,

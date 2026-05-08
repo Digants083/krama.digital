@@ -358,6 +358,22 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE appointments "
             "ADD COLUMN IF NOT EXISTS last_email_sent_at TIMESTAMP"
         )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'online'"
+        )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS slot_id INTEGER"
+        )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS push_count INTEGER DEFAULT 0"
+        )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS queue_position INTEGER"
+        )
 
         await safe_exec(
             "ALTER TABLE qr_appointments "
@@ -416,6 +432,8 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS manual_stop_date VARCHAR")
 
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS daily_toggle_counts JSON DEFAULT '[]'")
+        await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS slots JSON DEFAULT '[]'")
+        await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS slot VARCHAR[] DEFAULT '{}'")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS last_slot_change_date TIMESTAMP")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS last_toggle_date TIMESTAMP")
 
