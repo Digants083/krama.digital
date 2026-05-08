@@ -7,9 +7,11 @@ from app.database.db import get_db
 from app.database.models import Appointment, CompletedAppointment, QRAppointment, ClinicTimeSlot, Clinic
 from app.services.email_service import send_queue_alert
 import json
+import logging
 
 router = APIRouter(prefix="/auth", tags=["queue"])
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+logger = logging.getLogger(__name__)
 
 
 def _clinic_now() -> datetime:
@@ -1609,10 +1611,17 @@ async def lookup_by_phone(
     # This makes lookup resilient to stored formats like '+91 98765-43210', '091...', '0091...', etc.
     phone_digits = "".join(ch for ch in phone.strip() if ch.isdigit())
     phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
+    masked_phone = f"******{phone_last10[-4:]}" if phone_last10 else "empty"
     def normalize_phone(value: str | None) -> str:
         return "".join(ch for ch in (value or "") if ch.isdigit())[-10:]
 
     today = _clinic_today_str()
+    logger.info(
+        "YourDetails lookup start phone=%s today=%s raw_digits_len=%s",
+        masked_phone,
+        today,
+        len(phone_digits),
+    )
 
     # Candidate exact matches for common stored formats
     phone_candidates = list(
@@ -1649,19 +1658,29 @@ async def lookup_by_phone(
         {"appointment": apt, "source": "online"}
         for apt in online_result.scalars().all()
     ]
+    logger.info(
+        "YourDetails exact online matches phone=%s count=%s",
+        masked_phone,
+        len(appointments),
+    )
 
     seen = {(item["source"], item["appointment"].id) for item in appointments}
 
-    # First priority: online appointments table. Only check QR/walk-in if no online record exists.
-    if not appointments:
-        all_online_result = await db.execute(
-            select(Appointment).where(Appointment.date == today)
-        )
-        for apt in all_online_result.scalars().all():
-            key = ("online", apt.id)
-            if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
-                appointments.append({"appointment": apt, "source": "online"})
-                seen.add(key)
+    # First priority: online appointments table. Collect every matching online appointment,
+    # including rows stored with spaces/country codes that SQL suffix matching can miss.
+    all_online_result = await db.execute(
+        select(Appointment).where(Appointment.date == today)
+    )
+    for apt in all_online_result.scalars().all():
+        key = ("online", apt.id)
+        if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
+            appointments.append({"appointment": apt, "source": "online"})
+            seen.add(key)
+    logger.info(
+        "YourDetails normalized online matches phone=%s total_count=%s",
+        masked_phone,
+        len(appointments),
+    )
 
     if not appointments:
         walkin_result = await db.execute(
@@ -1675,6 +1694,11 @@ async def lookup_by_phone(
             for apt in walkin_result.scalars().all()
         ]
         seen = {(item["source"], item["appointment"].id) for item in appointments}
+        logger.info(
+            "YourDetails exact walkin matches phone=%s count=%s",
+            masked_phone,
+            len(appointments),
+        )
 
     if not appointments:
         all_walkin_result = await db.execute(
@@ -1685,6 +1709,11 @@ async def lookup_by_phone(
             if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
                 appointments.append({"appointment": apt, "source": "walkin"})
                 seen.add(key)
+        logger.info(
+            "YourDetails normalized walkin matches phone=%s total_count=%s",
+            masked_phone,
+            len(appointments),
+        )
 
     appointments.sort(
         key=lambda item: _sort_datetime(item["appointment"].created_at),
@@ -1692,6 +1721,7 @@ async def lookup_by_phone(
     )
 
     if not appointments:
+        logger.info("YourDetails lookup not found phone=%s today=%s", masked_phone, today)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No appointment found for this phone number today"

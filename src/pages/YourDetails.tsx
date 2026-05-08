@@ -111,17 +111,41 @@ const YourDetails = () => {
     setError("");
 
     try {
-      const response = await fetch(apiUrl(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone.trim())}`));
+      const lookupUrl = apiUrl(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone.trim())}`);
+      console.info("[YourDetails] lookup request", {
+        url: lookupUrl,
+        phoneLast4: phone.trim().slice(-4),
+      });
+
+      const response = await fetch(lookupUrl);
       
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
+        console.error("[YourDetails] lookup failed", {
+          url: lookupUrl,
+          status: response.status,
+          statusText: response.statusText,
+          response: err,
+        });
         throw new Error(err.detail || "No appointment found for this number");
       }
 
       const data: LookupResponse = await response.json();
+      console.info("[YourDetails] lookup success", {
+        url: lookupUrl,
+        count: data.count,
+        appointments: data.appointments?.map((apt) => ({
+          token: apt.token_label,
+          source: apt.source,
+          date: apt.date,
+          status: apt.status,
+          clinic: apt.clinic_name,
+        })),
+      });
       setAppointments(data.appointments);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Something went wrong";
+      console.error("[YourDetails] lookup exception", err);
       setError(errorMessage);
       setAppointments(null);
     } finally {
