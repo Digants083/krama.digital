@@ -6,9 +6,9 @@ import asyncio
 from app.services.appointment_maintenance import cleanup_old_appointments, clinic_today_str
 
 async def cleanup_yesterday_appointments():
-    """Clean up old appointments (not from today) - mark as not served"""
+    """Clean up appointments before today - mark as not served"""
     print(f"Today's date: {clinic_today_str()}")
-    print("Cleaning up all appointments NOT from today...\n")
+    print("Cleaning up appointments before today...\n")
     cleaned_count = await cleanup_old_appointments()
     if cleaned_count == 0:
         print("No old appointments found to clean up.")

@@ -1434,9 +1434,7 @@ async def join_queue(
     - Inserts a new row in qr_appointments table
     - Returns token_label, token_number, and position in queue
     """
-    from datetime import date
-
-    today = date.today().isoformat()  # e.g. "2024-01-15"
+    today = _clinic_today_str()
 
     # Determine current slot if not provided
     slot_id = payload.slot_id
@@ -1448,7 +1446,8 @@ async def join_queue(
         record = result.scalar_one_or_none()
         if record:
             slots = _load_slots(record.slots)
-            current_time_decimal = datetime.now().hour + datetime.now().minute / 60.0
+            now = _clinic_now()
+            current_time_decimal = now.hour + now.minute / 60.0
             for idx, slot in enumerate(slots):
                 if slot.get("is_open"):
                     start, end = slot.get("time_range", [0, 0])
@@ -1646,40 +1645,46 @@ async def lookup_by_phone(
             Appointment.date == today,
         )
     )
-    walkin_result = await db.execute(
-        select(QRAppointment).where(
-            walkin_phone_filter,
-            QRAppointment.date == today,
-        )
-    )
-
     appointments = [
         {"appointment": apt, "source": "online"}
         for apt in online_result.scalars().all()
-    ] + [
-        {"appointment": apt, "source": "walkin"}
-        for apt in walkin_result.scalars().all()
     ]
 
     seen = {(item["source"], item["appointment"].id) for item in appointments}
 
-    all_online_result = await db.execute(
-        select(Appointment).where(Appointment.date == today)
-    )
-    for apt in all_online_result.scalars().all():
-        key = ("online", apt.id)
-        if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
-            appointments.append({"appointment": apt, "source": "online"})
-            seen.add(key)
+    # First priority: online appointments table. Only check QR/walk-in if no online record exists.
+    if not appointments:
+        all_online_result = await db.execute(
+            select(Appointment).where(Appointment.date == today)
+        )
+        for apt in all_online_result.scalars().all():
+            key = ("online", apt.id)
+            if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
+                appointments.append({"appointment": apt, "source": "online"})
+                seen.add(key)
 
-    all_walkin_result = await db.execute(
-        select(QRAppointment).where(QRAppointment.date == today)
-    )
-    for apt in all_walkin_result.scalars().all():
-        key = ("walkin", apt.id)
-        if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
-            appointments.append({"appointment": apt, "source": "walkin"})
-            seen.add(key)
+    if not appointments:
+        walkin_result = await db.execute(
+            select(QRAppointment).where(
+                walkin_phone_filter,
+                QRAppointment.date == today,
+            )
+        )
+        appointments = [
+            {"appointment": apt, "source": "walkin"}
+            for apt in walkin_result.scalars().all()
+        ]
+        seen = {(item["source"], item["appointment"].id) for item in appointments}
+
+    if not appointments:
+        all_walkin_result = await db.execute(
+            select(QRAppointment).where(QRAppointment.date == today)
+        )
+        for apt in all_walkin_result.scalars().all():
+            key = ("walkin", apt.id)
+            if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
+                appointments.append({"appointment": apt, "source": "walkin"})
+                seen.add(key)
 
     appointments.sort(
         key=lambda item: _sort_datetime(item["appointment"].created_at),

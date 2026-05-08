@@ -51,6 +51,11 @@ def _sort_datetime(value):
         return value.replace(tzinfo=CLINIC_TIMEZONE)
     return value
 
+
+def _token_number(token: Optional[str]) -> int:
+    digits = "".join(ch for ch in (token or "") if ch.isdigit())
+    return int(digits) if digits else 10**9
+
 from app.schemas import (
 
     ClinicSignup, ClinicLogin, PatientSignup, PatientLogin,
@@ -4620,9 +4625,16 @@ async def get_today_appointments(
 
 
 
-    # Sort by queue_position (not created_at) to respect skip/reorder operations
-
-    appointment_list.sort(key=lambda x: x.get("queue_position") or float('inf'))
+    # Keep online + walk-in rows in the visible token order.
+    appointment_list.sort(
+        key=lambda x: (
+            _token_number(x.get("token")),
+            x.get("queue_position") if x.get("queue_position") is not None else 10**9,
+            _sort_datetime(x.get("created_at")),
+            0 if x.get("source") != "walkin" else 1,
+            x.get("id") or 0,
+        )
+    )
 
 
 

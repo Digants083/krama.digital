@@ -47,7 +47,7 @@ async def check_appointment_dates(log_details: bool = True) -> dict:
 
 
 async def cleanup_old_appointments(delete_completed_before_yesterday: bool = False) -> int:
-    """Move appointments from previous days into completed_appointments as not_served."""
+    """Move only appointments before today into completed_appointments as not_served."""
     today = clinic_today_str()
     cleaned_count = 0
 
@@ -55,7 +55,7 @@ async def cleanup_old_appointments(delete_completed_before_yesterday: bool = Fal
         online_result = await db.execute(
             select(Appointment).where(
                 and_(
-                    Appointment.date != today,
+                    Appointment.date < today,
                     Appointment.status.notin_(["completed", "not_served"]),
                 )
             )
@@ -65,7 +65,7 @@ async def cleanup_old_appointments(delete_completed_before_yesterday: bool = Fal
         qr_result = await db.execute(
             select(QRAppointment).where(
                 and_(
-                    QRAppointment.date != today,
+                    QRAppointment.date < today,
                     QRAppointment.status.notin_(["completed", "not_served"]),
                 )
             )
