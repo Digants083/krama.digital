@@ -135,7 +135,12 @@ const YourDetails = () => {
           response: responseBody,
           rawText: responseText,
         });
-        throw new Error(responseBody.detail || responseBody.raw || "No appointment found for this number");
+        const detail = responseBody.detail;
+        const message =
+          typeof detail === "string"
+            ? detail
+            : detail?.message || responseBody.raw || "No appointment found for this number";
+        throw new Error(message);
       }
 
       const data: LookupResponse = responseBody;

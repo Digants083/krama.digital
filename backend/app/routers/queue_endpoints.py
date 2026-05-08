@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Optional
@@ -47,7 +49,7 @@ def _load_slots(raw_slots):
 
 
 
-def _can_toggle_slot(last_toggle_date: Optional[datetime], slot_toggle_counts: list, slot_index: int) -> tuple[bool, str]:
+def _can_toggle_slot(last_toggle_date: Optional[datetime], slot_toggle_counts: list, slot_index: int):
     """
     Check if clinic can toggle a specific slot open/close based on daily limit (2 times per slot).
 
@@ -1603,7 +1605,7 @@ async def join_queue(
 # Works for both online appointments and walk-in/QR appointments
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _verify_lookup_schema(db: AsyncSession) -> None:
+async def _verify_lookup_schema(db):
     await db.execute(text("SELECT 1"))
 
     required_columns = {
@@ -1627,7 +1629,7 @@ async def _verify_lookup_schema(db: AsyncSession) -> None:
         },
     }
 
-    missing: dict[str, list[str]] = {}
+    missing = {}
     for table_name, columns in required_columns.items():
         result = await db.execute(
             text(
@@ -1659,10 +1661,7 @@ async def _verify_lookup_schema(db: AsyncSession) -> None:
 
 
 @router.get("/queue/lookup-by-phone")
-async def lookup_by_phone(
-    phone: str = Query(..., description="Patient phone number"),
-    db: AsyncSession = Depends(get_db)
-):
+async def lookup_by_phone(phone: str = Query(..., description="Patient phone number"), db: AsyncSession = Depends(get_db)):
     phone_digits = "".join(ch for ch in phone.strip() if ch.isdigit())
     phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
 
@@ -1712,10 +1711,7 @@ async def lookup_by_phone(
         ) from exc
 
 
-async def _lookup_by_phone_impl(
-    phone: str = Query(..., description="Patient phone number"),
-    db: AsyncSession = Depends(get_db)
-):
+async def _lookup_by_phone_impl(phone, db):
     """
     Look up appointment details by phone number.
     Searches both online appointments and QR/walk-in appointments.
@@ -1818,7 +1814,7 @@ async def _lookup_by_phone_impl(
         )
     
     # Helper function to get slot name
-    async def get_slot_name(clinic_id: str, slot_id: int | None):
+    async def get_slot_name(clinic_id, slot_id):
         if not slot_id:
             return None
         try:
@@ -1837,7 +1833,7 @@ async def _lookup_by_phone_impl(
         return None
     
     # Helper function to get clinic info
-    async def get_clinic_info(clinic_id: str):
+    async def get_clinic_info(clinic_id):
         try:
             clinic_result = await db.execute(
                 select(Clinic.clinic_name, Clinic.address).where(Clinic.clinic_id == clinic_id)
