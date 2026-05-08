@@ -10,11 +10,16 @@ logger = logging.getLogger(__name__)
 REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
     "appointments": {
         "notification_stage": "VARCHAR DEFAULT 'pending'",
+        "last_email_sent_at": "TIMESTAMP",
+        "patient_email": "VARCHAR DEFAULT ''",
+        "doctor_name": "VARCHAR",
+        "source": "VARCHAR DEFAULT 'online'",
         "slot_id": "INTEGER",
         "push_count": "INTEGER DEFAULT 0",
         "queue_position": "INTEGER",
     },
     "qr_appointments": {
+        "doctor_name": "VARCHAR",
         "slot_id": "INTEGER",
         "queue_position": "INTEGER",
     },
@@ -33,6 +38,27 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "last_slot_change_date": "TIMESTAMP",
         "daily_toggle_counts": "JSON DEFAULT '[]'",
         "last_toggle_date": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    },
+    "clinics": {
+        "category": "VARCHAR",
+        "categories": "JSON",
+        "street_address": "VARCHAR",
+        "road": "VARCHAR",
+        "layout": "VARCHAR",
+        "section": "VARCHAR",
+        "city": "VARCHAR",
+        "pincode": "VARCHAR",
+        "latitude": "VARCHAR",
+        "longitude": "VARCHAR",
+        "specialization": "VARCHAR",
+        "experience": "VARCHAR",
+        "qualifications": "VARCHAR",
+        "has_pinned_location": "BOOLEAN DEFAULT FALSE",
+        "booking_cutoff_minutes": "INTEGER DEFAULT 15",
+        "is_active": "BOOLEAN DEFAULT FALSE",
+        "manual_stop_date": "VARCHAR",
     },
 }
 
@@ -104,6 +130,8 @@ async def get_foreign_keys(conn: AsyncConnection, table_name: str) -> List[Tuple
 
 
 async def ensure_required_schema(conn: AsyncConnection) -> None:
+    added_columns: List[str] = []
+
     for table_name in EXPECTED_RELATED_TABLES:
         if not await table_exists(conn, table_name):
             raise RuntimeError(f"Required database table is missing: {table_name}")
@@ -119,9 +147,38 @@ async def ensure_required_schema(conn: AsyncConnection) -> None:
             await conn.execute(
                 text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
             )
+            added_columns.append(f"{table_name}.{column_name}")
 
     await _normalize_column_defaults(conn)
     await _log_relationship_status(conn)
+
+    if added_columns:
+        logger.warning("Database schema repair added columns: %s", ", ".join(added_columns))
+    else:
+        logger.info("Database schema check passed; no missing columns found.")
+
+
+async def get_schema_report(conn: AsyncConnection) -> Dict[str, object]:
+    report: Dict[str, object] = {"tables": {}, "missing": {}}
+
+    for table_name in EXPECTED_RELATED_TABLES:
+        exists = await table_exists(conn, table_name)
+        table_report = {"exists": exists, "columns": []}
+        if exists:
+            table_report["columns"] = await get_existing_columns(conn, table_name)
+        report["tables"][table_name] = table_report
+
+    for table_name, required_columns in REQUIRED_TABLE_COLUMNS.items():
+        if not await table_exists(conn, table_name):
+            report["missing"][table_name] = ["<table missing>"]
+            continue
+
+        existing_columns = set(await get_existing_columns(conn, table_name))
+        missing_columns = sorted(set(required_columns) - existing_columns)
+        if missing_columns:
+            report["missing"][table_name] = missing_columns
+
+    return report
 
 
 async def _normalize_column_defaults(conn: AsyncConnection) -> None:

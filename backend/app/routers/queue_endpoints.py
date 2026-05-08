@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, and_, func, or_, text
+from sqlalchemy.exc import SQLAlchemyError
 from app.database.db import get_db
 from app.database.models import Appointment, CompletedAppointment, QRAppointment, ClinicTimeSlot, Clinic
 from app.services.email_service import send_queue_alert
@@ -1596,8 +1597,115 @@ async def join_queue(
 # Works for both online appointments and walk-in/QR appointments
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def _verify_lookup_schema(db: AsyncSession) -> None:
+    await db.execute(text("SELECT 1"))
+
+    required_columns = {
+        "appointments": {
+            "id",
+            "appointment_token",
+            "clinic_id",
+            "patient_name",
+            "patient_phone",
+            "date",
+            "status",
+        },
+        "qr_appointments": {
+            "id",
+            "appointment_token",
+            "clinic_id",
+            "patient_name",
+            "patient_phone",
+            "date",
+            "status",
+        },
+    }
+
+    missing: dict[str, list[str]] = {}
+    for table_name, columns in required_columns.items():
+        result = await db.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        )
+        existing = {row[0] for row in result.fetchall()}
+        table_missing = sorted(columns - existing)
+        if not existing:
+            missing[table_name] = ["<table missing>"]
+        elif table_missing:
+            missing[table_name] = table_missing
+
+    if missing:
+        logger.error("YourDetails lookup schema check failed: %s", missing)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": "Database schema is missing required lookup tables or columns",
+                "missing": missing,
+            },
+        )
+
+
 @router.get("/queue/lookup-by-phone")
 async def lookup_by_phone(
+    phone: str = Query(..., description="Patient phone number"),
+    db: AsyncSession = Depends(get_db)
+):
+    phone_digits = "".join(ch for ch in phone.strip() if ch.isdigit())
+    phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
+
+    if len(phone_digits) < 10 or len(phone_digits) > 15 or len(phone_last10) != 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enter a valid 10-digit mobile number",
+        )
+
+    if phone_last10[0] not in {"6", "7", "8", "9"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enter a valid Indian mobile number",
+        )
+
+    try:
+        await _verify_lookup_schema(db)
+        return await _lookup_by_phone_impl(phone=phone, db=db)
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        logger.exception(
+            "YourDetails database/query error phone=******%s error_type=%s",
+            phone_last10[-4:],
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": "Database query failed while looking up appointment details",
+                "error_type": type(exc).__name__,
+            },
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "YourDetails unexpected lookup error phone=******%s error_type=%s",
+            phone_last10[-4:],
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": "Appointment lookup failed unexpectedly",
+                "error_type": type(exc).__name__,
+            },
+        ) from exc
+
+
+async def _lookup_by_phone_impl(
     phone: str = Query(..., description="Patient phone number"),
     db: AsyncSession = Depends(get_db)
 ):
@@ -1722,14 +1830,18 @@ async def lookup_by_phone(
     
     # Helper function to get clinic info
     async def get_clinic_info(clinic_id: str):
-        clinic_result = await db.execute(
-            select(Clinic.clinic_name, Clinic.address).where(Clinic.clinic_id == clinic_id)
-        )
-        clinic = clinic_result.first()
-        return {
-            "name": clinic[0] if clinic and clinic[0] else clinic_id,
-            "address": clinic[1] if clinic else None,
-        }
+        try:
+            clinic_result = await db.execute(
+                select(Clinic.clinic_name, Clinic.address).where(Clinic.clinic_id == clinic_id)
+            )
+            clinic = clinic_result.first()
+            return {
+                "name": clinic[0] if clinic and clinic[0] else clinic_id,
+                "address": clinic[1] if clinic else None,
+            }
+        except Exception:
+            logger.exception("YourDetails clinic lookup failed clinic_id=%s", clinic_id)
+            return {"name": clinic_id, "address": None}
     
     # Helper function to calculate queue position
     async def get_queue_position(
