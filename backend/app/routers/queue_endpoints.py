@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, and_, func, or_
+from sqlalchemy import select, delete, and_, func, or_, text
 from app.database.db import get_db
 from app.database.models import Appointment, CompletedAppointment, QRAppointment, ClinicTimeSlot, Clinic
 from app.services.email_service import send_queue_alert
@@ -1639,78 +1640,52 @@ async def lookup_by_phone(
     # NOTE: This is intentionally conservative by anchoring to last-10 digits.
     phone_suffix_like = f"%{phone_last10}" if phone_last10 else None
 
-    online_phone_filter = or_(
-        Appointment.patient_phone.in_(phone_candidates),
-        Appointment.patient_phone.like(phone_suffix_like) if phone_suffix_like else False,
-    )
-    walkin_phone_filter = or_(
-        QRAppointment.patient_phone.in_(phone_candidates),
-        QRAppointment.patient_phone.like(phone_suffix_like) if phone_suffix_like else False,
-    )
+    def make_appointment(row: dict, source: str):
+        return SimpleNamespace(
+            id=row.get("id"),
+            appointment_token=row.get("appointment_token") or "",
+            clinic_id=row.get("clinic_id") or "",
+            patient_id=row.get("patient_id") or f"{source}-{row.get('id')}",
+            patient_name=row.get("patient_name") or "",
+            patient_email=row.get("patient_email") or "",
+            patient_phone=row.get("patient_phone") or "",
+            doctor_name=row.get("doctor_name") or "",
+            date=row.get("date") or today,
+            time=row.get("time") or "",
+            status=row.get("status") or "booked",
+            created_at=row.get("created_at"),
+            source=row.get("source") or source,
+            slot_id=row.get("slot_id"),
+            queue_position=row.get("queue_position"),
+        )
 
     online_result = await db.execute(
-        select(Appointment).where(
-            online_phone_filter,
-            Appointment.date == today,
-        )
+        text("SELECT * FROM appointments WHERE date = :today"),
+        {"today": today},
     )
-    appointments = [
-        {"appointment": apt, "source": "online"}
-        for apt in online_result.scalars().all()
-    ]
-    logger.info(
-        "YourDetails exact online matches phone=%s count=%s",
-        masked_phone,
-        len(appointments),
-    )
-
-    seen = {(item["source"], item["appointment"].id) for item in appointments}
-
-    # First priority: online appointments table. Collect every matching online appointment,
-    # including rows stored with spaces/country codes that SQL suffix matching can miss.
-    all_online_result = await db.execute(
-        select(Appointment).where(Appointment.date == today)
-    )
-    for apt in all_online_result.scalars().all():
-        key = ("online", apt.id)
-        if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
+    appointments = []
+    for row in online_result.mappings().all():
+        apt = make_appointment(dict(row), "online")
+        if normalize_phone(apt.patient_phone) == phone_last10:
             appointments.append({"appointment": apt, "source": "online"})
-            seen.add(key)
+
     logger.info(
-        "YourDetails normalized online matches phone=%s total_count=%s",
+        "YourDetails online matches phone=%s count=%s",
         masked_phone,
         len(appointments),
     )
 
     if not appointments:
-        walkin_result = await db.execute(
-            select(QRAppointment).where(
-                walkin_phone_filter,
-                QRAppointment.date == today,
-            )
+        qr_result = await db.execute(
+            text("SELECT * FROM qr_appointments WHERE date = :today"),
+            {"today": today},
         )
-        appointments = [
-            {"appointment": apt, "source": "walkin"}
-            for apt in walkin_result.scalars().all()
-        ]
-        seen = {(item["source"], item["appointment"].id) for item in appointments}
-        logger.info(
-            "YourDetails exact walkin matches phone=%s count=%s",
-            masked_phone,
-            len(appointments),
-        )
-
-    if not appointments:
-        all_walkin_result = await db.execute(
-            select(QRAppointment).where(QRAppointment.date == today)
-        )
-        for apt in all_walkin_result.scalars().all():
-            key = ("walkin", apt.id)
-            if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
+        for row in qr_result.mappings().all():
+            apt = make_appointment(dict(row), "walkin")
+            if normalize_phone(apt.patient_phone) == phone_last10:
                 appointments.append({"appointment": apt, "source": "walkin"})
-                seen.add(key)
         logger.info(
-            "YourDetails normalized walkin matches phone=%s total_count=%s",
+            "YourDetails walkin matches phone=%s count=%s",
             masked_phone,
             len(appointments),
         )
@@ -1733,11 +1708,11 @@ async def lookup_by_phone(
             return None
         try:
             slot_result = await db.execute(
-                select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+                select(ClinicTimeSlot.slots).where(ClinicTimeSlot.clinic_id == clinic_id)
             )
-            slot_record = slot_result.scalar_one_or_none()
-            if slot_record:
-                slots = _load_slots(slot_record.slots)
+            raw_slots = slot_result.scalar_one_or_none()
+            if raw_slots is not None:
+                slots = _load_slots(raw_slots)
                 slot_idx = slot_id - 1
                 if 0 <= slot_idx < len(slots):
                     return slots[slot_idx].get("slot_name", f"Slot {slot_id}")
@@ -1748,12 +1723,12 @@ async def lookup_by_phone(
     # Helper function to get clinic info
     async def get_clinic_info(clinic_id: str):
         clinic_result = await db.execute(
-            select(Clinic).where(Clinic.clinic_id == clinic_id)
+            select(Clinic.clinic_name, Clinic.address).where(Clinic.clinic_id == clinic_id)
         )
-        clinic = clinic_result.scalar_one_or_none()
+        clinic = clinic_result.first()
         return {
-            "name": getattr(clinic, "clinic_name", None) or clinic_id,
-            "address": getattr(clinic, "address", None) if clinic else None
+            "name": clinic[0] if clinic and clinic[0] else clinic_id,
+            "address": clinic[1] if clinic else None,
         }
     
     # Helper function to calculate queue position
