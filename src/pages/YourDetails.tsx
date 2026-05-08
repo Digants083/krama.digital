@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Clock, Building2, UserCheck, Search } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 interface AppointmentDetails {
   token_label: string;
@@ -110,7 +111,7 @@ const YourDetails = () => {
     setError("");
 
     try {
-      const response = await fetch(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone.trim())}`);
+      const response = await fetch(apiUrl(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone.trim())}`));
       
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));

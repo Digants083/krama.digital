@@ -7,96 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, select
 from sqlalchemy.exc import DBAPIError
 from app.database.db import engine, AsyncSessionLocal
-from app.database.models import Base, Appointment, Clinic, ClinicTimeSlot, CompletedAppointment, QRAppointment
+from app.database.models import Base, Appointment, Clinic, ClinicTimeSlot
 from app.database.schema_checks import ensure_required_schema
 from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports
 from app.services.email_service import send_queue_alert
+from app.services.appointment_maintenance import check_appointment_dates, cleanup_old_appointments
 import json
 
 # Setup logging for scheduled tasks
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-async def cleanup_yesterday_appointments():
-    """Clean up yesterday's appointments on startup - mark as not served"""
-    from sqlalchemy import and_
-    
-    async with AsyncSessionLocal() as db:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        # Get all clinics
-        clinic_result = await db.execute(select(Clinic))
-        clinics = clinic_result.scalars().all()
-        
-        for clinic in clinics:
-            # Get yesterday's appointments that are not completed
-            result = await db.execute(
-                select(Appointment).where(
-                    and_(
-                        Appointment.clinic_id == clinic.clinic_id,
-                        Appointment.date == yesterday,
-                        Appointment.status.notin_(["completed", "not_served"])
-                    )
-                )
-            )
-            
-            deleted_count = 0
-            for apt in result.scalars().all():
-                completed = CompletedAppointment(
-                    appointment_token=apt.appointment_token,
-                    clinic_id=apt.clinic_id,
-                    patient_id=getattr(apt, 'patient_id', f"online-{apt.id}"),
-                    patient_name=apt.patient_name,
-                    patient_phone=apt.patient_phone,
-                    patient_email=getattr(apt, 'patient_email', ""),
-                    status="not_served",
-                    wait_time_minutes=0,
-                    date=apt.date,
-                    time=getattr(apt, 'time', ""),
-                    slot_id=getattr(apt, 'slot_id', None),
-                    doctor_name=getattr(apt, 'doctor_name', None),
-                    created_at=apt.created_at,
-                    served_at=datetime.now()
-                )
-                db.add(completed)
-                await db.delete(apt)
-                deleted_count += 1
-            
-            # Same for QR appointments
-            qr_result = await db.execute(
-                select(QRAppointment).where(
-                    and_(
-                        QRAppointment.clinic_id == clinic.clinic_id,
-                        QRAppointment.date == yesterday,
-                        QRAppointment.status.notin_(["completed", "not_served"])
-                    )
-                )
-            )
-            
-            for apt in qr_result.scalars().all():
-                completed = CompletedAppointment(
-                    appointment_token=apt.appointment_token,
-                    clinic_id=apt.clinic_id,
-                    patient_id=getattr(apt, 'patient_id', f"qr-{apt.id}"),
-                    patient_name=apt.patient_name,
-                    patient_phone=apt.patient_phone,
-                    patient_email=getattr(apt, 'patient_email', ""),
-                    status="not_served",
-                    wait_time_minutes=0,
-                    date=apt.date,
-                    time=getattr(apt, 'time', ""),
-                    slot_id=getattr(apt, 'slot_id', None),
-                    created_at=apt.created_at,
-                    served_at=datetime.now()
-                )
-                db.add(completed)
-                await db.delete(apt)
-                deleted_count += 1
-            
-            if deleted_count > 0:
-                await db.commit()
-                print(f"Cleaned up {deleted_count} old appointments for clinic {clinic.clinic_id}")
 
 
 async def scheduled_auto_finish_unserved():
@@ -256,58 +176,10 @@ async def scheduled_midnight_cleanup():
             
             # Check if it's midnight (between 00:00 and 00:01)
             if now.hour == 0 and now.minute == 0:
-                async with AsyncSessionLocal() as db:
-                    today = now.strftime("%Y-%m-%d")
-                    print(f"[Midnight Cleanup] Running cleanup for {today}...")
-                    
-                    # 1. Clean up old appointments (not from today)
-                    result = await db.execute(
-                        select(Appointment).where(
-                            and_(
-                                Appointment.date != today,
-                                Appointment.status.notin_(["completed", "not_served"])
-                            )
-                        )
-                    )
-                    
-                    deleted_count = 0
-                    for apt in result.scalars().all():
-                        completed = CompletedAppointment(
-                            appointment_token=apt.appointment_token,
-                            clinic_id=apt.clinic_id,
-                            patient_id=f"online-{apt.id}",
-                            patient_name=apt.patient_name,
-                            patient_phone=apt.patient_phone,
-                            patient_email=getattr(apt, 'patient_email', ""),
-                            doctor_name=getattr(apt, 'doctor_name', ""),
-                            date=apt.date,
-                            time=getattr(apt, 'time', ""),
-                            slot_id=getattr(apt, 'slot_id', None),
-                            status="completed",
-                            outcome="not_served",
-                            served=False,
-                            wait_time_minutes=0,
-                            served_at=datetime.now()
-                        )
-                        db.add(completed)
-                        await db.delete(apt)
-                        deleted_count += 1
-                    
-                    if deleted_count > 0:
-                        await db.commit()
-                        print(f"[Midnight Cleanup] Cleaned up {deleted_count} old appointments")
-                    
-                    # 2. Delete old completed records (keep today and future)
-                    # Delete records older than yesterday
-                    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-                    from app.database.models import CompletedAppointment as CA
-                    delete_result = await db.execute(
-                        delete(CA).where(CA.date < yesterday)
-                    )
-                    await db.commit()
-                    print(f"[Midnight Cleanup] Deleted {delete_result.rowcount} old completed records")
-                    
-                    print(f"[Midnight Cleanup] Done!")
+                print(f"[Midnight Cleanup] Running cleanup for {now.strftime('%Y-%m-%d')}...")
+                cleaned_count = await cleanup_old_appointments(delete_completed_before_yesterday=True)
+                print(f"[Midnight Cleanup] Cleaned up {cleaned_count} old appointments")
+                print("[Midnight Cleanup] Done!")
             
             # Check every minute
             await asyncio.sleep(60)
@@ -663,9 +535,10 @@ async def lifespan(app: FastAPI):
     midnight_cleanup_task = asyncio.create_task(scheduled_midnight_cleanup())
     logger.info("Started scheduled background tasks (pre-slot + auto-finish + midnight cleanup)")
 
-    # Clean up yesterday's appointments on startup
+    # Run appointment maintenance on startup/restart
     try:
-        await cleanup_yesterday_appointments()
+        await check_appointment_dates()
+        await cleanup_old_appointments()
     except Exception as e:
         print(f"Startup cleanup error (non-fatal): {e}")
 

@@ -20,6 +20,14 @@ def _clinic_today_str() -> str:
     return _clinic_now().strftime("%Y-%m-%d")
 
 
+def _sort_datetime(value):
+    if value is None:
+        return datetime.min.replace(tzinfo=CLINIC_TIMEZONE)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=CLINIC_TIMEZONE)
+    return value
+
+
 def _load_slots(raw_slots):
     slots = raw_slots
     if isinstance(slots, str):
@@ -1602,6 +1610,8 @@ async def lookup_by_phone(
     # This makes lookup resilient to stored formats like '+91 98765-43210', '091...', '0091...', etc.
     phone_digits = "".join(ch for ch in phone.strip() if ch.isdigit())
     phone_last10 = phone_digits[-10:] if len(phone_digits) >= 10 else phone_digits
+    def normalize_phone(value: str | None) -> str:
+        return "".join(ch for ch in (value or "") if ch.isdigit())[-10:]
 
     today = _clinic_today_str()
 
@@ -1650,8 +1660,29 @@ async def lookup_by_phone(
         {"appointment": apt, "source": "walkin"}
         for apt in walkin_result.scalars().all()
     ]
+
+    seen = {(item["source"], item["appointment"].id) for item in appointments}
+
+    all_online_result = await db.execute(
+        select(Appointment).where(Appointment.date == today)
+    )
+    for apt in all_online_result.scalars().all():
+        key = ("online", apt.id)
+        if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
+            appointments.append({"appointment": apt, "source": "online"})
+            seen.add(key)
+
+    all_walkin_result = await db.execute(
+        select(QRAppointment).where(QRAppointment.date == today)
+    )
+    for apt in all_walkin_result.scalars().all():
+        key = ("walkin", apt.id)
+        if key not in seen and normalize_phone(apt.patient_phone) == phone_last10:
+            appointments.append({"appointment": apt, "source": "walkin"})
+            seen.add(key)
+
     appointments.sort(
-        key=lambda item: item["appointment"].created_at or datetime.min,
+        key=lambda item: _sort_datetime(item["appointment"].created_at),
         reverse=True,
     )
 
@@ -1748,7 +1779,7 @@ async def lookup_by_phone(
         queue_items.sort(
             key=lambda item: (
                 item["queue_position"] if item["queue_position"] is not None else 10**9,
-                item["created_at"] or datetime.min,
+                _sort_datetime(item["created_at"]),
                 0 if item["source"] == "online" else 1,
                 item["id"],
             )
@@ -1803,7 +1834,7 @@ async def lookup_by_phone(
             "clinic_address": clinic_info["address"],
             "doctor_name": getattr(apt, "doctor_name", None),
             "date": apt.date,
-            "time": apt.time,
+            "time": getattr(apt, "time", None) or slot_name or "Walk-in",
             "slot_name": slot_name,
             "position": queue_pos["position"],
             "patients_ahead": queue_pos["patients_ahead"],

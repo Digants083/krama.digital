@@ -40,6 +40,17 @@ from app.services.geocoding_service import get_coordinates_from_address, get_coo
 
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
+def _clinic_today_str() -> str:
+    return datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
+
+
+def _sort_datetime(value):
+    if value is None:
+        return datetime.min.replace(tzinfo=CLINIC_TIMEZONE)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=CLINIC_TIMEZONE)
+    return value
+
 from app.schemas import (
 
     ClinicSignup, ClinicLogin, PatientSignup, PatientLogin,
@@ -4725,11 +4736,7 @@ async def get_queue_position(
 
     """
 
-    from datetime import datetime
-
-
-
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _clinic_today_str()
 
 
 
@@ -4879,7 +4886,7 @@ async def get_queue_position(
 
 
 
-    queue_items.sort(key=lambda item: (item["created_at"] or datetime.min, item["id"]))
+    queue_items.sort(key=lambda item: (_sort_datetime(item["created_at"]), item["id"]))
 
 
 
