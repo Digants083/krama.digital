@@ -303,22 +303,6 @@ const ClinicControlQueue = () => {
     return true;
   };
 
-  const hasActivatableSlot = () => {
-    if (timeSlots.length === 0) return false;
-
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-    return timeSlots.some((slot) => {
-      if (!slot.is_open) return false;
-
-      const startMinutes = slot.time_range[0] * 60;
-      const endMinutes = slot.time_range[1] * 60;
-
-      return currentMinutes < endMinutes && currentMinutes < startMinutes + 30;
-    });
-  };
-
   const canActivateNow = () => {
     if (timeSlots.length === 0) return false;
     const slot1Start = timeSlots[0]?.time_range?.[0];
@@ -344,8 +328,7 @@ const ClinicControlQueue = () => {
     const cutoffMinutes = latestEndMinutes - 15;
 
     return currentMinutes >= activationThresholdMinutes &&
-      currentMinutes < cutoffMinutes &&
-      hasActivatableSlot();
+      currentMinutes < cutoffMinutes;
   };
 
   // Check if current time is past the viewing slot's start time
