@@ -6,6 +6,7 @@ import { ArrowLeft, CalendarDays, Check, Clock, MapPin, Phone, Building2, Users 
 import { Button } from "@/components/ui/button";
 import DoctorCard from "@/components/shared/DoctorCard";
 import PatientTermsModal from "@/components/auth/PatientTermsModal";
+import { formatHourDecimal24, formatTimeRange } from "@/lib/timeFormat";
 
 interface ClinicTimeSlot {
   slot_name: string;
@@ -26,19 +27,6 @@ const generateDates = () => {
     });
   }
   return dates;
-};
-
-// Convert 24-hour to 12-hour format for display
-const formatTimeRange = (timeRange: number[]) => {
-  const convertHour = (h: number) => {
-    if (h === 0) return { hour: 12, ampm: "AM" };
-    if (h === 12) return { hour: 12, ampm: "PM" };
-    if (h > 12) return { hour: h - 12, ampm: "PM" };
-    return { hour: h, ampm: "AM" };
-  };
-  const start = convertHour(timeRange[0]);
-  const end = convertHour(timeRange[1]);
-  return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
 };
 
 const BookAppointment = () => {
@@ -93,14 +81,6 @@ const BookAppointment = () => {
     return true;
   };
 
-  const formatTime = (time: string) => {
-    const [hours, minutes] = time.split(":");
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? "PM" : "AM";
-    const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-    return `${displayHour}:${minutes} ${ampm}`;
-  };
-
   const handleConfirm = () => {
     navigate("/confirmation", {
       state: {
@@ -135,7 +115,7 @@ const BookAppointment = () => {
 
       const selectedSlot = timeSlots[selectedSlotIndex || 0];
       const timeRange = selectedSlot?.time_range || [9, 10];
-      const time = `${timeRange[0]}:00`;
+      const time = formatHourDecimal24(timeRange[0]);
 
       const response = await fetch("/api/auth/appointments", {
         method: "POST",

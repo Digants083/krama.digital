@@ -4,14 +4,24 @@ import { useQueue } from "@/context/QueueContext";
 import { Eye, Settings, User, Users, MapPin, AlertCircle, FileText } from "lucide-react";
 import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const ClinicDashboard = () => {
   const [clinicProfile, setClinicProfile] = useState<any>(null);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showLocationConfirm, setShowLocationConfirm] = useState(false);
   const { fetchQueueForClinic } = useQueue();
 
   const hasLocation = clinicProfile?.latitude && clinicProfile?.longitude;
+  const needsLocationConfirmation = hasLocation && clinicProfile?.has_pinned_location === false;
 
   // Check if clinic is diagnostic or scanning center
   const isDiagnosticCenter = clinicProfile?.categories?.some(
@@ -71,7 +81,9 @@ const ClinicDashboard = () => {
         if (response.ok) {
           const data = await response.json();
           setClinicProfile(data);
-          if (!data.latitude || !data.longitude) {
+          if (data.latitude && data.longitude && data.has_pinned_location === false) {
+            setShowLocationConfirm(true);
+          } else if (!data.latitude || !data.longitude) {
             setShowLocationModal(true);
           }
         }
@@ -105,7 +117,9 @@ const ClinicDashboard = () => {
           ...prev,
           latitude: data.latitude,
           longitude: data.longitude,
+          has_pinned_location: data.has_pinned_location,
         }));
+        setShowLocationConfirm(false);
         setMessage({ text: "Location saved successfully!", type: "success" });
       } else {
         setMessage({ text: "Failed to save location", type: "error" });
@@ -113,6 +127,15 @@ const ClinicDashboard = () => {
     } catch (error) {
       setMessage({ text: "Error saving location", type: "error" });
     }
+  };
+
+  const handleAcceptPinnedLocation = async () => {
+    if (!clinicProfile?.latitude || !clinicProfile?.longitude) return;
+    await handleSaveLocation(
+      clinicProfile.latitude,
+      clinicProfile.longitude,
+      clinicProfile.address || ""
+    );
   };
 
   return (
@@ -166,6 +189,15 @@ const ClinicDashboard = () => {
             </div>
           )}
 
+          {needsLocationConfirmation && (
+            <div className="mt-6 flex items-center gap-2 rounded-lg bg-white/10 px-4 py-3">
+              <MapPin className="h-5 w-5 text-white" />
+              <p className="text-sm text-white">
+                Please confirm the admin-pinned clinic location before continuing.
+              </p>
+            </div>
+          )}
+
           <div className="mt-8 grid gap-4 sm:grid-cols-4">
             {actions.map((action) => (
               <Link
@@ -185,6 +217,8 @@ const ClinicDashboard = () => {
         isOpen={showLocationModal}
         onClose={() => setShowLocationModal(false)}
         onSave={handleSaveLocation}
+        initialLatitude={clinicProfile?.latitude}
+        initialLongitude={clinicProfile?.longitude}
         clinicAddress={
           [
             clinicProfile?.street_address,
@@ -196,6 +230,51 @@ const ClinicDashboard = () => {
           ].filter(Boolean).join(", ")
         }
       />
+
+      <Dialog open={showLocationConfirm} onOpenChange={setShowLocationConfirm}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Confirm Clinic Location</DialogTitle>
+            <DialogDescription>
+              Admin pinned this coordinate for your clinic. Confirm it if correct, or adjust the pin.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border bg-secondary/40 p-4 text-sm">
+            <div className="font-medium text-foreground">Pinned coordinate</div>
+            <div className="mt-1 text-muted-foreground">
+              {clinicProfile?.latitude}, {clinicProfile?.longitude}
+            </div>
+            {!!clinicProfile?.address && (
+              <div className="mt-2 text-muted-foreground">{clinicProfile.address}</div>
+            )}
+          </div>
+
+          {clinicProfile?.latitude && clinicProfile?.longitude && (
+            <iframe
+              title="Admin pinned clinic location"
+              className="h-64 w-full rounded-lg border"
+              loading="lazy"
+              src={`https://maps.google.com/maps?q=${clinicProfile.latitude},${clinicProfile.longitude}&z=17&output=embed`}
+            />
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowLocationConfirm(false);
+                setShowLocationModal(true);
+              }}
+            >
+              No, adjust pin
+            </Button>
+            <Button onClick={handleAcceptPinnedLocation}>
+              Yes, location is correct
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

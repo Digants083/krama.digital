@@ -53,6 +53,11 @@ class VerifyOtpRequest(BaseModel):
     confirmation_otp_code: str
 
 
+class RegistrationLocationRequest(BaseModel):
+    latitude: str
+    longitude: str
+
+
 def create_admin_session(admin_id: str, username: str) -> tuple[str, datetime]:
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=ADMIN_SESSION_HOURS)
@@ -412,6 +417,48 @@ async def get_pending_registration_details(
     }
 
 
+@router.put("/pending-registrations/{registration_id}/location")
+async def update_pending_registration_location(
+    registration_id: int,
+    request: RegistrationLocationRequest,
+    db: AsyncSession = Depends(get_db),
+    session: dict = Depends(require_admin_session)
+):
+    """
+    Store the admin-pinned coordinate for a pending clinic registration.
+    The clinic will confirm or correct this pin on first login after approval.
+    """
+    result = await db.execute(
+        select(PendingClinicRegistration)
+        .where(PendingClinicRegistration.id == registration_id)
+    )
+    reg = result.scalar_one_or_none()
+
+    if not reg:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Registration not found"
+        )
+
+    if reg.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Registration is already {reg.status}"
+        )
+
+    reg.latitude = request.latitude
+    reg.longitude = request.longitude
+    await db.commit()
+    await db.refresh(reg)
+
+    return {
+        "message": "Location pinned successfully",
+        "id": reg.id,
+        "latitude": reg.latitude,
+        "longitude": reg.longitude,
+    }
+
+
 @router.post("/pending-registrations/{registration_id}/approve")
 async def approve_registration(
     registration_id: int,
@@ -461,16 +508,10 @@ async def approve_registration(
         latitude = pending_reg.latitude
         longitude = pending_reg.longitude
 
-        # Geocode the address if coordinates are missing
         if not latitude or not longitude:
-            from app.services.geocoding_service import get_coordinates_from_address
-
-            # Build address for geocoding
-            full_address = f"{pending_reg.street_address or ''}, {pending_reg.road or ''}, {pending_reg.city or ''}, {pending_reg.pincode or ''}"
-            latitude, longitude = get_coordinates_from_address(
-                full_address,
-                pending_reg.city,
-                pending_reg.pincode
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please pin the clinic location on the map before approval"
             )
  
         # Create approved clinic with all address fields, category and doctor details
@@ -498,6 +539,7 @@ async def approve_registration(
             qualifications=pending_reg.qualifications,
             available=True,
             is_active=False,
+            has_pinned_location=False,
         )
 
         approved_clinic_id = pending_reg.clinic_id

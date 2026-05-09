@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatTimeRange } from "@/lib/timeFormat";
 
 interface Review {
   id: number;
@@ -12,19 +13,6 @@ interface Review {
   dislikes: number;
   created_at: string;
 }
-
-// Convert 24-hour to 12-hour format for display
-const formatTimeRange = (timeRange: number[]) => {
-  const convertHour = (h: number) => {
-    if (h === 0) return { hour: 12, ampm: "AM" };
-    if (h === 12) return { hour: 12, ampm: "PM" };
-    if (h > 12) return { hour: h - 12, ampm: "PM" };
-    return { hour: h, ampm: "AM" };
-  };
-  const start = convertHour(timeRange[0]);
-  const end = convertHour(timeRange[1]);
-  return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
-};
 
 const ClinicDetails = () => {
   const { id } = useParams<{ id: string }>();
@@ -54,6 +42,7 @@ const ClinicDetails = () => {
   ].filter(Boolean).join(", ") || clinic?.address || "";
   const lat = clinic?.latitude ? Number(clinic.latitude) : NaN;
   const lng = clinic?.longitude ? Number(clinic.longitude) : NaN;
+  const clinicAcceptingBookings = Boolean(clinic?.is_active && clinic?.available !== false);
   const hasPinnedCoords = Number.isFinite(lat) && Number.isFinite(lng);
   const mapQuery = encodeURIComponent(clinicAddress);
   const googleMapsUrl = hasPinnedCoords
@@ -196,10 +185,15 @@ const ClinicDetails = () => {
 
           return {
             ...slot,
+            slot_id: idx + 1,
             is_open: isOpen,
             is_expired: isExpired,
             display_status: isExpired ? "Expired" : (isOpen ? "Available" : "Not Available")
           };
+        }).sort((a: any, b: any) => {
+          const aStart = a.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+          const bStart = b.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+          return aStart - bStart;
         });
 
         setTimeSlots(processedSlots);
@@ -225,6 +219,11 @@ const ClinicDetails = () => {
   };
 
   const handleBookClick = () => {
+    if (!clinicAcceptingBookings) {
+      setMessage({text: "This clinic is not accepting bookings right now.", type: "error"});
+      return;
+    }
+
     if (!localStorage.getItem("user")) {
       setMessage({text: "Please login to book appointment", type: "error"});
       navigate("/patient/login");
@@ -241,7 +240,7 @@ const ClinicDetails = () => {
     
     const timeString = `${slot.slot_name} ${formatTimeRange(slot.time_range)}`;
     setSelectedTime(timeString);
-    setSelectedSlotId(slotIndex + 1);
+    setSelectedSlotId(slot.slot_id ?? slotIndex + 1);
   };
 
   const handleConfirmBooking = async () => {
@@ -512,16 +511,19 @@ const ClinicDetails = () => {
                   <div>
                     <h3 className="font-semibold text-foreground">{clinic.doctor_name || "Available Doctor"}</h3>
                     <p className="text-sm text-muted-foreground">General Practice</p>
-                    <p className="text-xs text-green-600">Available Today</p>
+                    <p className={`text-xs ${clinicAcceptingBookings ? "text-green-600" : "text-muted-foreground"}`}>
+                      {clinicAcceptingBookings ? "Available Today" : "Not accepting bookings right now"}
+                    </p>
                   </div>
                 </div>
                 <div className="mt-4">
                   <Button
                     onClick={handleBookClick}
-                    className="w-full bg-[#00555A] hover:bg-[#004455] text-white"
+                    className="w-full bg-[#00555A] hover:bg-[#004455] text-white disabled:opacity-60"
+                    disabled={!clinicAcceptingBookings}
                   >
                     <Clock className="h-4 w-4 mr-2" />
-                    Book Appointment
+                    {clinicAcceptingBookings ? "Book Appointment" : "Not Available Now"}
                   </Button>
                 </div>
               </div>
@@ -617,12 +619,12 @@ const ClinicDetails = () => {
             {timeSlots.length > 0 ? (
               <div className="space-y-4">
                 {timeSlots.map((slot, index) => {
-                  const slotId = index + 1;
+                  const slotId = slot.slot_id ?? index + 1;
                   const patientCount = slotQueueCounts[slotId] || 0;
 
                   return (
                     <button
-                      key={index}
+                      key={slotId}
                       onClick={() => handleSlotSelect(slot, index)}
                       disabled={!slot.is_open || slot.is_expired || booking}
                       className={`w-full p-4 rounded-lg border-2 text-left transition-all ${

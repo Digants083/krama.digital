@@ -1081,7 +1081,11 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
             first_login=first_login,
 
-            address=clinic.address # Provide address for the frontend to center the map
+            address=clinic.address, # Provide address for the frontend to center the map
+
+            latitude=clinic.latitude,
+
+            longitude=clinic.longitude
 
         )
 
@@ -1417,9 +1421,13 @@ async def get_clinic_data(
 
         "longitude": clinic.longitude,
 
+        "has_pinned_location": clinic.has_pinned_location,
+
         "image_urls": clinic.image_urls or [],
 
         "doctor_name": clinic.doctor_name,
+
+        "is_active": clinic.is_active,
 
         "available": clinic.available,
 
@@ -1453,17 +1461,12 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
 
     """
 
-    List all clinics for patient to browse.
-
-    Only shows clinics that are active for patient discovery.
+    List all approved clinics for patient browsing.
+    Frontend decides nearby/search grouping and booking availability.
 
     """
 
-    result = await db.execute(
-
-        select(Clinic).where(Clinic.is_active == True)
-
-    )
+    result = await db.execute(select(Clinic))
 
     clinics = result.scalars().all()
 
@@ -3595,6 +3598,16 @@ async def create_appointment(
 
             )
 
+        if not clinic.is_active or clinic.available is False:
+
+            raise HTTPException(
+
+                status_code=status.HTTP_400_BAD_REQUEST,
+
+                detail="Clinic is not accepting bookings right now."
+
+            )
+
         
 
         if clinic.end is not None:
@@ -4436,6 +4449,68 @@ async def get_today_appointments(
 
 
 
+    async def _latest_expired_slot_with_patients_index() -> Optional[int]:
+
+        active_slot_ids = set()
+
+        online_slot_result = await db.execute(
+
+            select(Appointment.slot_id).where(
+
+                Appointment.clinic_id == clinic_id,
+
+                Appointment.date == today,
+
+                Appointment.slot_id.isnot(None)
+
+            )
+
+        )
+
+        active_slot_ids.update(slot for slot in online_slot_result.scalars().all() if slot is not None)
+
+        walkin_slot_result = await db.execute(
+
+            select(QRAppointment.slot_id).where(
+
+                QRAppointment.clinic_id == clinic_id,
+
+                QRAppointment.date == today,
+
+                QRAppointment.slot_id.isnot(None)
+
+            )
+
+        )
+
+        active_slot_ids.update(slot for slot in walkin_slot_result.scalars().all() if slot is not None)
+
+        candidates: list[tuple[float, int]] = []
+
+        for idx, slot in enumerate(slots or []):
+
+            slot_id_for_index = idx + 1
+
+            if slot_id_for_index not in active_slot_ids or not slot.get("is_open"):
+
+                continue
+
+            _start, end = slot.get("time_range", [0, 0])
+
+            if current_time_decimal >= end:
+
+                candidates.append((end, idx))
+
+        if not candidates:
+
+            return None
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+
+        return candidates[0][1]
+
+
+
     today = datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
 
 
@@ -4473,6 +4548,17 @@ async def get_today_appointments(
         next_index = _next_open_slot_index(slots, slot_array, current_time_decimal)
 
         viewing_slot_id = (next_index + 1) if next_index is not None else None
+
+
+
+    # After the day's slots have ended, keep Control Queue useful by showing
+    # the latest expired slot that still has active patients.
+
+    if viewing_slot_id is None:
+
+        expired_index = await _latest_expired_slot_with_patients_index()
+
+        viewing_slot_id = (expired_index + 1) if expired_index is not None else None
 
 
 

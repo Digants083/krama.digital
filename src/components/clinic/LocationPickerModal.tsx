@@ -8,6 +8,12 @@ interface LocationPickerModalProps {
   onClose: () => void;
   onSave: (lat: string, lng: string, address: string) => Promise<void>;
   clinicAddress?: string;
+  initialLatitude?: string | number | null;
+  initialLongitude?: string | number | null;
+  defaultCenter?: { lat: number; lng: number };
+  defaultZoom?: number;
+  title?: string;
+  description?: string;
 }
 
 declare global {
@@ -24,6 +30,12 @@ export default function LocationPickerModal({
   onClose,
   onSave,
   clinicAddress = "",
+  initialLatitude,
+  initialLongitude,
+  defaultCenter = { lat: 20.5937, lng: 78.9629 },
+  defaultZoom = 5,
+  title = "Pin Your Clinic Location",
+  description = "Pan/zoom the map to your clinic area, then click to drop the pin on the exact location.",
 }: LocationPickerModalProps) {
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [savedAddress, setSavedAddress] = useState("");
@@ -39,7 +51,14 @@ export default function LocationPickerModal({
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedRef.current = false;
+      mapInstanceRef.current = null;
+      markerRef.current = null;
+      setSelectedLocation(null);
+      setSavedAddress("");
+      return;
+    }
     setSavedAddress("");
   }, [isOpen, clinicAddress]);
 
@@ -76,17 +95,40 @@ export default function LocationPickerModal({
     initializedRef.current = true;
 
     const initMap = async () => {
-      let center = { lat: 20.5937, lng: 78.9629 };
+      let center = defaultCenter;
+      const initialLat = Number(initialLatitude);
+      const initialLng = Number(initialLongitude);
+      const hasInitialLocation = Number.isFinite(initialLat) && Number.isFinite(initialLng);
+      if (hasInitialLocation) {
+        center = { lat: initialLat, lng: initialLng };
+        setSelectedLocation(center);
+        setSavedAddress(`${initialLat.toFixed(6)}, ${initialLng.toFixed(6)}`);
+      }
 
       mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
         center,
-        zoom: 5,
+        zoom: hasInitialLocation ? 16 : defaultZoom,
         mapId: MAP_ID,
         disableDefaultUI: false,
         zoomControl: true,
         streetViewControl: false,
         mapTypeControl: false,
       });
+
+      if (hasInitialLocation) {
+        markerRef.current = new window.google.maps.Marker({
+          position: center,
+          map: mapInstanceRef.current,
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: "#00555A",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 3,
+          },
+        });
+      }
 
       const clickListener = mapInstanceRef.current.addListener("click", (e: google.maps.MapMouseEvent) => {
         if (e.latLng) {
@@ -122,7 +164,7 @@ export default function LocationPickerModal({
     return () => {
       initializedRef.current = false;
     };
-  }, [isOpen, mapLoaded, clinicAddress]);
+  }, [isOpen, mapLoaded, clinicAddress, initialLatitude, initialLongitude, defaultCenter, defaultZoom]);
 
   const handleSave = async () => {
     if (!selectedLocation) return;
@@ -169,14 +211,14 @@ export default function LocationPickerModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-foreground">Pin Your Clinic Location</h2>
+          <h2 className="text-xl font-bold text-foreground">{title}</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
             ×
           </Button>
         </div>
 
         <p className="mb-4 text-sm text-muted-foreground">
-          Pan/zoom the map to your clinic area, then click to drop the pin on the exact location.
+          {description}
         </p>
 
         {!!clinicAddress && (

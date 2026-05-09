@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
+import { formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
 
 // ─── Types ────────────────────────────────────────────────────────────────────────────────
 interface TimeSlot {
   slot_name: string;
   time_range: number[];
+  slot_id?: number;
   is_open: boolean;
   is_expired: boolean;
   display_status: string;
@@ -45,18 +47,8 @@ const JoinQueue = () => {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
 
-  // Convert 24-hour to 12-hour format
-  const formatHour = (hour: number) => {
-    // Handle overnight times (e.g., 25 = 1 AM next day)
-    const h = Math.floor(hour);
-    const normalizedHour = h > 24 ? h - 24 : h;
-    const ampm = normalizedHour >= 12 ? 'PM' : 'AM';
-    const h12 = normalizedHour % 12 || 12;
-    return `${h12}:00 ${ampm}`;
-  };
-
   const formatTimeRange = (start: number, end: number) => {
-    return `${formatHour(start)} - ${formatHour(end)}`;
+    return formatSlotTimeRange([start, end]);
   };
 
   // Check if a slot has expired based on current time (15 min before slot ends)
@@ -116,10 +108,15 @@ const JoinQueue = () => {
           const isExpired = isSlotExpired(s.time_range);
           return {
             ...s,
+            slot_id: idx + 1,
             is_open: isOpen,
             is_expired: isExpired,
             display_status: isExpired ? "Expired" : (isOpen ? "Available" : "Not Available")
           };
+        }).sort((a: TimeSlot, b: TimeSlot) => {
+          const aStart = a.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+          const bStart = b.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+          return aStart - bStart;
         });
         // Show ALL slots - open and closed (closed slots will be disabled)
         setTimeSlots(slots);
@@ -390,7 +387,7 @@ const JoinQueue = () => {
             ) : timeSlots.length > 0 ? (
               <div className="space-y-2">
                 {timeSlots.map((slot, idx) => {
-                  const slotNum = idx + 1;
+                  const slotNum = slot.slot_id ?? idx + 1;
                   const isDisabled = !slot.is_open || slot.is_expired;
                   const isSelected = selectedSlotId === slotNum;
 

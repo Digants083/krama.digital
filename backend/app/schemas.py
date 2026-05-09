@@ -47,6 +47,10 @@ class AuthResponse(BaseModel):
     user_type: Optional[str] = None
     clinic_id: Optional[str] = None
     patient_data: Optional[dict] = None
+    first_login: Optional[bool] = None
+    address: Optional[str] = None
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
 
 class ErrorResponse(BaseModel):
     error: str

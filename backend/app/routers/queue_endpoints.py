@@ -48,6 +48,55 @@ def _load_slots(raw_slots):
     return list(slots or [])
 
 
+def _load_slot_status(raw_slot_status):
+    slot_status = raw_slot_status
+    if isinstance(slot_status, str):
+        slot_status = json.loads(slot_status) if slot_status else []
+    return list(slot_status or [])
+
+
+def _is_slot_available(slot: dict, slot_status: list, index: int) -> bool:
+    if not slot.get("is_open"):
+        return False
+    if index < len(slot_status) and slot_status[index] == "close":
+        return False
+    return True
+
+
+async def _sync_slot_live_status(clinic_id: str, db: AsyncSession, is_active: bool):
+    result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        return
+
+    slots = _load_slots(record.slots)
+    slot_status = _load_slot_status(record.slot)
+    while len(slot_status) < len(slots):
+        slot_status.append("close")
+
+    now = _clinic_now()
+    current_time_decimal = now.hour + now.minute / 60.0
+
+    for index, slot in enumerate(slots):
+        if not isinstance(slot, dict):
+            continue
+
+        time_range = slot.get("time_range", [0, 0])
+        if len(time_range) < 2:
+            continue
+
+        # Start opens slots that are still bookable today. Stop closes all slots.
+        should_open = is_active and current_time_decimal < (time_range[1] - (15 / 60.0))
+        slot["is_open"] = should_open
+        slot_status[index] = "open" if should_open else "close"
+
+    record.slots = slots
+    record.slot = slot_status
+    record.last_slot_change_date = datetime.now(timezone.utc)
+
+
 
 
 def _can_toggle_slot(last_toggle_date: Optional[datetime], slot_toggle_counts: list, slot_index: int):
@@ -124,7 +173,8 @@ async def get_clinic_current_slot(clinic_id: str, db: AsyncSession):
 
 async def get_first_open_slot_start(clinic_id: str, db: AsyncSession):
     """
-    Returns the start hour of the first open slot of the day.
+    Returns the earliest configured slot start of the day.
+    Start is intentionally based on configured time, even if that slot is closed.
     """
     result = await db.execute(
         select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
@@ -137,20 +187,20 @@ async def get_first_open_slot_start(clinic_id: str, db: AsyncSession):
     if not slots:
         return None
 
-    first_slot = slots[0] if isinstance(slots, list) else None
-    if not isinstance(first_slot, dict):
-        return None
+    starts = []
+    for slot in slots:
+        if not isinstance(slot, dict):
+            continue
+        time_range = slot.get("time_range")
+        if isinstance(time_range, list) and len(time_range) >= 2 and isinstance(time_range[0], (int, float)):
+            starts.append(time_range[0])
 
-    time_range = first_slot.get("time_range")
-    if not isinstance(time_range, list) or len(time_range) < 2:
-        return None
-
-    return time_range[0]
+    return min(starts) if starts else None
 
 async def get_last_open_slot_end(clinic_id: str, db: AsyncSession):
     """
-    Returns the end hour of the last open slot of the day.
-    Only considers slots where is_open is True.
+    Returns the end hour of the last available slot of the day.
+    A slot is available when it is configured open and not toggled closed.
     """
     result = await db.execute(
         select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
@@ -160,13 +210,37 @@ async def get_last_open_slot_end(clinic_id: str, db: AsyncSession):
         return None
 
     slots = _load_slots(record.slots)
+    slot_status = _load_slot_status(record.slot)
     last_end = None
-    for slot in slots:
-        if slot.get("is_open"):
+    for idx, slot in enumerate(slots):
+        if _is_slot_available(slot, slot_status, idx):
             end_time = slot.get("time_range", [0, 0])[1]
             if last_end is None or end_time > last_end:
                 last_end = end_time
     return last_end
+
+async def get_last_configured_slot_end(clinic_id: str, db: AsyncSession):
+    """
+    Returns the latest configured slot end, regardless of current open/close state.
+    Used to enforce the live window before Start opens today's slots.
+    """
+    result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        return None
+
+    slots = _load_slots(record.slots)
+    ends = []
+    for slot in slots:
+        if not isinstance(slot, dict):
+            continue
+        time_range = slot.get("time_range")
+        if isinstance(time_range, list) and len(time_range) >= 2 and isinstance(time_range[1], (int, float)):
+            ends.append(time_range[1])
+
+    return max(ends) if ends else None
 
 async def all_slots_expired(clinic_id: str, db: AsyncSession) -> bool:
     """
@@ -180,11 +254,12 @@ async def all_slots_expired(clinic_id: str, db: AsyncSession) -> bool:
         return True  # No slots configured, consider as expired
 
     slots = _load_slots(record.slots)
+    slot_status = _load_slot_status(record.slot)
 
     now = _clinic_now()
     current_time_decimal = now.hour + now.minute / 60.0
-    for slot in slots:
-        if slot.get("is_open"):
+    for idx, slot in enumerate(slots):
+        if _is_slot_available(slot, slot_status, idx):
             end_time = slot.get("time_range", [0, 0])[1]
             if current_time_decimal < end_time:
                 return False
@@ -339,19 +414,6 @@ async def set_clinic_active(
 
     if is_active:
         today = _clinic_today_str()
-        if clinic.manual_stop_date == today:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Clinic was manually stopped for today. You can start again tomorrow during the allowed start window."
-            )
-
-        # Check if all slots have expired
-        if await all_slots_expired(clinic_id, db):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="All time slots have expired for today. Cannot activate clinic."
-            )
-
         # Check pre-activation window
         first_slot_start = await get_first_open_slot_start(clinic_id, db)
         if first_slot_start is None:
@@ -372,8 +434,8 @@ async def set_clinic_active(
                 detail=f"Clinic can only be activated {wait_minutes} minutes from now (Slot starts at {int(first_slot_start)}:00)."
             )
 
-        # Manual Online Restriction: Cannot go online if all slots have passed
-        last_slot_end = await get_last_open_slot_end(clinic_id, db)
+        # Manual Online Restriction: Cannot go online if today's live window has ended.
+        last_slot_end = await get_last_configured_slot_end(clinic_id, db)
         if last_slot_end is not None and current_time_decimal >= (last_slot_end - (15 / 60.0)):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -381,8 +443,9 @@ async def set_clinic_active(
             )
 
     clinic.is_active = is_active
-    if not is_active and manual_stop:
-        clinic.manual_stop_date = _clinic_today_str()
+    if is_active:
+        clinic.manual_stop_date = None
+    await _sync_slot_live_status(clinic_id, db, is_active)
     
     # Clean up yesterday's appointments - mark as not served and remove from queue
     if is_active:
@@ -479,18 +542,23 @@ async def get_clinic_active_status(
     if clinic.is_active:
         # Check 15 minutes before last open slot ends
         last_slot_end = await get_last_open_slot_end(clinic_id, db)
-        if last_slot_end is not None:
+        if last_slot_end is None:
+            clinic.is_active = False
+            await _sync_slot_live_status(clinic_id, db, False)
+            await db.commit()
+        else:
             now = _clinic_now()
             current_time_decimal = now.hour + now.minute / 60.0
             auto_offline_time = last_slot_end - (15 / 60.0)
             if current_time_decimal >= auto_offline_time:
                 clinic.is_active = False
+                await _sync_slot_live_status(clinic_id, db, False)
                 await db.commit()
 
     today = _clinic_today_str()
     return {
         "is_active": clinic.is_active,
-        "manual_stop_locked": clinic.manual_stop_date == today,
+        "manual_stop_locked": False,
         "manual_stop_date": clinic.manual_stop_date,
     }
 

@@ -3,12 +3,17 @@ import { Button } from "@/components/ui/button";
 import type { Clinic } from "@/data/mockData";
 import { useNavigate } from "react-router-dom";
 
+type ClinicCardClinic = Clinic & {
+  isActive?: boolean;
+};
+
 interface ClinicCardProps {
-  clinic: Clinic;
+  clinic: ClinicCardClinic;
 }
 
 const ClinicCard = ({ clinic }: ClinicCardProps) => {
   const navigate = useNavigate();
+  const isActive = clinic.isActive !== false;
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
@@ -45,17 +50,26 @@ const ClinicCard = ({ clinic }: ClinicCardProps) => {
           <span className="mt-1 text-xs font-medium text-accent">
             {clinic.distance}
           </span>
+          <span
+            className={`mt-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              isActive
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            {isActive ? "Available now" : "Not available now"}
+          </span>
         </div>
       </div>
       <div className="mt-4 flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {clinic.doctors.length} doctor{clinic.doctors.length > 1 ? "s" : ""} available
+          {clinic.doctors.length} doctor{clinic.doctors.length > 1 ? "s" : ""} listed
         </p>
         <Button
           size="sm"
           onClick={() => navigate(`/clinic-details/${clinic.id}`)}
         >
-          Book Appointment
+          {isActive ? "Book Appointment" : "View Details"}
         </Button>
       </div>
     </div>

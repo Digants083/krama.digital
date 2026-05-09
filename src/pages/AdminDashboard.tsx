@@ -30,6 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 
 interface ClinicData {
   id: number;
@@ -131,6 +132,7 @@ const AdminDashboard = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("pending");
   const [searchTerm, setSearchTerm] = useState("");
+  const [locationReg, setLocationReg] = useState<ClinicData | null>(null);
 
   const API_BASE = "/api/admin";
 
@@ -197,6 +199,12 @@ const AdminDashboard = () => {
   }, [activeTab]);
 
   const handleApprove = async (reg: ClinicData) => {
+    if (!reg.latitude || !reg.longitude) {
+      toast.error("Pin the clinic location before approval");
+      setLocationReg(reg);
+      return;
+    }
+
     setActionLoading(true);
     try {
       const response = await fetch(
@@ -225,6 +233,47 @@ const AdminDashboard = () => {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const buildClinicAddress = (reg?: ClinicData | null) => {
+    if (!reg) return "";
+    return [
+      reg.street_address,
+      reg.road,
+      reg.layout,
+      reg.section,
+      reg.city,
+      reg.pincode,
+    ].filter(Boolean).join(", ") || reg.address || "";
+  };
+
+  const updateRegistrationLocationState = (regId: number, latitude: string, longitude: string) => {
+    const updater = (items: ClinicData[]) =>
+      items.map((item) => item.id === regId ? { ...item, latitude, longitude } : item);
+
+    setRegistrations(updater);
+    setApprovedClinics(updater);
+    setRejectedClinics(updater);
+    setSelectedReg((current) => current?.id === regId ? { ...current, latitude, longitude } : current);
+    setLocationReg((current) => current?.id === regId ? { ...current, latitude, longitude } : current);
+  };
+
+  const handleSaveAdminLocation = async (lat: string, lng: string) => {
+    if (!locationReg) return;
+
+    const response = await fetch(`${API_BASE}/pending-registrations/${locationReg.id}/location`, {
+      method: "PUT",
+      headers: getAdminHeaders(),
+      body: JSON.stringify({ latitude: lat, longitude: lng }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Failed to save location");
+    }
+
+    updateRegistrationLocationState(locationReg.id, lat, lng);
+    toast.success("Clinic location pinned");
   };
 
   const handleReject = async (reg: any) => {
@@ -588,6 +637,12 @@ const AdminDashboard = () => {
                                 <MapPin className="w-4 h-4" />
                                 {reg.address}
                               </div>
+                              <div className="flex items-center gap-2 md:col-span-2">
+                                <MapPin className="w-4 h-4" />
+                                {reg.latitude && reg.longitude
+                                  ? `Pinned: ${Number(reg.latitude).toFixed(6)}, ${Number(reg.longitude).toFixed(6)}`
+                                  : "Location not pinned by admin"}
+                              </div>
                               {(reg.doctor_name || reg.specialization) && (
                                 <div className="flex items-center gap-2 md:col-span-2">
                                   <User className="w-4 h-4" />
@@ -612,10 +667,19 @@ const AdminDashboard = () => {
                             {reg.status === "pending" && (
                               <>
                                 <Button
+                                  variant="outline"
+                                  onClick={() => setLocationReg(reg)}
+                                  disabled={actionLoading}
+                                >
+                                  <MapPin className="w-4 h-4 mr-1" />
+                                  {reg.latitude && reg.longitude ? "Edit Pin" : "Pin Location"}
+                                </Button>
+                                <Button
                                   variant="default"
                                   className="bg-green-600 hover:bg-green-700"
                                   onClick={() => handleApprove(reg)}
-                                  disabled={actionLoading}
+                                  disabled={actionLoading || !reg.latitude || !reg.longitude}
+                                  title={!reg.latitude || !reg.longitude ? "Pin the clinic location before approval" : "Approve clinic"}
                                 >
                                   {actionLoading ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -681,6 +745,27 @@ const AdminDashboard = () => {
                     <div className="md:col-span-2">
                       <label className="text-sm font-medium text-muted-foreground">Full Address</label>
                       <p className="text-sm">{selectedReg.address}</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-sm font-medium text-muted-foreground">Admin Location Pin</label>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <p className="text-sm">
+                          {selectedReg.latitude && selectedReg.longitude
+                            ? `${Number(selectedReg.latitude).toFixed(6)}, ${Number(selectedReg.longitude).toFixed(6)}`
+                            : "Not pinned yet"}
+                        </p>
+                        {selectedReg.status === "pending" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setLocationReg(selectedReg)}
+                          >
+                            <MapPin className="mr-1 h-4 w-4" />
+                            {selectedReg.latitude && selectedReg.longitude ? "Edit Pin" : "Pin Location"}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <label className="text-sm font-medium text-muted-foreground">City</label>
@@ -755,7 +840,8 @@ const AdminDashboard = () => {
                       <Button
                         className="bg-green-600 hover:bg-green-700"
                         onClick={() => handleApprove(selectedReg)}
-                        disabled={actionLoading}
+                        disabled={actionLoading || !selectedReg.latitude || !selectedReg.longitude}
+                        title={!selectedReg.latitude || !selectedReg.longitude ? "Pin the clinic location before approval" : "Approve clinic"}
                       >
                         {actionLoading ? (
                           <Loader2 className="w-4 h-4 animate-spin mr-1" />
@@ -771,6 +857,19 @@ const AdminDashboard = () => {
             )}
           </DialogContent>
         </Dialog>
+
+        <LocationPickerModal
+          isOpen={!!locationReg}
+          onClose={() => setLocationReg(null)}
+          onSave={handleSaveAdminLocation}
+          clinicAddress={buildClinicAddress(locationReg)}
+          initialLatitude={locationReg?.latitude}
+          initialLongitude={locationReg?.longitude}
+          defaultCenter={{ lat: 22.9734, lng: 78.6569 }}
+          defaultZoom={5}
+          title="Pin Clinic Location"
+          description="Drop the marker on the clinic's exact location. The clinic will confirm or correct this pin on first login."
+        />
       </div>
     );
   }

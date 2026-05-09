@@ -3,26 +3,13 @@ import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight } from "lucide-react";
+import { formatTimeRange } from "@/lib/timeFormat";
 
 interface TimeSlot {
   slot_name: string;
   time_range: number[];
   is_open: boolean;
 }
-
-// Convert 24-hour to 12-hour format for display
-const formatTimeRange = (timeRange: number[]) => {
-  const convertHour = (h: number) => {
-    if (h === 0) return { hour: 12, ampm: "AM" };
-    if (h === 12) return { hour: 12, ampm: "PM" };
-    if (h > 12) return { hour: h - 12, ampm: "PM" };
-    return { hour: h, ampm: "AM" };
-  };
-  const start = convertHour(timeRange[0]);
-  const end = convertHour(timeRange[1]);
-  return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
-};
-
 
 const SourceBadge = ({ source }: { source: string }) => {
   const map: Record<string, { label: string; className: string }> = {
@@ -117,6 +104,17 @@ const ClinicControlQueue = () => {
   const [slotStatus, setSlotStatus] = useState<string[]>([]); // "open" or "close" for each slot
   const [loadingSlots, setLoadingSlots] = useState(false);
 
+  const isSlotAvailable = (slot: TimeSlot, index: number, statuses = slotStatus) =>
+    slot.is_open && statuses[index] !== "close";
+
+  const sortedTimeSlots = timeSlots
+    .map((slot, originalIndex) => ({ slot, originalIndex }))
+    .sort((a, b) => {
+      const aStart = a.slot.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+      const bStart = b.slot.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+      return aStart - bStart;
+    });
+
   useEffect(() => {
     if (clinicId) {
       fetchTimeSlots();
@@ -137,7 +135,7 @@ const ClinicControlQueue = () => {
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [clinicId]);
+  }, [clinicId, isClinicActive]);
 
   const fetchTimeSlots = async () => {
     setLoadingSlots(true);
@@ -149,59 +147,25 @@ const ClinicControlQueue = () => {
         setTimeSlots(slots);
         setSlotStatus(data.slot || []); // Set the slot status array (open/close)
 
-        // Auto-logout: check if current time is past all slot end times
+        // Auto-logout 15 minutes before the last open slot ends.
         if (isClinicActive && slots.length > 0) {
           const now = new Date();
           const currentMinutes = now.getHours() * 60 + now.getMinutes();
+          let latestEndMinutes = 0;
 
-          // Check if there are future slots available today
-          const hasFutureSlots = () => {
-            for (const slot of slots) {
-              if (!slot.is_open) continue;
-
+          for (let index = 0; index < slots.length; index += 1) {
+            const slot = slots[index];
+            if (isSlotAvailable(slot, index, data.slot || [])) {
               const endMinutes = slot.time_range[1] * 60;
-              if (currentMinutes < endMinutes) {
-                return true; // There are future slots
+              if (endMinutes > latestEndMinutes) {
+                latestEndMinutes = endMinutes;
               }
             }
-            return false; // No future slots
-          };
+          }
 
-          // Only auto-deactivate if no future slots available
-          if (!hasFutureSlots()) {
-            // Check if all slots have expired
-            let allExpired = true;
-            for (const slot of slots) {
-              if (slot.is_open) {
-                const endMinutes = slot.time_range[1] * 60;
-                if (currentMinutes < endMinutes) {
-                  allExpired = false;
-                  break;
-                }
-              }
-            }
-
-            // If all slots expired, auto deactivate
-            if (allExpired) {
-              handleDeactivate(false);
-            } else {
-              // Also check 15 minutes before last OPEN slot ends
-              let latestEndMinutes = 0;
-              for (const slot of slots) {
-                if (slot.is_open) {
-                  const endMinutes = slot.time_range[1] * 60;
-                  if (endMinutes > latestEndMinutes) {
-                    latestEndMinutes = endMinutes;
-                  }
-                }
-              }
-
-              // If current time is past (end - 15min), auto deactivate
-              const cutoffMinutes = latestEndMinutes - 15;
-              if (currentMinutes >= cutoffMinutes && latestEndMinutes > 0) {
-                handleDeactivate(false);
-              }
-            }
+          const cutoffMinutes = latestEndMinutes - 15;
+          if (latestEndMinutes > 0 && currentMinutes >= cutoffMinutes) {
+            handleDeactivate(false);
           }
         }
       }
@@ -213,7 +177,9 @@ const ClinicControlQueue = () => {
   };
 
   useEffect(() => {
-    if (clinicId) {
+    if (!clinicId) return;
+
+    const fetchActiveStatus = () => {
       fetch(`/api/auth/clinic/active-status?clinic_id=${clinicId}`)
         .then(res => res.json())
         .then(data => {
@@ -221,7 +187,11 @@ const ClinicControlQueue = () => {
           setManualStopLocked(data.manual_stop_locked || false);
         })
         .catch(console.error);
-    }
+    };
+
+    fetchActiveStatus();
+    const interval = setInterval(fetchActiveStatus, 60000);
+    return () => clearInterval(interval);
   }, [clinicId]);
 
   const handleActivate = async () => {
@@ -286,8 +256,9 @@ const ClinicControlQueue = () => {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     
-    for (const slot of timeSlots) {
-      if (slot.is_open) {
+    for (let index = 0; index < timeSlots.length; index += 1) {
+      const slot = timeSlots[index];
+      if (isSlotAvailable(slot, index)) {
         const endMinutes = slot.time_range[1] * 60;
         if (currentMinutes < endMinutes) {
           return false;
@@ -299,17 +270,21 @@ const ClinicControlQueue = () => {
 
   const canActivateNow = () => {
     if (timeSlots.length === 0) return false;
-    const slot1Start = timeSlots[0]?.time_range?.[0];
-    if (typeof slot1Start !== "number") return false;
+    const earliestSlotStart = Math.min(
+      ...timeSlots
+        .map((slot) => slot.time_range?.[0])
+        .filter((start): start is number => typeof start === "number")
+    );
+    if (!Number.isFinite(earliestSlotStart)) return false;
 
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const slot1StartMinutes = slot1Start * 60;
-    const activationThresholdMinutes = slot1StartMinutes - 45;
+    const activationThresholdMinutes = earliestSlotStart * 60 - 45;
 
     let latestEndMinutes = 0;
-    for (const slot of timeSlots) {
-      if (slot.is_open) {
+    for (let index = 0; index < timeSlots.length; index += 1) {
+      const slot = timeSlots[index];
+      if (isSlotAvailable(slot, index)) {
         const endMinutes = slot.time_range[1] * 60;
         if (endMinutes > latestEndMinutes) {
           latestEndMinutes = endMinutes;
@@ -324,6 +299,40 @@ const ClinicControlQueue = () => {
     return currentMinutes >= activationThresholdMinutes &&
       currentMinutes < cutoffMinutes;
   };
+
+  const getStartDisabledReason = () => {
+    if (activating) return "Updating clinic status...";
+    if (isClinicActive) return "Clinic is already live.";
+    if (timeSlots.length === 0) return "No time slots configured.";
+
+    const starts = timeSlots
+      .map((slot) => slot.time_range?.[0])
+      .filter((start): start is number => typeof start === "number");
+    if (starts.length === 0) return "No valid slot start time configured.";
+
+    const earliestSlotStart = Math.min(...starts);
+    const latestAvailableEnd = Math.max(
+      ...timeSlots
+        .map((slot, index) => isSlotAvailable(slot, index) ? slot.time_range?.[1] : undefined)
+        .filter((end): end is number => typeof end === "number")
+    );
+    if (!Number.isFinite(latestAvailableEnd)) return "No available slots for today.";
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const activationThresholdMinutes = earliestSlotStart * 60 - 45;
+    const cutoffMinutes = latestAvailableEnd * 60 - 15;
+
+    if (currentMinutes < activationThresholdMinutes) {
+      return "Start opens 45 minutes before the earliest slot.";
+    }
+    if (currentMinutes >= cutoffMinutes) {
+      return "Live window ended 15 minutes before the last available slot.";
+    }
+    return "";
+  };
+
+  const startDisabledReason = getStartDisabledReason();
 
   // Check if current time is past the viewing slot's start time
   const canServeInCurrentSlot = () => {
@@ -355,6 +364,16 @@ const ClinicControlQueue = () => {
     return false;
   };
 
+  const getCurrentTimeDecimal = () => {
+    const now = new Date();
+    return now.getHours() + now.getMinutes() / 60.0;
+  };
+
+  const isSlotExpired = (slot: TimeSlot): boolean => {
+    const [, endHour] = slot.time_range;
+    return getCurrentTimeDecimal() >= endHour;
+  };
+
   // Check if a slot is currently available based on time and status
   const isSlotCurrentlyAvailable = (slot: TimeSlot, index: number): boolean => {
     // Check if slot is marked as "close" in the slotStatus array
@@ -362,16 +381,11 @@ const ClinicControlQueue = () => {
     
     if (!slot.is_open) return false;
 
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentTimeDecimal = currentHour + currentMinute / 60.0;
-
     const [startHour, endHour] = slot.time_range;
 
     // Slot is available if it's open and end time hasn't passed yet
     // (can be in the past, current, or future - as long as not expired)
-    return currentTimeDecimal < endHour;
+    return getCurrentTimeDecimal() < endHour;
   };
 
   const isServingAllowedForViewingSlot =
@@ -380,6 +394,8 @@ const ClinicControlQueue = () => {
     (selectedSlotId ?? viewingSlotId) === activeSlotId;
 
   const currentSlotLabelId = selectedSlotId ?? viewingSlotId;
+  const selectedSlot = typeof currentSlotLabelId === "number" ? timeSlots[currentSlotLabelId - 1] : undefined;
+  const isSelectedSlotExpired = selectedSlot ? isSlotExpired(selectedSlot) : false;
 
   const handleSlotSelect = (slotId: number) => {
     setSelectedSlotId(slotId);
@@ -513,8 +529,13 @@ const ClinicControlQueue = () => {
             <div className="flex gap-3">
               <Button
                 onClick={handleActivate}
-                disabled={activating || isClinicActive || manualStopLocked || allSlotsExpired() || !canActivateNow()}
-                className="bg-green-500 hover:bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all"
+                disabled={Boolean(startDisabledReason)}
+                title={startDisabledReason || "Start clinic"}
+                className={`px-6 py-2.5 rounded-lg font-medium shadow-md transition-all ${
+                  startDisabledReason
+                    ? "bg-slate-200 text-slate-500 hover:bg-slate-200 hover:translate-y-0 shadow-none"
+                    : "bg-green-500 hover:bg-green-600 text-white hover:shadow-lg"
+                }`}
               >
                 <Play className="h-4 w-4 mr-2" />
                 Start
@@ -555,23 +576,26 @@ const ClinicControlQueue = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {timeSlots.map((slot, index) => {
-                    const isCurrentlyAvailable = isSlotCurrentlyAvailable(slot, index);
-                    const isSlotClosed = slotStatus[index] === "close";
-                    const isExpired = !isCurrentlyAvailable && !isSlotClosed && slot.is_open;
+                  {sortedTimeSlots.map(({ slot, originalIndex }) => {
+                    const slotId = originalIndex + 1;
+                    const isCurrentlyAvailable = isSlotCurrentlyAvailable(slot, originalIndex);
+                    const isSlotClosed = slotStatus[originalIndex] === "close";
+                    const isExpired = isSlotExpired(slot);
                     return (
                       <button
                         type="button"
-                        key={index}
-                        onClick={() => handleSlotSelect(index + 1)}
+                        key={slotId}
+                        onClick={() => handleSlotSelect(slotId)}
                         className={`border-2 rounded-xl p-4 transition-all ${
-                          currentSlotLabelId === index + 1
+                          currentSlotLabelId === slotId
                             ? "bg-gradient-to-r from-[#00555A]/10 to-white border-[#00555A] shadow-md"
                             : isCurrentlyAvailable
                               ? "bg-gradient-to-r from-green-50 to-white border-green-200"
+                              : isExpired
+                                ? "bg-gradient-to-r from-red-50 to-white border-red-200"
                               : "bg-slate-50 border-slate-200"
                         }`}
-                        disabled={isSlotClosed || !slot.is_open || isExpired}
+                        disabled={!slot.is_open && !isExpired}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -712,7 +736,11 @@ const ClinicControlQueue = () => {
               {typeof currentSlotLabelId === "number" && (
                 <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
                   Slot {currentSlotLabelId}
-                  {!isServingAllowedForViewingSlot && " (Upcoming)"}
+                  {isSelectedSlotExpired
+                    ? " (Expired)"
+                    : !isServingAllowedForViewingSlot
+                      ? " (Upcoming)"
+                      : ""}
                 </span>
               )}
               {walkinCount > 0 && (

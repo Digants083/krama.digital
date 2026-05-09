@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, select
@@ -17,6 +17,106 @@ import json
 # Setup logging for scheduled tasks
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+
+
+def _load_slots(raw_slots):
+    slots = raw_slots
+    if isinstance(slots, str):
+        slots = json.loads(slots)
+    return list(slots or [])
+
+
+def _load_slot_status(raw_slot_status):
+    slot_status = raw_slot_status
+    if isinstance(slot_status, str):
+        slot_status = json.loads(slot_status) if slot_status else []
+    return list(slot_status or [])
+
+
+def _is_slot_available(slot: dict, slot_status: list, index: int) -> bool:
+    if not slot.get("is_open"):
+        return False
+    if index < len(slot_status) and slot_status[index] == "close":
+        return False
+    return True
+
+
+def _last_available_slot_end(slots: list, slot_status: list):
+    last_end = None
+    for index, slot in enumerate(slots):
+        if not isinstance(slot, dict) or not _is_slot_available(slot, slot_status, index):
+            continue
+        time_range = slot.get("time_range", [0, 0])
+        if len(time_range) < 2:
+            continue
+        end_time = time_range[1]
+        if last_end is None or end_time > last_end:
+            last_end = end_time
+    return last_end
+
+
+def _close_slots(slots: list, slot_status: list):
+    while len(slot_status) < len(slots):
+        slot_status.append("close")
+
+    for index, slot in enumerate(slots):
+        if isinstance(slot, dict):
+            slot["is_open"] = False
+        slot_status[index] = "close"
+
+
+async def scheduled_auto_stop_clinics():
+    """
+    Background task that turns live clinics offline 15 minutes before
+    their last available slot ends, even when no dashboard tab is open.
+    """
+    await asyncio.sleep(10)
+
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                now = datetime.now(CLINIC_TIMEZONE)
+                current_time_decimal = now.hour + now.minute / 60.0
+
+                clinic_result = await db.execute(
+                    select(Clinic).where(Clinic.is_active == True)
+                )
+                active_clinics = clinic_result.scalars().all()
+
+                stopped_count = 0
+                for clinic in active_clinics:
+                    slot_result = await db.execute(
+                        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic.clinic_id)
+                    )
+                    slot_record = slot_result.scalar_one_or_none()
+                    if not slot_record:
+                        continue
+
+                    slots = _load_slots(slot_record.slots)
+                    slot_status = _load_slot_status(slot_record.slot)
+                    last_end = _last_available_slot_end(slots, slot_status)
+                    should_stop = last_end is None
+                    if last_end is not None:
+                        auto_offline_time = last_end - (15 / 60.0)
+                        should_stop = current_time_decimal >= auto_offline_time
+
+                    if should_stop:
+                        clinic.is_active = False
+                        _close_slots(slots, slot_status)
+                        slot_record.slots = slots
+                        slot_record.slot = slot_status
+                        slot_record.last_slot_change_date = datetime.now(timezone.utc)
+                        stopped_count += 1
+
+                if stopped_count:
+                    await db.commit()
+                    logger.info("Scheduled task: Auto-stopped %s clinic(s)", stopped_count)
+
+        except Exception as e:
+            logger.error(f"Error in scheduled auto-stop clinics task: {e}", exc_info=True)
+
+        await asyncio.sleep(60)
 
 
 async def scheduled_auto_finish_unserved():
@@ -563,9 +663,9 @@ async def lifespan(app: FastAPI):
     
     # Start background scheduled tasks
     pre_slot_task = asyncio.create_task(scheduled_pre_slot_notifications())
-    auto_finish_task = asyncio.create_task(scheduled_auto_finish_unserved())
     midnight_cleanup_task = asyncio.create_task(scheduled_midnight_cleanup())
-    logger.info("Started scheduled background tasks (pre-slot + auto-finish + midnight cleanup)")
+    auto_stop_task = asyncio.create_task(scheduled_auto_stop_clinics())
+    logger.info("Started scheduled background tasks (pre-slot + midnight cleanup + auto-stop)")
 
     # Run appointment maintenance on startup/restart
     try:
@@ -578,18 +678,18 @@ async def lifespan(app: FastAPI):
 
     # Cleanup on shutdown
     pre_slot_task.cancel()
-    auto_finish_task.cancel()
     midnight_cleanup_task.cancel()
+    auto_stop_task.cancel()
     try:
         await pre_slot_task
     except asyncio.CancelledError:
         pass
     try:
-        await auto_finish_task
+        await midnight_cleanup_task
     except asyncio.CancelledError:
         pass
     try:
-        await midnight_cleanup_task
+        await auto_stop_task
     except asyncio.CancelledError:
         pass
     logger.info("Scheduled tasks cancelled")

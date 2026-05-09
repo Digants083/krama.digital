@@ -28,6 +28,7 @@ type ClinicApiResponse = {
   doctors?: { name: string }[];
   specializations?: string[];
   is_active?: boolean;
+  available?: boolean;
   latitude?: string | null;
   longitude?: string | null;
 };
@@ -39,6 +40,7 @@ type ReviewApiResponse = {
 
 type ClinicWithDistance = Clinic & {
   distanceValue: number;
+  isActive: boolean;
 };
 
 const SEARCH_RADIUS_KM = 5;
@@ -198,19 +200,8 @@ const PatientFindClinics = () => {
 
         const data = await response.json();
 
-        const nearbyClinics = await Promise.all(
+        const clinicCards = await Promise.all(
           (data.clinics as ClinicApiResponse[]).map(async (clinic) => {
-            if (!clinic.is_active || !clinic.latitude || !clinic.longitude) {
-              return null;
-            }
-
-            const clinicLatitude = Number(clinic.latitude);
-            const clinicLongitude = Number(clinic.longitude);
-
-            if (Number.isNaN(clinicLatitude) || Number.isNaN(clinicLongitude)) {
-              return null;
-            }
-
             try {
               const reviewsResponse = await fetch(
                 `/api/auth/reviews/clinic?clinic_id=${clinic.clinic_id}`
@@ -220,16 +211,18 @@ const PatientFindClinics = () => {
                 ? await reviewsResponse.json()
                 : {};
 
-              const distanceValue = haversineDistanceKm(
-                userCoords.latitude,
-                userCoords.longitude,
-                clinicLatitude,
-                clinicLongitude
-              );
-
-              if (distanceValue > SEARCH_RADIUS_KM) {
-                return null;
-              }
+              const clinicLatitude = clinic.latitude ? Number(clinic.latitude) : NaN;
+              const clinicLongitude = clinic.longitude ? Number(clinic.longitude) : NaN;
+              const hasValidCoords =
+                Number.isFinite(clinicLatitude) && Number.isFinite(clinicLongitude);
+              const distanceValue = hasValidCoords
+                ? haversineDistanceKm(
+                    userCoords.latitude,
+                    userCoords.longitude,
+                    clinicLatitude,
+                    clinicLongitude
+                  )
+                : Number.POSITIVE_INFINITY;
 
               const fullAddress = [
                 clinic.street_address,
@@ -245,13 +238,16 @@ const PatientFindClinics = () => {
                 name: clinic.clinic_name,
                 address: fullAddress,
                 city: clinic.city || "",
-                distance: `${distanceValue.toFixed(1)} km`,
+                distance: Number.isFinite(distanceValue)
+                  ? `${distanceValue.toFixed(1)} km`
+                  : "Distance unavailable",
                 distanceValue,
                 rating: reviewData.average_rating || 0,
                 reviewCount: reviewData.total || 0,
                 phone: clinic.phone,
                 doctors: clinic.doctors?.length ? clinic.doctors : [{ name: "Available Doctor" }],
                 specializations: clinic.specializations?.length ? clinic.specializations : ["general"],
+                isActive: Boolean(clinic.is_active && clinic.available !== false),
               };
             } catch (error) {
               console.error("Error building clinic card:", clinic.clinic_id, error);
@@ -261,9 +257,17 @@ const PatientFindClinics = () => {
         );
 
         setClinics(
-          nearbyClinics
+          clinicCards
             .filter((clinic): clinic is ClinicWithDistance => clinic !== null)
-            .sort((a, b) => a.distanceValue - b.distanceValue)
+            .sort((a, b) => {
+              if (a.isActive !== b.isActive) {
+                return a.isActive ? -1 : 1;
+              }
+              if (a.distanceValue !== b.distanceValue) {
+                return a.distanceValue - b.distanceValue;
+              }
+              return a.name.localeCompare(b.name);
+            })
         );
       } catch (error) {
         setMessage({ text: "Error fetching clinics", type: "error" });
@@ -343,23 +347,44 @@ const PatientFindClinics = () => {
     );
   };
 
-  const filtered = clinics.filter((clinic) => {
-    const matchesSearch =
-      clinic.name.toLowerCase().includes(search.toLowerCase()) ||
-      clinic.address.toLowerCase().includes(search.toLowerCase()) ||
-      clinic.doctors.some((doctor) => doctor.name.toLowerCase().includes(search.toLowerCase())) ||
+  const searchText = search.trim().toLowerCase();
+  const isSearching = searchText.length > 0;
+
+  const matchesSearch = (clinic: ClinicWithDistance) => {
+    if (!isSearching) {
+      return true;
+    }
+
+    return (
+      clinic.name.toLowerCase().includes(searchText) ||
+      clinic.address.toLowerCase().includes(searchText) ||
+      clinic.city.toLowerCase().includes(searchText) ||
+      clinic.doctors.some((doctor) => doctor.name.toLowerCase().includes(searchText)) ||
       clinic.specializations.some((specialization) =>
-        specialization.toLowerCase().includes(search.toLowerCase())
-      );
+        specialization.toLowerCase().includes(searchText)
+      )
+    );
+  };
 
-    const matchesCategory =
-      selectedCategory === "all" ||
-      clinic.specializations.some(
-        (specialization) => specialization.toLowerCase() === selectedCategory.toLowerCase()
-      );
+  const matchesCategory = (clinic: ClinicWithDistance) =>
+    selectedCategory === "all" ||
+    clinic.specializations.some(
+      (specialization) => specialization.toLowerCase() === selectedCategory.toLowerCase()
+    );
 
-    return matchesSearch && matchesCategory;
+  const displayedClinics = clinics.filter((clinic) => {
+    if (isSearching) {
+      return matchesSearch(clinic);
+    }
+
+    return clinic.distanceValue <= SEARCH_RADIUS_KM && matchesCategory(clinic);
   });
+
+  const availableClinics = displayedClinics.filter((clinic) => clinic.isActive);
+  const unavailableClinics = displayedClinics.filter((clinic) => !clinic.isActive);
+  const emptyMessage = isSearching
+    ? "No clinics matched your search."
+    : `No clinics found within ${SEARCH_RADIUS_KM} km for the selected category.`;
 
   return (
     <div className="min-h-screen bg-background">
@@ -389,7 +414,7 @@ const PatientFindClinics = () => {
       <main className="mx-auto max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-bold text-foreground">Find Clinics Near You</h1>
         <p className="mt-1 text-muted-foreground">
-          Allow your location and we will show nearby clinics within {SEARCH_RADIUS_KM} km, sorted by distance.
+          Allow your location to see nearby clinics. Search can find matching clinics from anywhere.
         </p>
 
         {!locationGranted ? (
@@ -424,7 +449,9 @@ const PatientFindClinics = () => {
                   {medicalCategories[selectedCategory].name}
                 </h3>
                 <p className="mt-1 text-sm text-[#00555A]/80">
-                  {medicalCategories[selectedCategory].description}. Clinics are sorted from nearest to farthest within {SEARCH_RADIUS_KM} km.
+                  {isSearching
+                    ? "Showing matching clinics regardless of distance or current availability."
+                    : `${medicalCategories[selectedCategory].description}. Available clinics appear first, then clinics not available right now within ${SEARCH_RADIUS_KM} km.`}
                 </p>
               </div>
             </div>
@@ -438,11 +465,33 @@ const PatientFindClinics = () => {
                     <Skeleton className="h-4 w-32" />
                   </div>
                 ))
-              ) : filtered.length > 0 ? (
-                filtered.map((clinic) => <ClinicCard key={clinic.id} clinic={clinic} />)
+              ) : displayedClinics.length > 0 ? (
+                <>
+                  {availableClinics.length > 0 && (
+                    <div className="space-y-3">
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        {isSearching ? "Available Matches" : "Available Nearby"}
+                      </h2>
+                      {availableClinics.map((clinic) => (
+                        <ClinicCard key={clinic.id} clinic={clinic} />
+                      ))}
+                    </div>
+                  )}
+
+                  {unavailableClinics.length > 0 && (
+                    <div className="space-y-3">
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        {isSearching ? "Not Available Matches" : "Not Available Right Now"}
+                      </h2>
+                      {unavailableClinics.map((clinic) => (
+                        <ClinicCard key={clinic.id} clinic={clinic} />
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <p className="py-12 text-center text-muted-foreground">
-                  No clinics found within {SEARCH_RADIUS_KM} km for the selected category or search.
+                  {emptyMessage}
                 </p>
               )}
             </section>

@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 
 import { ArrowLeft, Clock, Save, Plus, Trash2, Users } from "lucide-react";
+import { formatTimeRange } from "@/lib/timeFormat";
 
 
 
@@ -62,6 +63,14 @@ const ClinicManageTime = () => {
 
   const clinicId = localStorage.getItem("clinic_id");
 
+  const sortedSlots = slots
+    .map((slot, originalIndex) => ({ slot, originalIndex }))
+    .sort((a, b) => {
+      const aStart = a.slot.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+      const bStart = b.slot.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+      return aStart - bStart;
+    });
+
 
 
   const fetchTimeSlots = async () => {
@@ -116,16 +125,6 @@ const ClinicManageTime = () => {
   // Convert stored time value to 24-hour format for backend
   const convertTo24Hour = (timeValue: number) => {
     return Math.floor(timeValue / 2);
-  };
-
-  // Convert 24-hour to 12-hour format for display (handles overnight times)
-  const convertTo12Hour = (hour24: number) => {
-    // Handle overnight times (e.g., 25 = 1 AM next day, 26 = 2 AM next day)
-    const normalizedHour = hour24 > 24 ? hour24 - 24 : hour24;
-    return {
-      hour: normalizedHour === 0 ? 12 : normalizedHour > 12 ? normalizedHour - 12 : normalizedHour,
-      ampm: normalizedHour >= 12 ? "PM" : "AM"
-    };
   };
 
   const addTimeSlot = async () => {
@@ -284,22 +283,6 @@ const ClinicManageTime = () => {
       console.error("Error updating slot status:", error);
 
     }
-
-  };
-
-
-
-  const formatTime = (time: string) => {
-
-    const [hours, minutes] = time.split(":");
-
-    const hour = parseInt(hours);
-
-    const ampm = hour >= 12 ? "PM" : "AM";
-
-    const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-
-    return `${displayHour}:${minutes} ${ampm}`;
 
   };
 
@@ -665,11 +648,11 @@ const ClinicManageTime = () => {
 
             <div className="space-y-4">
 
-              {slots.map((slot, index) => (
+              {sortedSlots.map(({ slot, originalIndex }) => (
 
                 <div
 
-                  key={index}
+                  key={originalIndex}
 
                   className={`border-2 rounded-xl p-5 transition-all hover:shadow-md ${slot.is_open ? 'bg-gradient-to-r from-green-50 to-white border-green-200' : 'bg-gradient-to-r from-red-50 to-white border-red-200'}`}
 
@@ -691,15 +674,7 @@ const ClinicManageTime = () => {
 
                         <p className="text-sm text-slate-500 font-medium">
 
-                          {(() => {
-
-                            const start = convertTo12Hour(slot.time_range[0]);
-
-                            const end = convertTo12Hour(slot.time_range[1]);
-
-                            return `${start.hour}:00 ${start.ampm} - ${end.hour}:00 ${end.ampm}`;
-
-                          })()}
+                          {formatTimeRange(slot.time_range)}
 
                         </p>
 
@@ -715,7 +690,7 @@ const ClinicManageTime = () => {
 
                         title={slot.is_open ? 'Close slot' : 'Open slot'}
 
-                        onClick={() => toggleSlotStatus(index, !slot.is_open)}
+                        onClick={() => toggleSlotStatus(originalIndex, !slot.is_open)}
 
                         className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all shadow-sm hover:shadow-md ${
 
@@ -737,7 +712,7 @@ const ClinicManageTime = () => {
 
                         title="Delete slot"
 
-                        onClick={() => deleteTimeSlot(index)}
+                        onClick={() => deleteTimeSlot(originalIndex)}
 
                         className="p-2.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
 
