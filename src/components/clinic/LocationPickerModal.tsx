@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, MapPin, Check } from "lucide-react";
+import { Loader2, MapPin, Check, Search } from "lucide-react";
 
 interface LocationPickerModalProps {
   isOpen: boolean;
@@ -42,8 +42,10 @@ export default function LocationPickerModal({
   const [saving, setSaving] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   
   const mapRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markerRef = useRef<google.maps.Marker | null>(null);
   const initializedRef = useRef(false);
@@ -57,9 +59,11 @@ export default function LocationPickerModal({
       markerRef.current = null;
       setSelectedLocation(null);
       setSavedAddress("");
+      setSearchQuery("");
       return;
     }
     setSavedAddress("");
+    setSearchQuery("");
   }, [isOpen, clinicAddress]);
 
   useEffect(() => {
@@ -112,8 +116,52 @@ export default function LocationPickerModal({
         disableDefaultUI: false,
         zoomControl: true,
         streetViewControl: false,
-        mapTypeControl: false,
+        mapTypeControl: true,
+        mapTypeControlOptions: {
+          style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+          mapTypeIds: [
+            window.google.maps.MapTypeId.ROADMAP,
+            window.google.maps.MapTypeId.SATELLITE,
+          ],
+        },
       });
+
+      const setMarkerLocation = (
+        location: google.maps.LatLng | google.maps.LatLngLiteral,
+        addressLabel?: string
+      ) => {
+        const lat =
+          typeof (location as google.maps.LatLng).lat === "function"
+            ? (location as google.maps.LatLng).lat()
+            : (location as google.maps.LatLngLiteral).lat;
+        const lng =
+          typeof (location as google.maps.LatLng).lng === "function"
+            ? (location as google.maps.LatLng).lng()
+            : (location as google.maps.LatLngLiteral).lng;
+        const markerPosition = { lat, lng };
+
+        setSelectedLocation(markerPosition);
+
+        if (markerRef.current) {
+          markerRef.current.setPosition(markerPosition);
+        } else {
+          markerRef.current = new window.google.maps.Marker({
+            position: markerPosition,
+            map: mapInstanceRef.current,
+            icon: {
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 10,
+              fillColor: "#00555A",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 3,
+            },
+          });
+        }
+
+        mapInstanceRef.current?.panTo(markerPosition);
+        setSavedAddress(addressLabel || `${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+      };
 
       if (hasInitialLocation) {
         markerRef.current = new window.google.maps.Marker({
@@ -130,31 +178,35 @@ export default function LocationPickerModal({
         });
       }
 
+      if (searchInputRef.current && window.google.maps.places) {
+        const searchBox = new window.google.maps.places.SearchBox(searchInputRef.current);
+
+        mapInstanceRef.current.addListener("bounds_changed", () => {
+          const bounds = mapInstanceRef.current?.getBounds();
+          if (bounds) {
+            searchBox.setBounds(bounds);
+          }
+        });
+
+        searchBox.addListener("places_changed", () => {
+          const places = searchBox.getPlaces();
+          const place = places?.[0];
+          const location = place?.geometry?.location;
+          if (!place || !location) {
+            return;
+          }
+
+          setMarkerLocation(
+            location,
+            place.formatted_address || place.name || `${location.lat().toFixed(6)}, ${location.lng().toFixed(6)}`
+          );
+          mapInstanceRef.current?.setZoom(17);
+        });
+      }
+
       const clickListener = mapInstanceRef.current.addListener("click", (e: google.maps.MapMouseEvent) => {
         if (e.latLng) {
-          const lat = e.latLng.lat();
-          const lng = e.latLng.lng();
-          setSelectedLocation({ lat, lng });
-          
-          if (markerRef.current) {
-            markerRef.current.setPosition(e.latLng);
-          } else {
-            markerRef.current = new window.google.maps.Marker({
-              position: e.latLng,
-              map: mapInstanceRef.current,
-              icon: {
-                path: window.google.maps.SymbolPath.CIRCLE,
-                scale: 10,
-                fillColor: "#00555A",
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 3,
-              },
-            });
-          }
-          
-          mapInstanceRef.current.panTo(e.latLng);
-          setSavedAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+          setMarkerLocation(e.latLng);
         }
       });
     };
@@ -228,12 +280,16 @@ export default function LocationPickerModal({
           </div>
         )}
 
-        <Input
-          placeholder="Search is disabled (Geocoding API not enabled)."
-          value=""
-          disabled
-          className="mb-4 w-full"
-        />
+        <div className="relative mb-4">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            ref={searchInputRef}
+            placeholder="Search clinic name, address, landmark, or area"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="w-full pl-9"
+          />
+        </div>
 
         <div ref={mapRef} className="mb-4 h-[400px] w-full overflow-hidden rounded-lg border" />
 
