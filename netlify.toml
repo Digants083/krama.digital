@@ -27,16 +27,6 @@
   status = 200
 
 [[redirects]]
-  from = "/android-chrome-192x192.png"
-  to = "/favicon-192x192.png"
-  status = 200
-
-[[redirects]]
-  from = "/android-chrome-512x512.png"
-  to = "/favicon-512x512.png"
-  status = 200
-
-[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
