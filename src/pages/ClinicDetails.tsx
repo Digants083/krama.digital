@@ -1,6 +1,6 @@
 ﻿import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatTimeRange } from "@/lib/timeFormat";
 
@@ -220,7 +220,7 @@ const ClinicDetails = () => {
 
   const handleBookClick = () => {
     if (!clinicAcceptingBookings) {
-      setMessage({text: "This clinic is not accepting bookings right now.", type: "error"});
+      setMessage({text: "Clinic isn't opened yet.", type: "error"});
       return;
     }
 
@@ -236,7 +236,15 @@ const ClinicDetails = () => {
   };
 
   const handleSlotSelect = (slot: any, slotIndex: number) => {
-    if (!slot.is_open || slot.is_expired) return;
+    if (!slot.is_open) {
+      setMessage({text: "Clinic isn't opened yet.", type: "error"});
+      return;
+    }
+
+    if (slot.is_expired) {
+      setMessage({text: "This slot has already closed.", type: "error"});
+      return;
+    }
     
     const timeString = `${slot.slot_name} ${formatTimeRange(slot.time_range)}`;
     setSelectedTime(timeString);
@@ -249,16 +257,14 @@ const ClinicDetails = () => {
       return;
     }
 
-    // Use today's date by default
     const today = new Date().toISOString().split('T')[0];
     setSelectedDate(today);
     
-    // Proceed with booking
-    proceedWithBooking();
+    await proceedWithBooking(today);
   };
 
-  const proceedWithBooking = async () => {
-    if (!selectedTime || !selectedDate) {
+  const proceedWithBooking = async (bookingDate = selectedDate) => {
+    if (!selectedTime || !bookingDate) {
       setMessage({text: "Please select a date and time", type: "error"});
       return;
     }
@@ -345,7 +351,7 @@ const ClinicDetails = () => {
         patient_phone: patientPhone || "",
         clinic_id: clinicId,
         doctor_name: clinic.doctor_name || "General",
-        date: selectedDate,
+        date: bookingDate,
         time: selectedTime,
         slot_id: selectedSlotId
       };
@@ -358,14 +364,14 @@ const ClinicDetails = () => {
         body: JSON.stringify(requestData)
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (response.ok) {
         navigate("/confirmation", {
           state: {
             clinic: clinic.clinic_name,
             doctor: clinic.doctor_name || "Available Doctor",
-            date: selectedDate,
+            date: bookingDate,
             time: selectedTime,
             address: clinic.address,
             token: data.token,
@@ -378,7 +384,8 @@ const ClinicDetails = () => {
         setMessage({text: `Failed to book: ${data.detail || JSON.stringify(data)}`, type: "error"});
       }
     } catch (error) {
-      setMessage({text: "Failed to book appointment. Please try again.", type: "error"});
+      const errorMessage = error instanceof Error ? error.message : "Failed to book appointment. Please try again.";
+      setMessage({text: errorMessage, type: "error"});
     } finally {
       setBooking(false);
     }
@@ -520,7 +527,6 @@ const ClinicDetails = () => {
                   <Button
                     onClick={handleBookClick}
                     className="w-full bg-[#00555A] hover:bg-[#004455] text-white disabled:opacity-60"
-                    disabled={!clinicAcceptingBookings}
                   >
                     <Clock className="h-4 w-4 mr-2" />
                     {clinicAcceptingBookings ? "Book Appointment" : "Not Available Now"}
@@ -621,39 +627,58 @@ const ClinicDetails = () => {
                 {timeSlots.map((slot, index) => {
                   const slotId = slot.slot_id ?? index + 1;
                   const patientCount = slotQueueCounts[slotId] || 0;
+                  const isSelected = selectedSlotId === slotId;
+                  const isUnavailable = slot.is_expired || !slot.is_open;
 
                   return (
                     <button
                       key={slotId}
                       onClick={() => handleSlotSelect(slot, index)}
-                      disabled={!slot.is_open || slot.is_expired || booking}
+                      disabled={booking}
                       className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
                         slot.is_expired
                           ? "bg-gray-50 border-gray-200 cursor-not-allowed opacity-50"
                           : !slot.is_open
                             ? "bg-red-50 border-red-200 cursor-not-allowed opacity-60"
-                            : selectedTime === `${slot.slot_name} ${formatTimeRange(slot.time_range)}`
-                              ? "border-[#00555A] bg-[#00555A]/10"
+                            : isSelected
+                              ? "border-[#00555A] bg-[#00555A] text-white shadow-sm"
                               : "border-border bg-card hover:border-[#00555A]"
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className={`font-semibold ${slot.is_expired ? 'line-through text-gray-400' : 'text-foreground'}`}>
+                          <h3 className={`font-semibold ${
+                            slot.is_expired
+                              ? "line-through text-gray-400"
+                              : isSelected
+                                ? "text-white"
+                                : "text-foreground"
+                          }`}>
                             {slot.slot_name}
                           </h3>
-                          <p className={`text-sm ${slot.is_expired ? 'text-gray-400 line-through' : 'text-muted-foreground'}`}>
+                          <p className={`text-sm ${
+                            slot.is_expired
+                              ? "text-gray-400 line-through"
+                              : isSelected
+                                ? "text-white/85"
+                                : "text-muted-foreground"
+                          }`}>
                             {formatTimeRange(slot.time_range)}
                           </p>
                         </div>
                         <div className="text-right">
                           <span className={`text-sm font-medium ${
-                            slot.is_expired ? 'text-gray-400' :
-                            slot.is_open ? 'text-green-600' : 'text-red-500'
+                            slot.is_expired ? "text-gray-400" :
+                            isSelected ? "text-white" :
+                            slot.is_open ? "text-green-600" : "text-red-500"
                           }`}>
-                            {slot.display_status}
+                            {isSelected ? "Selected" : slot.display_status}
                           </span>
-                          {slot.is_open && !slot.is_expired && (
+                          {isSelected ? (
+                            <div className="mt-1 flex items-center justify-end gap-1 text-white">
+                              <CheckCircle2 className="h-4 w-4" />
+                            </div>
+                          ) : !isUnavailable && (
                             <div className="mt-1 flex items-center justify-end gap-1">
                               <span className="text-lg">🧑</span>
                               <span className="text-xs text-muted-foreground">
@@ -674,7 +699,7 @@ const ClinicDetails = () => {
             <div className="mt-6">
               <Button
                 onClick={handleConfirmBooking}
-                disabled={!selectedTime || booking}
+                disabled={selectedSlotId === null || booking}
                 className="w-full bg-[#00555A] hover:bg-[#004455] text-white disabled:opacity-50"
               >
                 {booking ? "Booking..." : "Book"}

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
@@ -40,6 +40,8 @@ interface QueuePosition {
   now_serving_token?: string;
 }
 
+const LIVE_REFRESH_MS = 5000;
+
 const AppointmentConfirmation = () => {
   const { state } = useLocation() as { state: ConfirmationState | null };
   const navigate = useNavigate();
@@ -47,52 +49,72 @@ const AppointmentConfirmation = () => {
   const [appointmentDetails, setAppointmentDetails] = useState<AppointmentDetails | null>(null);
   const [queuePosition, setQueuePosition] = useState<QueuePosition | null>(null);
   const [loading, setLoading] = useState(true);
+  const addedVisitTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchAppointmentDetails = async () => {
       try {
         const userStr = localStorage.getItem("user");
         if (!userStr) {
-          setLoading(false);
+          if (!cancelled) setLoading(false);
           return;
         }
 
         const user = JSON.parse(userStr);
-        const response = await fetch(`/api/auth/patient/appointments?email=${user.email}`);
+        const response = await fetch(
+          `/api/auth/patient/appointments?email=${encodeURIComponent(user.email)}`
+        );
         if (!response.ok) {
-          setLoading(false);
+          if (!cancelled) setLoading(false);
           return;
         }
 
         const data = await response.json();
-        const allAppointments = data.appointments || [];
+        const allAppointments: AppointmentDetails[] = data.appointments || [];
         
-        // Use most recent appointment (last one in the list)
-        let selectedAppointment = null;
+        let selectedAppointment: AppointmentDetails | null = null;
+        if (state?.token) {
+          selectedAppointment =
+            allAppointments.find((appointment) => appointment.appointment_token === state.token) || null;
+        }
+
+        // Fall back to most recent appointment (last one in the list).
         if (allAppointments.length > 0) {
-          selectedAppointment = allAppointments[allAppointments.length - 1];
+          selectedAppointment = selectedAppointment || allAppointments[allAppointments.length - 1];
         }
         
         if (selectedAppointment) {
+          if (cancelled) return;
           setAppointmentDetails(selectedAppointment);
 
-          const queueResponse = await fetch(
-            `/api/auth/appointments/queue-position?clinic_id=${selectedAppointment.clinic_id}&appointment_token=${selectedAppointment.appointment_token}&appointment_id=${selectedAppointment.id}`
-          );
+          const queueParams = new URLSearchParams({
+            clinic_id: selectedAppointment.clinic_id,
+            appointment_token: selectedAppointment.appointment_token,
+            appointment_id: String(selectedAppointment.id),
+          });
+          const queueResponse = await fetch(`/api/auth/appointments/queue-position?${queueParams}`);
           if (queueResponse.ok) {
             const queueData = await queueResponse.json();
-            setQueuePosition(queueData);
+            if (!cancelled) setQueuePosition(queueData);
           }
         }
       } catch (error) {
         console.error("Error fetching appointment details:", error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     void fetchAppointmentDetails();
-  }, []);
+    const intervalId = window.setInterval(() => void fetchAppointmentDetails(), LIVE_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [state?.token]);
 
   const token = state?.token || appointmentDetails?.appointment_token || "T-1";
   const clinicName = state?.clinic || appointmentDetails?.clinic_name || "Unknown Clinic";
@@ -118,12 +140,15 @@ const AppointmentConfirmation = () => {
       estimatedWaitMins: estimatedWait,
       patientsAhead,
     });
-    addVisit({
-      clinicId: `clinic-${token}`,
-      clinicName,
-      date: `${dateText} at ${timeText}`,
-    });
-  }, [token, clinicName, doctorName, dateText, timeText, clinicAddress, appointmentDetails, estimatedWait, patientsAhead, setActiveAppointment, addVisit]);
+    if (addedVisitTokenRef.current !== token) {
+      addedVisitTokenRef.current = token;
+      addVisit({
+        clinicId: `clinic-${token}`,
+        clinicName,
+        date: `${dateText} at ${timeText}`,
+      });
+    }
+  }, [token, clinicName, doctorName, dateText, timeText, clinicAddress, appointmentDetails?.status, estimatedWait, patientsAhead, setActiveAppointment, addVisit]);
 
   if (loading) {
     return (

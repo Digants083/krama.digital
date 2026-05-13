@@ -3,11 +3,11 @@ Patient Reports router for diagnostic and scanning centers.
 Provides endpoints for managing patient reports and sending PDF reports via email.
 """
 import os
-import shutil
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.database.db import get_db
@@ -16,9 +16,33 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/clinic/reports", tags=["patient_reports"])
 
-# Directory for storing PDF reports
+# Legacy directory for reports uploaded before PDFs were moved into the database.
 REPORTS_DIR = "patient_reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
+DB_REPORT_PREFIX = "db:"
+
+
+def _resolve_report_path(report_path: str) -> str:
+    normalized = os.path.normpath((report_path or "").replace("/", os.sep))
+    if (
+        not normalized
+        or os.path.isabs(normalized)
+        or normalized.startswith(f"..{os.sep}")
+        or normalized == ".."
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid PDF path"
+        )
+
+    reports_root = os.path.abspath(REPORTS_DIR)
+    full_path = os.path.abspath(os.path.join(reports_root, normalized))
+    if os.path.commonpath([reports_root, full_path]) != reports_root:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid PDF path"
+        )
+    return full_path
 
 
 def _safe_pdf_filename(filename: str) -> str:
@@ -29,11 +53,93 @@ def _safe_pdf_filename(filename: str) -> str:
     return name or "report.pdf"
 
 
+def _db_report_reference(table_name: str, report_id: int) -> str:
+    return f"{DB_REPORT_PREFIX}{table_name}:{report_id}"
+
+
+def _parse_db_report_reference(report_path: str) -> Optional[Tuple[str, int]]:
+    if not (report_path or "").startswith(DB_REPORT_PREFIX):
+        return None
+
+    parts = report_path.split(":")
+    if len(parts) != 3 or parts[1] not in {"reports", "completed_reports"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid PDF reference"
+        )
+
+    try:
+        return parts[1], int(parts[2])
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid PDF reference"
+        )
+
+
+async def _get_db_pdf_payload(
+    report_path: str,
+    db: AsyncSession,
+) -> Optional[Tuple[bytes, str, str]]:
+    parsed_reference = _parse_db_report_reference(report_path)
+    if not parsed_reference:
+        return None
+
+    table_name, report_id = parsed_reference
+    model = Report if table_name == "reports" else CompletedReport
+    result = await db.execute(select(model).where(model.id == report_id))
+    report = result.scalar_one_or_none()
+
+    if not report or not report.report_pdf_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report PDF not found"
+        )
+
+    return (
+        bytes(report.report_pdf_data),
+        report.report_pdf_filename or "patient_report.pdf",
+        report.report_pdf_content_type or "application/pdf",
+    )
+
+
 class ReportProcessRequest(BaseModel):
     report_id: int
     action: str  # "send", "collected", "no_report"
     pdf_path: Optional[str] = None
     notes: Optional[str] = None
+
+
+@router.get("/file")
+async def view_report_pdf(
+    path: str = Query(..., description="Stored report PDF path"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    View an uploaded report PDF.
+    """
+    db_payload = await _get_db_pdf_payload(path, db)
+    if db_payload:
+        pdf_bytes, filename, content_type = db_payload
+        return Response(
+            content=pdf_bytes,
+            media_type=content_type,
+            headers={"Content-Disposition": f'inline; filename="{filename}"'}
+        )
+
+    full_pdf_path = _resolve_report_path(path)
+    if not os.path.exists(full_pdf_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report PDF not found"
+        )
+
+    filename = os.path.basename(full_pdf_path)
+    return FileResponse(
+        full_pdf_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'}
+    )
 
 
 @router.get("/pending")
@@ -68,6 +174,7 @@ async def get_pending_reports(
                     "patient_phone": r.patient_phone,
                     "created_at": r.created_at.isoformat() if r.created_at else None,
                     "report_pdf": r.report_pdf,
+                    "report_pdf_filename": r.report_pdf_filename,
                     "report_type": r.report_type
                 }
                 for r in reports
@@ -111,6 +218,7 @@ async def get_completed_reports(
                     "patient_phone": r.patient_phone,
                     "status": r.status,  # true = report provided, false = no report
                     "report_pdf": r.report_pdf,
+                    "report_pdf_filename": r.report_pdf_filename,
                     "report_type": r.report_type,
                     "completed_at": r.completed_at.isoformat() if r.completed_at else None
                 }
@@ -164,29 +272,27 @@ async def upload_report_pdf(
                 detail="Report not found"
             )
 
-        # Create clinic-specific directory
-        clinic_dir = os.path.join(REPORTS_DIR, clinic_id)
-        os.makedirs(clinic_dir, exist_ok=True)
-
-        # Generate unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{patient_id}_{timestamp}_{_safe_pdf_filename(file.filename)}"
-        file_path = os.path.join(clinic_dir, filename)
+        pdf_bytes = await file.read()
 
-        # Save file
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        if not pdf_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded PDF is empty"
+            )
 
-        # Return the relative path for storage
-        relative_path = os.path.join(clinic_id, filename).replace("\\", "/")
-        
-        # Update the report with PDF path in database
-        report.report_pdf = relative_path
+        # Store the PDF itself in the database. report_pdf remains a stable
+        # reference used by the existing frontend and /file endpoint.
+        report.report_pdf = _db_report_reference("reports", report.id)
+        report.report_pdf_filename = filename
+        report.report_pdf_content_type = file.content_type or "application/pdf"
+        report.report_pdf_data = pdf_bytes
         await db.commit()
 
         return {
             "message": "PDF uploaded successfully",
-            "file_path": relative_path,
+            "file_path": report.report_pdf,
             "filename": filename
         }
 
@@ -231,6 +337,9 @@ async def process_report(
             )
 
         # Determine status and report_type
+        pdf_bytes = None
+        pdf_filename = None
+        pdf_content_type = None
         if request.action == "send":
             report_provided = True  # Report provided (via email)
             report_type = "sent"
@@ -261,21 +370,29 @@ async def process_report(
                     detail="Clinic not found"
                 )
 
-            pdf_path_normalized = os.path.normpath(pdf_path.replace("/", os.sep))
-            if os.path.isabs(pdf_path_normalized) or pdf_path_normalized.startswith(f"..{os.sep}") or pdf_path_normalized == "..":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid PDF path"
-                )
+            full_pdf_path = None
+            if report.report_pdf_data:
+                pdf_bytes = bytes(report.report_pdf_data)
+                pdf_filename = report.report_pdf_filename or "patient_report.pdf"
+                pdf_content_type = report.report_pdf_content_type or "application/pdf"
+            else:
+                db_payload = await _get_db_pdf_payload(pdf_path, db)
+                if db_payload:
+                    pdf_bytes, pdf_filename, pdf_content_type = db_payload
+                else:
+                    full_pdf_path = _resolve_report_path(pdf_path)
+                    logger.info(f"Full PDF path: {full_pdf_path}, exists: {os.path.exists(full_pdf_path)}")
 
-            full_pdf_path = os.path.join(REPORTS_DIR, pdf_path_normalized)
-            logger.info(f"Full PDF path: {full_pdf_path}, exists: {os.path.exists(full_pdf_path)}")
+                    if not os.path.exists(full_pdf_path):
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Uploaded PDF file was not found. Please upload it again."
+                        )
 
-            if not os.path.exists(full_pdf_path):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Uploaded PDF file was not found. Please upload it again."
-                )
+                    with open(full_pdf_path, "rb") as existing_pdf:
+                        pdf_bytes = existing_pdf.read()
+                    pdf_filename = os.path.basename(full_pdf_path)
+                    pdf_content_type = "application/pdf"
 
             logger.info(f"Sending email to {report.patient_email} with PDF")
             email_sent = send_patient_report_email(
@@ -283,7 +400,9 @@ async def process_report(
                 patient_name=report.patient_name,
                 clinic_name=clinic.clinic_name,
                 pdf_path=full_pdf_path,
-                notes=request.notes
+                notes=request.notes,
+                pdf_bytes=pdf_bytes,
+                pdf_filename=pdf_filename
             )
             logger.info(f"Email sent result: {email_sent}")
             if not email_sent:
@@ -294,7 +413,23 @@ async def process_report(
         elif request.action == "collected":
             report_provided = True  # Report provided (physical)
             report_type = "collected"
-            pdf_path = None
+            pdf_path = request.pdf_path or report.report_pdf
+            if pdf_path:
+                if report.report_pdf_data:
+                    pdf_bytes = bytes(report.report_pdf_data)
+                    pdf_filename = report.report_pdf_filename or "patient_report.pdf"
+                    pdf_content_type = report.report_pdf_content_type or "application/pdf"
+                else:
+                    db_payload = await _get_db_pdf_payload(pdf_path, db)
+                    if db_payload:
+                        pdf_bytes, pdf_filename, pdf_content_type = db_payload
+                    else:
+                        full_pdf_path = _resolve_report_path(pdf_path)
+                        if os.path.exists(full_pdf_path):
+                            with open(full_pdf_path, "rb") as existing_pdf:
+                                pdf_bytes = existing_pdf.read()
+                            pdf_filename = os.path.basename(full_pdf_path)
+                            pdf_content_type = "application/pdf"
         else:  # no_report
             report_provided = False  # No report provided
             report_type = "no_report"
@@ -308,12 +443,18 @@ async def process_report(
             patient_email=report.patient_email,
             patient_phone=report.patient_phone,
             status=report_provided,
-            report_pdf=pdf_path,
+            report_pdf=None,
+            report_pdf_filename=pdf_filename,
+            report_pdf_content_type=pdf_content_type,
+            report_pdf_data=pdf_bytes,
             report_type=report_type,
             completed_at=datetime.now(timezone.utc)
         )
 
         db.add(completed_report)
+        await db.flush()
+        if pdf_bytes:
+            completed_report.report_pdf = _db_report_reference("completed_reports", completed_report.id)
 
         # Delete from pending reports
         await db.delete(report)

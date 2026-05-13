@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
+import { ArrowRight, MapPinned, Search, Ticket } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────────────────
 interface TimeSlot {
@@ -25,6 +26,7 @@ interface ClinicInfo {
   name: string;
   address?: string;
   doctors: Doctor[];
+  isActive?: boolean;
 }
 
 type Step = "options" | "form" | "loading" | "success" | "error";
@@ -46,6 +48,7 @@ const JoinQueue = () => {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
+  const [quickBookChecking, setQuickBookChecking] = useState(false);
 
   const formatTimeRange = (start: number, end: number) => {
     return formatSlotTimeRange([start, end]);
@@ -87,10 +90,11 @@ const JoinQueue = () => {
           name: data.clinic_name || "Clinic",
           address: data.address,
           doctors: data.doctors || [],
+          isActive: Boolean(data.is_active && data.available !== false),
         });
       })
       .catch(() => {
-        setClinicInfo({ id: qrClinicId, name: "Clinic", doctors: [] });
+        setClinicInfo({ id: qrClinicId, name: "Clinic", doctors: [], isActive: false });
       })
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
@@ -131,8 +135,52 @@ const JoinQueue = () => {
   };
 
   // ─── Handle quick book option ───────────────────────────────────────────────────────────────
-  const handleQuickBook = () => {
-    setStep("form");
+  const handleQuickBook = async () => {
+    setErrorMsg("");
+    setQuickBookChecking(true);
+
+    try {
+      const response = await fetch(`/api/auth/clinic/data?clinic_id=${qrClinicId}`);
+      if (!response.ok) {
+        throw new Error("Clinic not found");
+      }
+
+      const data = await response.json();
+      const isActive = Boolean(data.is_active && data.available !== false);
+      setClinicInfo({
+        id: data.clinic_id || qrClinicId,
+        name: data.clinic_name || "Clinic",
+        address: data.address,
+        doctors: data.doctors || [],
+        isActive,
+      });
+
+      if (!isActive) {
+        setErrorMsg("Clinic isn't opened yet.");
+        return;
+      }
+
+      setStep("form");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Unable to check clinic status.");
+    } finally {
+      setQuickBookChecking(false);
+    }
+  };
+
+  const handleSlotSelect = (slot: TimeSlot, slotNum: number) => {
+    if (!slot.is_open) {
+      setErrorMsg("Clinic isn't opened yet.");
+      return;
+    }
+
+    if (slot.is_expired) {
+      setErrorMsg("This slot has already closed.");
+      return;
+    }
+
+    setErrorMsg("");
+    setSelectedSlotId(slotNum);
   };
 
   // ─── Validation ────────────────────────────────────────────────────────────────────────────────
@@ -141,6 +189,7 @@ const JoinQueue = () => {
     name.trim().length >= 2 &&
     phoneRegex.test(phone.trim()) &&
     selectedSlotId !== "" &&
+    clinicInfo?.isActive !== false &&
     timeSlots.length > 0; // Ensure slots are loaded
 
   // ─── Submit ────────────────────────────────────────────────────────────────────────────────────
@@ -187,45 +236,6 @@ const JoinQueue = () => {
 
   // ─── Render ────────────────────────────────────────────────────────────────────────────────────
 
-  // Options screen - choose between Sign up or Quick book
-  if (step === "options") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary font-display text-2xl font-bold text-primary-foreground">
-            K
-          </div>
-          <h2 className="mb-2 text-xl font-semibold text-[#0F172A]">Join Queue</h2>
-          {clinicInfo && (
-            <p className="mb-6 text-sm font-medium text-primary">{clinicInfo.name}</p>
-          )}
-          
-          <p className="mb-6 text-sm text-muted-foreground">
-            Would you like to sign up for the full experience or continue with a quick booking?
-          </p>
-
-          {/* Sign up option */}
-          <button
-            onClick={handleSignUp}
-            className="mb-3 w-full rounded-xl bg-primary px-4 py-4 text-sm font-medium text-primary-foreground shadow-[0_14px_28px_-18px_rgba(31,92,84,0.9)] transition-all duration-200 hover:bg-primary/90"
-          >
-            <span className="block font-semibold">Sign Up for Full Experience</span>
-            <span className="block text-xs text-white/70 mt-1">Live queue tracking, appointment history & more</span>
-          </button>
-
-          {/* Quick book option */}
-          <button
-            onClick={handleQuickBook}
-            className="w-full rounded-xl border border-primary/25 bg-primary/5 px-4 py-4 text-sm font-medium text-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/10"
-          >
-            <span className="block font-semibold text-primary">Quick Book</span>
-            <span className="mt-1 block text-xs text-muted-foreground">Just book a slot - no account needed</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // Invalid QR code
   if (!qrClinicId) {
     return (
@@ -246,6 +256,54 @@ const JoinQueue = () => {
         <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
           <div className="mx-auto mb-2 h-6 w-32 animate-pulse rounded bg-primary/10" />
           <div className="mx-auto h-4 w-24 animate-pulse rounded bg-primary/10" />
+        </div>
+      </div>
+    );
+  }
+
+  // Options screen - choose between Sign up or Quick book
+  if (step === "options") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
+        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary font-display text-2xl font-bold text-primary-foreground">
+            K
+          </div>
+          <h2 className="mb-2 text-xl font-semibold text-[#0F172A]">Join Queue</h2>
+          {clinicInfo && (
+            <p className="mb-6 text-sm font-medium text-primary">{clinicInfo.name}</p>
+          )}
+          
+          {errorMsg && (
+            <div className="mb-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm text-destructive">
+              {errorMsg}
+            </div>
+          )}
+
+          <p className="mb-6 text-sm text-muted-foreground">
+            Would you like to sign up for the full experience or continue with a quick booking?
+          </p>
+
+          {/* Sign up option */}
+          <button
+            onClick={handleSignUp}
+            className="mb-3 w-full rounded-xl bg-primary px-4 py-4 text-sm font-medium text-primary-foreground shadow-[0_14px_28px_-18px_rgba(31,92,84,0.9)] transition-all duration-200 hover:bg-primary/90"
+          >
+            <span className="block font-semibold">Sign Up for Full Experience</span>
+            <span className="block text-xs text-white/70 mt-1">Live queue tracking, appointment history & more</span>
+          </button>
+
+          {/* Quick book option */}
+          <button
+            onClick={handleQuickBook}
+            disabled={quickBookChecking}
+            className="w-full rounded-xl border border-primary/25 bg-primary/5 px-4 py-4 text-sm font-medium text-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/10"
+          >
+            <span className="block font-semibold text-primary">
+              {quickBookChecking ? "Checking clinic..." : "Quick Book"}
+            </span>
+            <span className="mt-1 block text-xs text-muted-foreground">Just book a slot - no account needed</span>
+          </button>
         </div>
       </div>
     );
@@ -287,12 +345,37 @@ const JoinQueue = () => {
             Please wait for your token to be called.
           </p>
 
-          {/* Info about Your Details */}
-          <div className="mb-4 rounded-xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-primary">
-            <p className="font-medium mb-1">Want to track your queue?</p>
-            <p className="text-xs text-primary/80">
-              Go to <strong>Your Details</strong> in the header and enter your number to see your position and wait time.
-            </p>
+          <div className="mb-4 rounded-2xl border border-primary/15 bg-primary/5 p-4 text-left">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary">
+              <MapPinned className="h-4 w-4" />
+              Check it later from the header
+            </div>
+            <div className="rounded-xl border border-primary/10 bg-white p-3">
+              <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
+                <span className="text-sm font-bold text-primary">Krama</span>
+                <span className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground">
+                  Your Token
+                </span>
+              </div>
+              <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-xs text-muted-foreground">
+                <Ticket className="h-4 w-4 text-primary" />
+                <span>Open Your Token</span>
+                <ArrowRight className="h-3.5 w-3.5 text-primary" />
+                <Search className="h-4 w-4 text-primary" />
+                <span>Enter {phone || "your phone number"}</span>
+                <ArrowRight className="h-3.5 w-3.5 text-primary" />
+                <Ticket className="h-4 w-4 text-primary" />
+                <span>See token and queue position</span>
+                <span />
+              </div>
+            </div>
+            <button
+              onClick={() => navigate("/your-token")}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-all duration-200 hover:bg-primary/90"
+            >
+              Open Your Token
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </div>
 
           <button
@@ -348,6 +431,18 @@ const JoinQueue = () => {
           <p className="mt-2 text-sm text-muted-foreground">Enter your details to get a token</p>
         </div>
 
+        {errorMsg && (
+          <div className="mb-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm text-destructive">
+            {errorMsg}
+          </div>
+        )}
+
+        {clinicInfo?.isActive === false && !errorMsg && (
+          <div className="mb-4 rounded-lg bg-[#FFC107]/15 px-4 py-2 text-sm text-[#7A5800]">
+            Clinic isn't opened yet.
+          </div>
+        )}
+
         <div className="space-y-4">
           {/* Name */}
           <div>
@@ -388,22 +483,21 @@ const JoinQueue = () => {
               <div className="space-y-2">
                 {timeSlots.map((slot, idx) => {
                   const slotNum = slot.slot_id ?? idx + 1;
-                  const isDisabled = !slot.is_open || slot.is_expired;
+                  const isUnavailable = !slot.is_open || slot.is_expired;
                   const isSelected = selectedSlotId === slotNum;
 
                   return (
                     <button
                       key={slotNum}
                       type="button"
-                      disabled={isDisabled}
-                      onClick={() => setSelectedSlotId(slotNum)}
+                      onClick={() => handleSlotSelect(slot, slotNum)}
                       className={[
                         "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-all duration-200",
                         isSelected
                           ? "border-primary bg-primary text-primary-foreground shadow-[0_14px_30px_-22px_rgba(31,92,84,0.9)]"
                           : "border-primary/15 bg-white text-foreground hover:border-primary/35 hover:bg-primary/5",
-                        isDisabled
-                          ? "cursor-not-allowed border-border bg-secondary/60 text-muted-foreground opacity-70 hover:border-border hover:bg-secondary/60"
+                        isUnavailable
+                          ? "border-border bg-secondary/60 text-muted-foreground opacity-70 hover:border-border hover:bg-secondary/60"
                           : ""
                       ].join(" ")}
                     >
@@ -420,7 +514,7 @@ const JoinQueue = () => {
                           "rounded-full px-2.5 py-1 text-[11px] font-semibold",
                           isSelected
                             ? "bg-white/15 text-white"
-                            : isDisabled
+                            : isUnavailable
                               ? "bg-[#FFC107]/20 text-[#7A5800]"
                               : "bg-primary/10 text-primary"
                         ].join(" ")}

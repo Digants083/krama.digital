@@ -12,8 +12,17 @@ interface PendingReport {
   patient_phone: string;
   created_at: string;
   report_pdf: string | null;
+  report_pdf_filename?: string | null;
   report_type: string | null;
 }
+
+const getReportPdfUrl = (pdfPath: string) => (
+  `/api/clinic/reports/file?path=${encodeURIComponent(pdfPath)}`
+);
+
+const openReportPdf = (pdfPath: string) => {
+  window.open(getReportPdfUrl(pdfPath), "_blank", "noopener,noreferrer");
+};
 
 // Expandable Card Component
 const PendingReportCard = ({ 
@@ -36,6 +45,7 @@ const PendingReportCard = ({
   const [expanded, setExpanded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [pdfPath, setPdfPath] = useState<string | null>(report.report_pdf);
+  const [pdfFilename, setPdfFilename] = useState<string | null>(report.report_pdf_filename || null);
   const selectedFile = selectedFiles[report.report_id];
 
   const formatDate = (dateString: string) => {
@@ -129,6 +139,7 @@ const PendingReportCard = ({
                     try {
                       const path = await onUploadPdf(report);
                       setPdfPath(path);
+                      setPdfFilename(selectedFile?.name || null);
                       toast.success("PDF uploaded successfully!");
                     } catch (error: any) {
                       toast.error(error.message || "Failed to upload PDF");
@@ -156,9 +167,21 @@ const PendingReportCard = ({
               </p>
             )}
             {pdfPath && (
-              <p className="mt-2 text-xs font-medium text-[#00555A]">
-                PDF uploaded: {pdfPath.split('/').pop()}
-              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="text-xs font-medium text-[#00555A]">
+                  PDF uploaded: {pdfFilename || pdfPath.split('/').pop()}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openReportPdf(pdfPath)}
+                  className="h-8 gap-1 border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  View Report
+                </Button>
+              </div>
             )}
           </div>
 
@@ -214,6 +237,7 @@ interface CompletedReport {
   patient_phone: string;
   status: boolean;  // true = report provided, false = no report
   report_pdf: string | null;
+  report_pdf_filename?: string | null;
   report_type: string | null;  // "sent", "collected", "no_report"
   completed_at: string;
 }
@@ -627,14 +651,11 @@ const ClinicPatientReports = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="gap-2"
-                          onClick={() => {
-                            // Download PDF logic here if needed
-                            toast.info("PDF available for download");
-                          }}
+                          className="gap-2 border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"
+                          onClick={() => openReportPdf(report.report_pdf!)}
                         >
                           <Download className="h-4 w-4" />
-                          View PDF
+                          View Report
                         </Button>
                       )}
                     </div>

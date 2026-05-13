@@ -21,8 +21,8 @@ const Header = () => {
             <Link to="/feedback" className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#00555A] transition-colors">
               Feedback
             </Link>
-            <Link to="/your-details" className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#00555A] transition-colors">
-              Your Details
+            <Link to="/your-token" className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#00555A] transition-colors">
+              Your Token
             </Link>
             <Link to="/clinic/login">
               <Button size="sm" variant="outline" className="border-[#00555A] text-[#00555A] hover:bg-[#00555A] hover:text-white">

@@ -60,6 +60,20 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "is_active": "BOOLEAN DEFAULT FALSE",
         "manual_stop_date": "VARCHAR",
     },
+    "reports": {
+        "report_pdf": "VARCHAR",
+        "report_pdf_filename": "VARCHAR",
+        "report_pdf_content_type": "VARCHAR",
+        "report_pdf_data": "BYTEA",
+        "report_type": "VARCHAR",
+    },
+    "completed_reports": {
+        "report_pdf": "VARCHAR",
+        "report_pdf_filename": "VARCHAR",
+        "report_pdf_content_type": "VARCHAR",
+        "report_pdf_data": "BYTEA",
+        "report_type": "VARCHAR",
+    },
 }
 
 
@@ -69,6 +83,8 @@ EXPECTED_RELATED_TABLES = [
     "qr_appointments",
     "completed_appointments",
     "clinic_time_slots",
+    "reports",
+    "completed_reports",
 ]
 
 

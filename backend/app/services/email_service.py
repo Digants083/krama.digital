@@ -631,8 +631,10 @@ def send_patient_report_email(
     patient_email: str,
     patient_name: str,
     clinic_name: str,
-    pdf_path: str,
-    notes: Optional[str] = None
+    pdf_path: Optional[str] = None,
+    notes: Optional[str] = None,
+    pdf_bytes: Optional[bytes] = None,
+    pdf_filename: Optional[str] = None,
 ) -> bool:
     """
     Send patient report email with PDF attachment.
@@ -641,8 +643,10 @@ def send_patient_report_email(
         patient_email: Recipient email address
         patient_name: Patient's name
         clinic_name: Clinic's name
-        pdf_path: Path to the PDF file to attach
+        pdf_path: Path to the PDF file to attach, used for legacy filesystem reports
         notes: Optional notes from the clinic
+        pdf_bytes: PDF content loaded from the database
+        pdf_filename: Attachment filename when using pdf_bytes
 
     Returns:
         bool: True if email sent successfully, False otherwise
@@ -748,8 +752,17 @@ def send_patient_report_email(
         body.attach(MIMEText(html_content, "html"))
         msg.attach(body)
 
-        # Attach the PDF file
-        if os.path.exists(pdf_path):
+        # Attach the PDF file. New reports are stored in the database; pdf_path is
+        # kept for older reports that were uploaded to disk before this change.
+        if pdf_bytes:
+            attachment_name = pdf_filename or "patient_report.pdf"
+            part = MIMEApplication(
+                pdf_bytes,
+                Name=attachment_name
+            )
+            part['Content-Disposition'] = f'attachment; filename="{attachment_name}"'
+            msg.attach(part)
+        elif pdf_path and os.path.exists(pdf_path):
             with open(pdf_path, 'rb') as f:
                 part = MIMEApplication(
                     f.read(),
@@ -758,7 +771,7 @@ def send_patient_report_email(
                 part['Content-Disposition'] = f'attachment; filename="{os.path.basename(pdf_path)}"'
                 msg.attach(part)
         else:
-            logger.error(f"PDF file not found: {pdf_path}")
+            logger.error("PDF attachment missing. pdf_path=%s, pdf_bytes=%s", pdf_path, bool(pdf_bytes))
             return False
 
         # Connect to SMTP server and send

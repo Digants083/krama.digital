@@ -52,7 +52,8 @@ function App() {
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
             <Route path="/about" element={<MainLayout><AboutUs /></MainLayout>} />
             <Route path="/feedback" element={<MainLayout><FeedbackPage /></MainLayout>} />
-            <Route path="/your-details" element={<MainLayout><YourDetails /></MainLayout>} />
+            <Route path="/your-token" element={<MainLayout><YourDetails /></MainLayout>} />
+            <Route path="/your-details" element={<Navigate to="/your-token" replace />} />
 
             {/* Patient Auth with Header */}
             <Route path="/patient/login" element={<MainLayout><PatientLogin /></MainLayout>} />
