@@ -10,6 +10,33 @@
   NODE_VERSION = "18"
 
 [[redirects]]
+  from = "https://www.krama.digital/*"
+  to = "https://krama.digital/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "http://www.krama.digital/*"
+  to = "https://krama.digital/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/apple-touch-icon-precomposed.png"
+  to = "/apple-touch-icon.png"
+  status = 200
+
+[[redirects]]
+  from = "/android-chrome-192x192.png"
+  to = "/favicon-192x192.png"
+  status = 200
+
+[[redirects]]
+  from = "/android-chrome-512x512.png"
+  to = "/favicon-512x512.png"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
