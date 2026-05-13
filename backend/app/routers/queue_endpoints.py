@@ -16,6 +16,7 @@ import logging
 
 router = APIRouter(prefix="/auth", tags=["queue"])
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+SERVE_UNLOCK_LEAD_MINUTES = 5
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +62,16 @@ def _is_slot_available(slot: dict, slot_status: list, index: int) -> bool:
     if index < len(slot_status) and slot_status[index] == "close":
         return False
     return True
+
+
+def _slot_booking_cutoff_passed(slot: dict, now: datetime) -> bool:
+    time_range = slot.get("time_range", [0, 0])
+    if not isinstance(time_range, list) or len(time_range) < 2:
+        return False
+
+    end_time = float(time_range[1])
+    current_time = now.hour + now.minute / 60.0
+    return current_time >= end_time - 0.25
 
 
 async def _sync_slot_live_status(clinic_id: str, db: AsyncSession, is_active: bool):
@@ -605,7 +616,7 @@ async def serve_patient(
             detail="Appointment not found"
         )
 
-    # Blocking Check: Ensure current time is >= slot start time
+    # Blocking Check: allow queue controls shortly before slot start.
     slot_id = appointment.slot_id
     if slot_id is not None:
         # slot_id is stored as human-friendly 1-based value (1,2,3)
@@ -622,10 +633,11 @@ async def serve_patient(
                 slot_start = slots[slot_index].get("time_range", [0, 0])[0]
                 now = _clinic_now()
                 current_time_decimal = now.hour + now.minute / 60.0
-                if current_time_decimal < slot_start:
+                unlock_time = slot_start - (SERVE_UNLOCK_LEAD_MINUTES / 60.0)
+                if current_time_decimal < unlock_time:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Serving cannot start until the official slot start time ({int(slot_start)}:00)."
+                        detail=f"Serving can start {SERVE_UNLOCK_LEAD_MINUTES} minutes before the official slot start time ({int(slot_start)}:00)."
                     )
 
     # Update status to serving
@@ -829,10 +841,11 @@ async def skip_patient(
                 slot_start = slots[slot_index].get("time_range", [0, 0])[0]
                 now = _clinic_now()
                 current_time_decimal = now.hour + now.minute / 60.0
-                if current_time_decimal < slot_start:
+                unlock_time = slot_start - (SERVE_UNLOCK_LEAD_MINUTES / 60.0)
+                if current_time_decimal < unlock_time:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Skipping cannot start until the official slot start time ({int(slot_start)}:00)."
+                        detail=f"Skipping can start {SERVE_UNLOCK_LEAD_MINUTES} minutes before the official slot start time ({int(slot_start)}:00)."
                     )
 
     online_filters = [
@@ -1517,30 +1530,73 @@ async def join_queue(
     """
     today = _clinic_today_str()
 
+    clinic_result = await db.execute(
+        select(Clinic).where(Clinic.clinic_id == payload.clinic_id)
+    )
+    clinic = clinic_result.scalar_one_or_none()
+
+    if not clinic:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Clinic not found"
+        )
+
+    if not clinic.is_active or clinic.available is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clinic isn't opened yet."
+        )
+
+    slot_record_result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == payload.clinic_id)
+    )
+    slot_record = slot_record_result.scalar_one_or_none()
+    slots = _load_slots(slot_record.slots) if slot_record else []
+    slot_status = _load_slot_status(slot_record.slot) if slot_record else []
+    now = _clinic_now()
+
     # Determine current slot if not provided
     slot_id = payload.slot_id
     if slot_id is None:
-        # Get current time slot
-        result = await db.execute(
-            select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == payload.clinic_id)
-        )
-        record = result.scalar_one_or_none()
-        if record:
-            slots = _load_slots(record.slots)
-            now = _clinic_now()
-            current_time_decimal = now.hour + now.minute / 60.0
-            for idx, slot in enumerate(slots):
-                if slot.get("is_open"):
-                    start, end = slot.get("time_range", [0, 0])
-                    if start <= current_time_decimal < end:
-                        slot_id = idx + 1
-                        break
+        current_time_decimal = now.hour + now.minute / 60.0
+        for idx, slot in enumerate(slots):
+            if _is_slot_available(slot, slot_status, idx):
+                start, end = slot.get("time_range", [0, 0])
+                if start <= current_time_decimal < end and not _slot_booking_cutoff_passed(slot, now):
+                    slot_id = idx + 1
+                    break
 
-            if slot_id is None:
-                for idx, slot in enumerate(slots):
-                    if slot.get("is_open"):
-                        slot_id = idx + 1
-                        break
+        if slot_id is None:
+            for idx, slot in enumerate(slots):
+                if _is_slot_available(slot, slot_status, idx) and not _slot_booking_cutoff_passed(slot, now):
+                    slot_id = idx + 1
+                    break
+
+    if slot_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clinic isn't opened yet."
+        )
+
+    slot_index = int(slot_id) - 1
+    if slot_index < 0 or slot_index >= len(slots):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid time slot"
+        )
+
+    selected_slot = slots[slot_index]
+    if not _is_slot_available(selected_slot, slot_status, slot_index):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clinic isn't opened yet."
+        )
+
+    if _slot_booking_cutoff_passed(selected_slot, now):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This slot has already closed."
+        )
 
     # Get highest token number for this specific slot
     max_token = -1
@@ -1905,12 +1961,37 @@ async def _lookup_by_phone_impl(phone, db):
     async def get_clinic_info(clinic_id):
         try:
             clinic_result = await db.execute(
-                select(Clinic.clinic_name, Clinic.address).where(Clinic.clinic_id == clinic_id)
+                select(
+                    Clinic.clinic_name,
+                    Clinic.address,
+                    Clinic.street_address,
+                    Clinic.road,
+                    Clinic.layout,
+                    Clinic.section,
+                    Clinic.city,
+                    Clinic.pincode,
+                ).where(Clinic.clinic_id == clinic_id)
             )
             clinic = clinic_result.first()
+            if not clinic:
+                return {"name": clinic_id, "address": None}
+
+            structured_address = ", ".join(
+                filter(
+                    None,
+                    [
+                        clinic.street_address,
+                        clinic.road,
+                        clinic.layout,
+                        clinic.section,
+                        clinic.city,
+                        clinic.pincode,
+                    ],
+                )
+            )
             return {
-                "name": clinic[0] if clinic and clinic[0] else clinic_id,
-                "address": clinic[1] if clinic else None,
+                "name": clinic.clinic_name or clinic_id,
+                "address": structured_address or clinic.address,
             }
         except Exception:
             logger.exception("YourDetails clinic lookup failed clinic_id=%s", clinic_id)

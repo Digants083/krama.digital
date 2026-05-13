@@ -6,9 +6,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, select
 from sqlalchemy.exc import DBAPIError
+from app.compat import install_starlette_router_compat
 from app.database.db import engine, AsyncSessionLocal
 from app.database.models import Base, Appointment, Clinic, ClinicTimeSlot
 from app.database.schema_checks import ensure_required_schema
+
+install_starlette_router_compat()
+
 from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports
 from app.services.email_service import send_queue_alert
 from app.services.appointment_maintenance import check_appointment_dates, cleanup_old_appointments
@@ -596,12 +600,18 @@ async def lifespan(app: FastAPI):
                 patient_phone VARCHAR NOT NULL,
                 status VARCHAR DEFAULT 'pending',
                 report_pdf VARCHAR,
+                report_pdf_filename VARCHAR,
+                report_pdf_content_type VARCHAR,
+                report_pdf_data BYTEA,
                 report_type VARCHAR,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
         await safe_exec("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_pdf VARCHAR")
+        await safe_exec("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_pdf_filename VARCHAR")
+        await safe_exec("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_pdf_content_type VARCHAR")
+        await safe_exec("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_pdf_data BYTEA")
         await safe_exec("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_type VARCHAR")
 
         await safe_exec("""
@@ -614,12 +624,18 @@ async def lifespan(app: FastAPI):
                 patient_phone VARCHAR NOT NULL,
                 status BOOLEAN DEFAULT FALSE,
                 report_pdf VARCHAR,
+                report_pdf_filename VARCHAR,
+                report_pdf_content_type VARCHAR,
+                report_pdf_data BYTEA,
                 report_type VARCHAR,
                 completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
         await safe_exec("ALTER TABLE completed_reports ADD COLUMN IF NOT EXISTS report_pdf VARCHAR")
+        await safe_exec("ALTER TABLE completed_reports ADD COLUMN IF NOT EXISTS report_pdf_filename VARCHAR")
+        await safe_exec("ALTER TABLE completed_reports ADD COLUMN IF NOT EXISTS report_pdf_content_type VARCHAR")
+        await safe_exec("ALTER TABLE completed_reports ADD COLUMN IF NOT EXISTS report_pdf_data BYTEA")
         await safe_exec("ALTER TABLE completed_reports ADD COLUMN IF NOT EXISTS report_type VARCHAR")
 
         # Create indexes for reports tables

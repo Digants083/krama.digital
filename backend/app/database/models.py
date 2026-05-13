@@ -289,7 +289,10 @@ class Report(Base):
     patient_email = Column(String, nullable=False)
     patient_phone = Column(String, nullable=False)
     status = Column(String, default="pending")  # pending
-    report_pdf = Column(String, nullable=True)  # Path to PDF file
+    report_pdf = Column(String, nullable=True)  # DB reference or legacy path to PDF file
+    report_pdf_filename = Column(String, nullable=True)
+    report_pdf_content_type = Column(String, nullable=True)
+    report_pdf_data = Column(LargeBinary, nullable=True)
     report_type = Column(String, nullable=True)  # sent, collected, no_report
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -305,6 +308,9 @@ class CompletedReport(Base):
     patient_email = Column(String, nullable=False)
     patient_phone = Column(String, nullable=False)
     status = Column(Boolean, default=False)  # true = report provided, false = no report
-    report_pdf = Column(String, nullable=True)  # Path to PDF file
+    report_pdf = Column(String, nullable=True)  # DB reference or legacy path to PDF file
+    report_pdf_filename = Column(String, nullable=True)
+    report_pdf_content_type = Column(String, nullable=True)
+    report_pdf_data = Column(LargeBinary, nullable=True)
     report_type = Column(String, nullable=True)  # sent, collected, no_report
     completed_at = Column(DateTime(timezone=True), server_default=func.now())

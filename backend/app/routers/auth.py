@@ -57,6 +57,40 @@ def _token_number(token: Optional[str]) -> int:
     digits = "".join(ch for ch in (token or "") if ch.isdigit())
     return int(digits) if digits else 10**9
 
+
+def _load_slots(raw_slots):
+    slots = raw_slots
+    if isinstance(slots, str):
+        import json
+        slots = json.loads(slots)
+    return list(slots or [])
+
+
+def _load_slot_status(raw_slot_status):
+    slot_status = raw_slot_status
+    if isinstance(slot_status, str):
+        import json
+        slot_status = json.loads(slot_status) if slot_status else []
+    return list(slot_status or [])
+
+
+def _is_slot_available(slot: dict, slot_status: list, index: int) -> bool:
+    if not slot.get("is_open"):
+        return False
+    if index < len(slot_status) and slot_status[index] == "close":
+        return False
+    return True
+
+
+def _slot_booking_cutoff_passed(slot: dict, now: datetime) -> bool:
+    time_range = slot.get("time_range", [0, 0])
+    if not isinstance(time_range, list) or len(time_range) < 2:
+        return False
+
+    end_time = float(time_range[1])
+    current_time = now.hour + now.minute / 60.0
+    return current_time >= end_time - 0.25
+
 from app.schemas import (
 
     ClinicSignup, ClinicLogin, PatientSignup, PatientLogin,
@@ -3604,19 +3638,91 @@ async def create_appointment(
 
                 status_code=status.HTTP_400_BAD_REQUEST,
 
-                detail="Clinic is not accepting bookings right now."
+                detail="Clinic isn't opened yet."
 
             )
 
+        if slot_id is not None:
+
+            try:
+
+                slot_id = int(slot_id)
+
+            except (TypeError, ValueError):
+
+                raise HTTPException(
+
+                    status_code=status.HTTP_400_BAD_REQUEST,
+
+                    detail="Invalid time slot"
+
+                )
+
+            slot_result = await db.execute(
+
+                select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+
+            )
+
+            slot_record = slot_result.scalar_one_or_none()
+
+            slots = _load_slots(slot_record.slots) if slot_record else []
+
+            slot_status = _load_slot_status(slot_record.slot) if slot_record else []
+
+            slot_index = slot_id - 1
+
+            if slot_index < 0 or slot_index >= len(slots):
+
+                raise HTTPException(
+
+                    status_code=status.HTTP_400_BAD_REQUEST,
+
+                    detail="Invalid time slot"
+
+                )
+
+            selected_slot = slots[slot_index]
+
+            if not _is_slot_available(selected_slot, slot_status, slot_index):
+
+                raise HTTPException(
+
+                    status_code=status.HTTP_400_BAD_REQUEST,
+
+                    detail="Clinic isn't opened yet."
+
+                )
+
+            if _slot_booking_cutoff_passed(selected_slot, datetime.now(CLINIC_TIMEZONE)):
+
+                raise HTTPException(
+
+                    status_code=status.HTTP_400_BAD_REQUEST,
+
+                    detail="This slot has already closed."
+
+                )
+
         
 
-        if clinic.end is not None:
+        if slot_id is None and clinic.end is not None:
 
             now = datetime.now(CLINIC_TIMEZONE)
 
             cutoff_minutes = clinic.booking_cutoff_minutes or 15
 
             end_hour = clinic.end
+
+            if end_hour < 0 or end_hour > 23:
+
+                raise HTTPException(
+
+                    status_code=status.HTTP_400_BAD_REQUEST,
+
+                    detail="Invalid clinic end time. Please select an available time slot."
+
+                )
 
             end_time_today = now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
 
@@ -3857,10 +3963,6 @@ async def create_appointment(
         # Smart Reach-Turn Logic: Send immediate email if booking during active slot with 0-1 people ahead
 
         try:
-
-            from datetime import datetime, timezone
-
-            from app.database.models import ClinicTimeSlot
 
             from app.services.email_service import send_queue_alert
 

@@ -11,6 +11,8 @@ interface TimeSlot {
   is_open: boolean;
 }
 
+const SERVE_UNLOCK_LEAD_MINUTES = 5;
+
 const SourceBadge = ({ source }: { source: string }) => {
   const map: Record<string, { label: string; className: string }> = {
     walkin:  { label: "Walk-in",  className: "bg-[#FFC107]/20 text-[#7A5800]" },
@@ -349,7 +351,8 @@ const ClinicControlQueue = () => {
 
       const [startHour, endHour] = slot.time_range;
 
-      if (currentTimeDecimal >= startHour && currentTimeDecimal < endHour) {
+      const unlockTime = startHour - SERVE_UNLOCK_LEAD_MINUTES / 60;
+      if (currentTimeDecimal >= unlockTime && currentTimeDecimal < endHour) {
         return true;
       }
     }

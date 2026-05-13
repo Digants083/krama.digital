@@ -181,12 +181,12 @@ const YourDetails = () => {
             <Search className="h-5 w-5" />
           </div>
           <h1 className="mb-2 text-center text-xl font-semibold text-foreground">
-            Your Details
+            Your Token
           </h1>
           <p className="mb-6 text-center text-sm text-muted-foreground">
             {appointments.length > 1 
               ? `Found ${appointments.length} appointments` 
-              : "Here's your appointment information"}
+              : "Here's your token information"}
           </p>
 
           <div className="space-y-4">
@@ -214,10 +214,10 @@ const YourDetails = () => {
           <Search className="h-6 w-6" />
         </div>
         <h1 className="mb-2 text-center text-xl font-semibold text-foreground">
-          Your Details
+          Your Token
         </h1>
         <p className="mb-6 text-center text-sm text-muted-foreground">
-          Enter your phone number to view your appointment details
+          Enter your phone number to view your token details
         </p>
 
         <div className="space-y-4">
@@ -259,7 +259,7 @@ const YourDetails = () => {
               Looking up...
             </span>
           ) : (
-            "View Details"
+            "View Token"
           )}
         </button>
       </div>
