@@ -1,6 +1,12 @@
 /favicon.ico
   Cache-Control: public, max-age=0, must-revalidate
 
+/favicon-16x16.png
+  Cache-Control: public, max-age=0, must-revalidate
+
+/favicon-32x32.png
+  Cache-Control: public, max-age=0, must-revalidate
+
 /favicon-48x48.png
   Cache-Control: public, max-age=0, must-revalidate
 
@@ -16,6 +22,12 @@
 /apple-touch-icon.png
   Cache-Control: public, max-age=0, must-revalidate
 
+/android-chrome-192x192.png
+  Cache-Control: public, max-age=0, must-revalidate
+
+/android-chrome-512x512.png
+  Cache-Control: public, max-age=0, must-revalidate
+
 /favicon-192x192.png
   Cache-Control: public, max-age=0, must-revalidate
 
@@ -23,6 +35,12 @@
   Cache-Control: public, max-age=0, must-revalidate
 
 /krama-logo.png
+  Cache-Control: public, max-age=0, must-revalidate
+
+/og-image.png
+  Cache-Control: public, max-age=0, must-revalidate
+
+/manifest.json
   Cache-Control: public, max-age=0, must-revalidate
 
 /site.webmanifest
