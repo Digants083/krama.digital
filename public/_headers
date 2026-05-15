@@ -4,6 +4,12 @@
 /digi-logo-v2.png
   Cache-Control: public, max-age=0, must-revalidate
 
+/favicon-new.png
+  Cache-Control: public, max-age=0, must-revalidate
+
+/apple-touch-icon-new.png
+  Cache-Control: public, max-age=0, must-revalidate
+
 /favicon.ico
   Cache-Control: public, max-age=0, must-revalidate
 
