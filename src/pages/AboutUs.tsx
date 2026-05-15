@@ -117,8 +117,8 @@ const AboutUs = () => {
                   <Mail className="w-5 h-5 text-[#00555A]" />
                   <div>
                     <p className="font-medium text-[#0F172A]">Email</p>
-                    <a href="mailto:digitalkrama@gmail.com" className="text-[#00555A] hover:text-[#00555A]/80 transition-all duration-200">
-                      digitalkrama@gmail.com
+                    <a href="mailto:reddit098609@gmail.com" className="text-[#00555A] hover:text-[#00555A]/80 transition-all duration-200">
+                      reddit098609@gmail.com
                     </a>
                   </div>
                 </div>

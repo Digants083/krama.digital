@@ -1,8 +1,9 @@
-﻿import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatTimeRange } from "@/lib/timeFormat";
+import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 
 interface Review {
   id: number;
@@ -13,11 +14,52 @@ interface Review {
   dislikes: number;
   created_at: string;
 }
+interface ClinicData {
+  clinic_id?: string;
+  clinic_name?: string;
+  doctor_name?: string;
+  street_address?: string;
+  road?: string;
+  layout?: string;
+  section?: string;
+  city?: string;
+  pincode?: string;
+  address?: string;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+  is_active?: boolean;
+  available?: boolean;
+}
+
+interface ClinicSlot {
+  slot_name: string;
+  time_range: number[];
+  slot_id?: number;
+  is_open: boolean | string | number | null;
+  is_expired?: boolean;
+  display_status?: string;
+}
+
+interface DisplayClinicSlot extends Omit<ClinicSlot, "is_open" | "is_expired" | "display_status"> {
+  is_open: boolean;
+  is_expired: boolean;
+  display_status: string;
+}
+
+interface AppointmentSummary {
+  clinic_id?: string;
+  status?: string;
+  date?: string;
+  time?: string;
+  appointment_token?: string;
+  patient_name?: string;
+  patient_phone?: string;
+}
 
 const ClinicDetails = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [clinic, setClinic] = useState<any>(null);
+  const [clinic, setClinic] = useState<ClinicData | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [averageRating, setAverageRating] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -27,7 +69,7 @@ const ClinicDetails = () => {
   const [selectedDate, setSelectedDate] = useState("");
   const [booking, setBooking] = useState(false);
   const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
-  const [timeSlots, setTimeSlots] = useState<any[]>([]);
+  const [timeSlots, setTimeSlots] = useState<DisplayClinicSlot[]>([]);
   const [userReactions, setUserReactions] = useState<{[key: number]: string}>({});
   const [patientId, setPatientId] = useState<string>("");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
@@ -93,7 +135,7 @@ const ClinicDetails = () => {
         const user = JSON.parse(userStr);
         const pid = user.patient_id || user.id;
         setPatientId(pid);
-        
+
         try {
           const response = await fetch(
             `/api/auth/reviews/user-reaction?clinic_id=${id}&patient_id=${pid}`
@@ -120,7 +162,7 @@ const ClinicDetails = () => {
 
   const handleLike = async (reviewId: number) => {
     if (!patientId) return;
-    
+
     try {
       const response = await fetch(
         `/api/auth/reviews/like?review_id=${reviewId}&patient_id=${patientId}`,
@@ -128,7 +170,7 @@ const ClinicDetails = () => {
       );
       if (response.ok) {
         const data = await response.json();
-        setReviews(reviews.map(r => 
+        setReviews(reviews.map(r =>
           r.id === reviewId ? { ...r, likes: data.likes, dislikes: data.dislikes } : r
         ));
         setUserReactions({ ...userReactions, [reviewId]: data.user_reaction });
@@ -140,7 +182,7 @@ const ClinicDetails = () => {
 
   const handleDislike = async (reviewId: number) => {
     if (!patientId) return;
-    
+
     try {
       const response = await fetch(
         `/api/auth/reviews/dislike?review_id=${reviewId}&patient_id=${patientId}`,
@@ -148,7 +190,7 @@ const ClinicDetails = () => {
       );
       if (response.ok) {
         const data = await response.json();
-        setReviews(reviews.map(r => 
+        setReviews(reviews.map(r =>
           r.id === reviewId ? { ...r, likes: data.likes, dislikes: data.dislikes } : r
         ));
         setUserReactions({ ...userReactions, [reviewId]: data.user_reaction });
@@ -163,34 +205,22 @@ const ClinicDetails = () => {
       const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${id}`);
       if (response.ok) {
         const data = await response.json();
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentTimeMinutes = currentHour * 60 + currentMinute;
-
         // Use slot array from database to determine open/close status
         const slotArray = data.slot || [];
 
         // Process slots and add disabled status based on current time
-        const processedSlots = (data.slots || []).map((slot: any, idx: number) => {
-          const startHour = slot.time_range[0];
-          const endHour = slot.time_range[1];
-          const endTimeMinutes = endHour * 60;
-          const cutoffTime = endTimeMinutes - 15; // 15 min before slot ends
-
-          // Check if slot is expired (current time past cutoff)
-          const isExpired = currentTimeMinutes >= cutoffTime;
-          // Use slot array to determine if open or closed
-          const isOpen = slotArray[idx] === "open";
+        const processedSlots = (data.slots || []).map((slot: ClinicSlot, idx: number) => {
+          const isOpen = isSlotManuallyOpen(slot, slotArray, idx);
+          const slotStatus = getPatientSlotStatus(slot.time_range, isOpen);
 
           return {
             ...slot,
             slot_id: idx + 1,
-            is_open: isOpen,
-            is_expired: isExpired,
-            display_status: isExpired ? "Expired" : (isOpen ? "Available" : "Not Available")
+            is_open: slotStatus.is_open,
+            is_expired: slotStatus.is_expired,
+            display_status: slotStatus.display_status
           };
-        }).sort((a: any, b: any) => {
+        }).sort((a: DisplayClinicSlot, b: DisplayClinicSlot) => {
           const aStart = a.time_range?.[0] ?? Number.POSITIVE_INFINITY;
           const bStart = b.time_range?.[0] ?? Number.POSITIVE_INFINITY;
           return aStart - bStart;
@@ -229,13 +259,13 @@ const ClinicDetails = () => {
       navigate("/patient/login");
       return;
     }
-    
+
     // Fetch time slots (now returns slots grouped by slot_name)
     fetchTimeSlots();
     setShowTimeSelection(true);
   };
 
-  const handleSlotSelect = (slot: any, slotIndex: number) => {
+  const handleSlotSelect = (slot: DisplayClinicSlot, slotIndex: number) => {
     if (!slot.is_open) {
       setMessage({text: "Clinic isn't opened yet.", type: "error"});
       return;
@@ -245,7 +275,7 @@ const ClinicDetails = () => {
       setMessage({text: "This slot has already closed.", type: "error"});
       return;
     }
-    
+
     const timeString = `${slot.slot_name} ${formatTimeRange(slot.time_range)}`;
     setSelectedTime(timeString);
     setSelectedSlotId(slot.slot_id ?? slotIndex + 1);
@@ -259,7 +289,7 @@ const ClinicDetails = () => {
 
     const today = new Date().toISOString().split('T')[0];
     setSelectedDate(today);
-    
+
     await proceedWithBooking(today);
   };
 
@@ -280,18 +310,18 @@ const ClinicDetails = () => {
       const user = JSON.parse(userStr);
       const patientEmail = user.email;
       const clinicId = clinic.clinic_id || id;
-      
+
       try {
         const appointmentsResponse = await fetch(`/api/auth/patient/appointments?email=${patientEmail}`);
         if (appointmentsResponse.ok) {
           const appointmentsData = await appointmentsResponse.json();
-          const activeBooking = appointmentsData.appointments?.find((apt: any) => 
-            apt.clinic_id === clinicId && 
-            apt.status !== "served" && 
+          const activeBooking = appointmentsData.appointments?.find((apt: AppointmentSummary) =>
+            apt.clinic_id === clinicId &&
+            apt.status !== "served" &&
             apt.status !== "completed" &&
             apt.status !== "cancelled"
           );
-          
+
           if (activeBooking) {
             // Show alert and navigate to confirmation
             alert("You have already booked this clinic. Please wait until your appointment is served.");
@@ -326,11 +356,11 @@ const ClinicDetails = () => {
       const user = JSON.parse(userStr);
 
       const clinicId = clinic.clinic_id || id;
-      
+
       // If patient_id is missing, fetch from patient data
       let patientId = user.patient_id;
       let patientPhone = user.phone;
-      
+
       if (!patientId || !patientPhone) {
         try {
           const patientDataResponse = await fetch(`/api/auth/patient/data?email=${user.email}`);
@@ -478,7 +508,7 @@ const ClinicDetails = () => {
             </div>
 
             <div className="hidden mt-4 flex h-36 items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
-              🗺️ Map placeholder - {clinic.address}
+              ??? Map placeholder - {clinic.address}
             </div>
 
             {/* Clinic Images Gallery - only show valid URLs */}
@@ -488,13 +518,13 @@ const ClinicDetails = () => {
                 <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
                   {clinic.image_urls.map((url: string | null, idx: number) => (
                     url ? (
-                      <div 
-                        key={idx} 
+                      <div
+                        key={idx}
                         className="relative aspect-square rounded-lg overflow-hidden border border-border cursor-pointer"
                         onClick={() => setSelectedImageIndex(idx)}
                       >
-                        <img 
-                          src={`/api${url}`} 
+                        <img
+                          src={`/api${url}`}
                           alt={`Clinic photo ${idx + 1}`}
                           className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
                           onError={(e) => {
@@ -513,7 +543,7 @@ const ClinicDetails = () => {
               <div className="mt-3 rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-                    <span className="text-lg">👨‍⚕️</span>
+                    <span className="text-lg">?????</span>
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground">{clinic.doctor_name || "Available Doctor"}</h3>
@@ -546,7 +576,7 @@ const ClinicDetails = () => {
                   <span className="text-sm font-medium">{averageRating.toFixed(1)}</span>
                 </div>
               </div>
-              
+
               {reviews.length === 0 ? (
                 <div className="text-center py-6 text-muted-foreground text-sm">
                   No reviews yet. Be the first to review!
@@ -575,13 +605,13 @@ const ClinicDetails = () => {
                           {new Date(review.created_at).toLocaleDateString()}
                         </span>
                       </div>
-                      
+
                       {review.review_text && (
                         <p className="text-sm text-muted-foreground mb-3">
                           {review.review_text}
                         </p>
                       )}
-                      
+
                       <div className="flex items-center gap-4">
                         <button
                           onClick={() => handleLike(review.id)}
@@ -616,7 +646,7 @@ const ClinicDetails = () => {
           /* Time Selection View - Show slots by slot_name */
           <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
             <h2 className="text-xl font-bold text-foreground mb-6">Select Time Slot</h2>
-            
+
             <div className="mb-6">
               <h3 className="font-semibold text-foreground">{clinic.clinic_name}</h3>
               <p className="text-sm text-muted-foreground">{clinic.doctor_name || "Available Doctor"}</p>
@@ -680,7 +710,7 @@ const ClinicDetails = () => {
                             </div>
                           ) : !isUnavailable && (
                             <div className="mt-1 flex items-center justify-end gap-1">
-                              <span className="text-lg">🧑</span>
+                              <span className="text-lg">??</span>
                               <span className="text-xs text-muted-foreground">
                                 {patientCount}
                               </span>
@@ -711,7 +741,7 @@ const ClinicDetails = () => {
 
       {/* Image Modal */}
       {selectedImageIndex !== null && clinic?.image_urls && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setSelectedImageIndex(null)}
         >

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePatient } from "@/context/PatientContext";
 import {
@@ -16,6 +16,9 @@ type Appointment = {
   date: string;
   time: string;
   status: string;
+  session_id?: number;
+  session_name?: string;
+  session_time?: string;
   address?: string;
 };
 
@@ -72,6 +75,9 @@ const PatientDashboard = () => {
         doctor: apt.doctor_name,
         date: apt.date,
         time: apt.time,
+        sessionName: apt.session_name,
+        sessionTime: apt.session_time,
+        sessionId: apt.session_id,
         address: apt.address || "",
       },
     });
@@ -125,6 +131,9 @@ const PatientDashboard = () => {
                   doctor: appointments[0].doctor_name,
                   date: appointments[0].date,
                   time: appointments[0].time,
+                  sessionName: appointments[0].session_name,
+                  sessionTime: appointments[0].session_time,
+                  sessionId: appointments[0].session_id,
                   address: appointments[0].address || "",
                 }}
                 className="rounded-[22px] bg-white/10 px-6 py-6 text-center transition hover:bg-white/20"

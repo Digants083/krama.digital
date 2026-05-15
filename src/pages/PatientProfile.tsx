@@ -238,7 +238,7 @@ const PatientProfile = () => {
             otp_code: otpCode,
           }),
         });
-        
+
         if (response.ok) {
           setCurrentPassword("");
           setNewPassword("");
@@ -347,6 +347,7 @@ const PatientProfile = () => {
             <div className="mt-8 grid gap-4 md:grid-cols-3">
               <ProfileStat label="Patient ID" value={dbProfile.patient_id} mono />
               <ProfileStat label="Phone" value={dbProfile.phone} />
+              <ProfileStat label="Blood Group" value={dbProfile.blood_group || "N/A"} />
               <ProfileStat label="Member Since" value={new Date(dbProfile.created_at).toLocaleDateString()} />
             </div>
           )}
@@ -388,15 +389,15 @@ const PatientProfile = () => {
               <>
                 <div>
                   <Label htmlFor="current-pw">Current Password</Label>
-                  <Input 
-                    id="current-pw" 
-                    type="password" 
-                    value={currentPassword} 
+                  <Input
+                    id="current-pw"
+                    type="password"
+                    value={currentPassword}
                     onChange={(e) => {
                       setCurrentPassword(e.target.value);
                       setPasswordVerified(false);
-                    }} 
-                    className="mt-2" 
+                    }}
+                    className="mt-2"
                   />
                 </div>
                 {passwordVerified ? (
@@ -518,7 +519,7 @@ const PatientProfile = () => {
                     />
                   </div>
                   <div className="flex flex-wrap gap-3">
-                    <Button 
+                    <Button
                       onClick={async () => {
                         if (!loggedInEmail || !deletePassword) return;
                         setVerifyingPassword(true);
@@ -544,8 +545,8 @@ const PatientProfile = () => {
                         } finally {
                           setVerifyingPassword(false);
                         }
-                      }} 
-                      disabled={!deletePassword || verifyingPassword} 
+                      }}
+                      disabled={!deletePassword || verifyingPassword}
                       className="bg-red-600 text-white hover:bg-red-700"
                     >
                       {verifyingPassword ? "Verifying..." : "Verify Password"}
@@ -561,7 +562,7 @@ const PatientProfile = () => {
                 <>
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                     <p className="text-sm text-amber-800">
-                      ✓ Password verified! We've sent an OTP to your email. Verify to delete your account.
+                      OK Password verified! We've sent an OTP to your email. Verify to delete your account.
                     </p>
                   </div>
                   <Button variant="outline" onClick={() => { setDeletePasswordVerified(false); setDeletePassword(""); }}>
@@ -588,13 +589,13 @@ const PatientProfile = () => {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {pendingAction === "phone" ? "Verify OTP for Phone Change" : 
-               pendingAction === "password_forgot" ? "Verify OTP for Password Reset" : 
+              {pendingAction === "phone" ? "Verify OTP for Phone Change" :
+               pendingAction === "password_forgot" ? "Verify OTP for Password Reset" :
                pendingAction === "delete" ? "Verify OTP for Account Deletion" :
                "Verify OTP"}
             </DialogTitle>
             <DialogDescription>
-              {pendingAction === "phone" 
+              {pendingAction === "phone"
                 ? `Enter the OTP sent to ${loggedInEmail} to verify your new phone number.`
                 : pendingAction === "password_forgot"
                 ? `Enter the OTP sent to ${loggedInEmail} to reset your password.`

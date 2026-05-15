@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { mockClinics } from "@/data/mockData";
 import type { Doctor } from "@/data/mockData";
@@ -9,8 +9,15 @@ import PatientTermsModal from "@/components/auth/PatientTermsModal";
 import { formatHourDecimal24, formatTimeRange } from "@/lib/timeFormat";
 
 interface ClinicTimeSlot {
-  slot_name: string;
-  time_range: number[];  // [start_hour, end_hour] e.g., [8, 11]
+  session_id: number;
+  slot_id: number;
+  slot_name?: string;
+  session_name: string;
+  time_range: number[];
+  time_label?: string;
+  status: string;
+  queue_count?: number;
+  delay_minutes?: number;
   is_open: boolean;
 }
 
@@ -49,27 +56,27 @@ const BookAppointment = () => {
 
   const dates = useMemo(generateDates, []);
 
-  // Fetch time slots when on step 1
-  useEffect(() => {
-    if (step === 1 && clinicId) {
-      fetchTimeSlots();
-    }
-  }, [step, clinicId]);
-
-  const fetchTimeSlots = async () => {
+  const fetchTimeSlots = useCallback(async () => {
     setLoadingSlots(true);
     try {
-      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${clinicId}`);
+      const response = await fetch(`/api/sessions/today/${clinicId}`);
       if (response.ok) {
         const data = await response.json();
-        setTimeSlots(data.slots || []);
+        setTimeSlots(data.sessions || []);
       }
     } catch (error) {
       console.error("Error fetching time slots:", error);
     } finally {
       setLoadingSlots(false);
     }
-  };
+  }, [clinicId]);
+
+  // Fetch time slots when on step 1
+  useEffect(() => {
+    if (step === 1 && clinicId) {
+      fetchTimeSlots();
+    }
+  }, [step, clinicId, fetchTimeSlots]);
 
   if (!clinic) return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Clinic not found.</div>;
 
@@ -81,21 +88,25 @@ const BookAppointment = () => {
     return true;
   };
 
-  const handleConfirm = () => {
+  const navigateToConfirmation = (booking: { token: string; appointment_id?: number }) => {
     navigate("/confirmation", {
       state: {
         clinic: clinic.name,
         doctor: selectedDoctor?.name,
         date: dates.find((d) => d.value === selectedDate)?.label,
-        timeRange: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
+        time: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
+        sessionName: selectedTimeSlot?.session_name || selectedTimeSlot?.slot_name,
+        sessionTime: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
+        sessionId: selectedTimeSlot?.session_id,
         address: clinic.address,
-        token: `T-${Math.floor(100 + Math.random() * 900)}`,
+        token: booking.token,
+        appointmentId: booking.appointment_id,
       },
     });
   };
 
   const proceedWithBooking = () => {
-    handleConfirm();
+    void handleBook();
   };
 
   const handleConfirmClick = () => {
@@ -103,38 +114,41 @@ const BookAppointment = () => {
     if (selectedDate !== today) {
       setShowTermsModal(true);
     } else {
-      proceedWithBooking();
+      void handleBook();
     }
   };
 
   const handleBook = async () => {
     // Create actual appointment
     try {
-      const patientData = localStorage.getItem("patientData");
+      const patientData = localStorage.getItem("patientData") || localStorage.getItem("user");
       const patient = patientData ? JSON.parse(patientData) : null;
 
-      const selectedSlot = timeSlots[selectedSlotIndex || 0];
+      const selectedSlot = selectedTimeSlot || timeSlots[selectedSlotIndex || 0];
       const timeRange = selectedSlot?.time_range || [9, 10];
       const time = formatHourDecimal24(timeRange[0]);
+      const sessionId = selectedSlot?.session_id || ((selectedSlotIndex || 0) + 1);
 
-      const response = await fetch("/api/auth/appointments", {
+      const response = await fetch("/api/auth/appointments/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clinic_id: clinicId,
           doctor_name: selectedDoctor?.name || selectedDoctor?.id,
-          patient_id: patient?.id,
+          patient_id: patient?.patient_id || patient?.id,
           patient_name: patient?.name,
           patient_email: patient?.email,
           patient_phone: patient?.phone,
           date: selectedDate,
           time: time,
-          slot_id: (selectedSlotIndex || 0) + 1, // 1-based slot ID
+          slot_id: sessionId,
+          session_id: sessionId
         }),
       });
 
       if (response.ok) {
-        handleConfirm();
+        const booking = await response.json();
+        navigateToConfirmation({ token: booking.token || booking.appointment_token || "T-1", appointment_id: booking.appointment_id });
       } else {
         const errorData = await response.json().catch(() => ({}));
         console.error("Booking failed:", errorData);
@@ -250,7 +264,7 @@ const BookAppointment = () => {
           <section className="space-y-3">
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
               <p className="text-sm text-primary font-medium">
-                Selected: {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`}
+                Selected: {selectedTimeSlot && `${selectedTimeSlot.session_name || selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`}
               </p>
             </div>
             <h2 className="text-lg font-semibold text-foreground">Select a Doctor</h2>
@@ -297,7 +311,8 @@ const BookAppointment = () => {
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between"><dt className="text-muted-foreground">Clinic</dt><dd className="font-medium text-foreground">{clinic.name}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Doctor</dt><dd className="font-medium text-foreground">{selectedDoctor?.name}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Time</dt><dd className="font-medium text-foreground">{selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Session</dt><dd className="font-medium text-foreground">{selectedTimeSlot && `${selectedTimeSlot.session_name || selectedTimeSlot.slot_name}`}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Time</dt><dd className="font-medium text-foreground">{selectedTimeSlot && formatTimeRange(selectedTimeSlot.time_range)}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Date</dt><dd className="font-medium text-foreground">{dates.find((d) => d.value === selectedDate)?.label}</dd></div>
             </dl>
             <p className="mt-4 rounded-lg bg-accent/10 px-4 py-2 text-sm text-accent">

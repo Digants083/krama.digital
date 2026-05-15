@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -65,7 +65,7 @@ const ClinicLogin = () => {
         localStorage.setItem("clinic_id", data.clinic_id);
       }
 
-      // 🚀 Redirect to clinic dashboard immediately
+      // ?? Redirect to clinic dashboard immediately
       navigate("/clinic");
     } catch (err) {
       setError("Network error. Please try again.");

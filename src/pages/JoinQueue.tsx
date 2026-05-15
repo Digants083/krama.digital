@@ -3,18 +3,39 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
 import { ArrowRight, MapPinned, Search, Ticket } from "lucide-react";
+import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 
-// ─── Types ────────────────────────────────────────────────────────────────────────────────
+// Types
 interface TimeSlot {
   slot_name: string;
+  session_name?: string;
   time_range: number[];
+  time_label?: string;
   slot_id?: number;
+  session_id?: number;
   is_open: boolean;
   is_expired: boolean;
   display_status: string;
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────────────────
+type RawTimeSlot = Omit<TimeSlot, "is_open" | "is_expired" | "display_status"> & {
+  is_open?: boolean | string | number | null;
+  is_expired?: boolean;
+  display_status?: string;
+};
+
+type SessionSlot = {
+  session_id: number;
+  slot_id?: number;
+  session_name?: string;
+  slot_name?: string;
+  time_range: number[];
+  time_label?: string;
+  status?: string;
+  is_open?: boolean;
+};
+
+// Types
 interface Doctor {
   id: string;
   name: string;
@@ -31,7 +52,7 @@ interface ClinicInfo {
 
 type Step = "options" | "form" | "loading" | "success" | "error";
 
-// ─── Component ────────────────────────────────────────────────────────────────────────────────
+// Component
 const JoinQueue = () => {
   // QR codes should link to /join?clinic_id=XYZ
   const [searchParams] = useSearchParams();
@@ -54,23 +75,6 @@ const JoinQueue = () => {
     return formatSlotTimeRange([start, end]);
   };
 
-  // Check if a slot has expired based on current time (15 min before slot ends)
-  const isSlotExpired = (timeRange: number[]) => {
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const endTimeMinutes = timeRange[1] * 60;
-    const cutoffMinutes = endTimeMinutes - 15; // 15 min before slot ends
-
-    // Handle overnight slots (end > 24 means next day)
-    if (timeRange[1] > 24) {
-      const normalizedEndMinutes = (timeRange[1] - 24) * 60;
-      const normalizedCutoffMinutes = normalizedEndMinutes - 15;
-      return currentMinutes >= normalizedCutoffMinutes;
-    }
-
-    // Normal slot: check if current time is past cutoff (15 min before end)
-    return currentMinutes >= cutoffMinutes;
-  };
   const [clinicLoading, setClinicLoading] = useState(false);
   const [tokenResult, setTokenResult] = useState<{
     token_label: string;
@@ -78,7 +82,7 @@ const JoinQueue = () => {
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // ─── Fetch clinic info when clinic_id is known ────────────────────────────────────────────────
+  // Fetch clinic info when clinic_id is known
   useEffect(() => {
     if (!qrClinicId) return;
     setClinicLoading(true);
@@ -99,42 +103,83 @@ const JoinQueue = () => {
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
 
-  // ─── Fetch time slots ───────────────────────────────────────────────────────────────────────
+  // Fetch time slots from the same session status source used by clinic dashboards
   useEffect(() => {
     if (!qrClinicId) return;
-    setSlotsLoading(true);
-    fetch(`/api/auth/clinic/time-slots?clinic_id=${qrClinicId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        const slotArray = data.slot || [];
-        const slots = (data.slots || []).map((s: any, idx: number) => {
-          const isOpen = slotArray[idx] === "open";
-          const isExpired = isSlotExpired(s.time_range);
-          return {
-            ...s,
-            slot_id: idx + 1,
-            is_open: isOpen,
-            is_expired: isExpired,
-            display_status: isExpired ? "Expired" : (isOpen ? "Available" : "Not Available")
-          };
-        }).sort((a: TimeSlot, b: TimeSlot) => {
-          const aStart = a.time_range?.[0] ?? Number.POSITIVE_INFINITY;
-          const bStart = b.time_range?.[0] ?? Number.POSITIVE_INFINITY;
-          return aStart - bStart;
-        });
-        // Show ALL slots - open and closed (closed slots will be disabled)
-        setTimeSlots(slots);
-      })
-      .catch(() => setTimeSlots([]))
-      .finally(() => setSlotsLoading(false));
-  }, [qrClinicId]);
 
-  // ─── Handle sign up option ───────────────────────────────────────────────────────────────────
+    const toDisplayName = (slot: Pick<TimeSlot, "session_name" | "slot_name" | "session_id" | "slot_id">) => {
+      const rawName = slot.session_name || slot.slot_name || `Session ${slot.session_id || slot.slot_id || ""}`;
+      return rawName.replace("Time ", "Session ");
+    };
+
+    const mapSessionSlot = (session: SessionSlot): TimeSlot => {
+      const slotStatus = getPatientSlotStatus(session.time_range, Boolean(session.is_open), new Date(), session.status);
+      return {
+        ...session,
+        slot_name: toDisplayName(session),
+        slot_id: session.session_id || session.slot_id,
+        session_id: session.session_id,
+        is_open: slotStatus.is_open,
+        is_expired: slotStatus.is_expired,
+        display_status: slotStatus.display_status,
+      };
+    };
+
+    const mapLegacySlot = (slot: RawTimeSlot, idx: number, slotArray: string[]): TimeSlot => {
+      const isOpen = isSlotManuallyOpen(slot, slotArray, idx);
+      const slotStatus = getPatientSlotStatus(slot.time_range, isOpen);
+      const slotId = idx + 1;
+      return {
+        ...slot,
+        slot_name: toDisplayName({ ...slot, slot_id: slotId }),
+        slot_id: slotId,
+        session_id: slotId,
+        is_open: slotStatus.is_open,
+        is_expired: slotStatus.is_expired,
+        display_status: slotStatus.display_status,
+      };
+    };
+
+    const sortSlots = (a: TimeSlot, b: TimeSlot) => {
+      const aStart = a.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+      const bStart = b.time_range?.[0] ?? Number.POSITIVE_INFINITY;
+      return aStart - bStart;
+    };
+
+    const fetchSlots = async () => {
+      setSlotsLoading(true);
+      try {
+        const sessionsResponse = await fetch(`/api/sessions/today/${encodeURIComponent(qrClinicId)}`);
+        if (sessionsResponse.ok) {
+          const data = await sessionsResponse.json();
+          const sessions = (data.sessions || []).map(mapSessionSlot).sort(sortSlots);
+          if (sessions.length > 0) {
+            setTimeSlots(sessions);
+            return;
+          }
+        }
+
+        const legacyResponse = await fetch(`/api/auth/clinic/time-slots?clinic_id=${encodeURIComponent(qrClinicId)}`);
+        const legacyData = await legacyResponse.json();
+        const slotArray = legacyData.slot || [];
+        const slots = (legacyData.slots || []).map((slot: RawTimeSlot, idx: number) => mapLegacySlot(slot, idx, slotArray)).sort(sortSlots);
+        setTimeSlots(slots);
+      } catch (error) {
+        console.error("Error fetching time slots:", error);
+        setTimeSlots([]);
+      } finally {
+        setSlotsLoading(false);
+      }
+    };
+
+    void fetchSlots();
+  }, [qrClinicId]);
+  // Handle sign up option
   const handleSignUp = () => {
     navigate("/patient/signup", { state: { fromJoinQueue: true, clinic_id: qrClinicId } });
   };
 
-  // ─── Handle quick book option ───────────────────────────────────────────────────────────────
+  // Handle quick book option
   const handleQuickBook = async () => {
     setErrorMsg("");
     setQuickBookChecking(true);
@@ -183,16 +228,19 @@ const JoinQueue = () => {
     setSelectedSlotId(slotNum);
   };
 
-  // ─── Validation ────────────────────────────────────────────────────────────────────────────────
+  // Validation
   const phoneRegex = /^[6-9]\d{9}$/;
+  const selectedSlot = timeSlots.find((slot) => (slot.slot_id || slot.session_id) === selectedSlotId);
   const isValid =
     name.trim().length >= 2 &&
     phoneRegex.test(phone.trim()) &&
     selectedSlotId !== "" &&
     clinicInfo?.isActive !== false &&
+    Boolean(selectedSlot?.is_open) &&
+    !selectedSlot?.is_expired &&
     timeSlots.length > 0; // Ensure slots are loaded
 
-  // ─── Submit ────────────────────────────────────────────────────────────────────────────────────
+  // Submit
   const handleJoin = async () => {
     if (!isValid || !clinicInfo) return;
     setStep("loading");
@@ -229,12 +277,12 @@ const JoinQueue = () => {
     }
   };
 
-  // ─── Go back to home ────────────────────────────────────────────────────────────────────────────
+  // Go back to home
   const handleGoHome = () => {
     window.location.href = "/";
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────────────────────────
+  // Render
 
   // Invalid QR code
   if (!qrClinicId) {
@@ -273,7 +321,7 @@ const JoinQueue = () => {
           {clinicInfo && (
             <p className="mb-6 text-sm font-medium text-primary">{clinicInfo.name}</p>
           )}
-          
+
           {errorMsg && (
             <div className="mb-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {errorMsg}
@@ -485,6 +533,13 @@ const JoinQueue = () => {
                   const slotNum = slot.slot_id ?? idx + 1;
                   const isUnavailable = !slot.is_open || slot.is_expired;
                   const isSelected = selectedSlotId === slotNum;
+                  const statusBadgeClass = slot.display_status === "Expired"
+                    ? "bg-red-100 text-red-700"
+                    : slot.display_status === "Delayed"
+                      ? "bg-orange-100 text-orange-700"
+                      : slot.display_status === "Closed" || slot.display_status === "Not Available"
+                        ? "bg-slate-200 text-slate-600"
+                        : "bg-primary/10 text-primary";
 
                   return (
                     <button
@@ -503,20 +558,16 @@ const JoinQueue = () => {
                     >
                       <span>
                         <span className="block text-sm font-semibold">
-                          {slot.slot_name || `Slot ${slotNum}`}
+                          {slot.slot_name || `Session ${slotNum}`}
                         </span>
                         <span className={isSelected ? "mt-0.5 block text-xs text-white/75" : "mt-0.5 block text-xs text-muted-foreground"}>
-                          {formatTimeRange(slot.time_range[0], slot.time_range[1])}
+                          {slot.time_label || formatTimeRange(slot.time_range[0], slot.time_range[1])}
                         </span>
                       </span>
                       <span
                         className={[
                           "rounded-full px-2.5 py-1 text-[11px] font-semibold",
-                          isSelected
-                            ? "bg-white/15 text-white"
-                            : isUnavailable
-                              ? "bg-[#FFC107]/20 text-[#7A5800]"
-                              : "bg-primary/10 text-primary"
+                          isSelected ? "bg-white/15 text-white" : statusBadgeClass
                         ].join(" ")}
                       >
                         {slot.display_status}
@@ -530,7 +581,7 @@ const JoinQueue = () => {
             )}
           </div>
 
-          {/* Doctor selector — shown only if clinic has multiple doctors */}
+          {/* Doctor selector - shown only if clinic has multiple doctors */}
           {clinicInfo && clinicInfo.doctors.length > 1 && (
             <div>
               <label className="mb-1 block text-xs font-medium text-primary">Select doctor</label>
@@ -542,7 +593,7 @@ const JoinQueue = () => {
                 <option value="">Any available doctor</option>
                 {clinicInfo.doctors.map((doc) => (
                   <option key={doc.id} value={doc.id}>
-                    {doc.name}{doc.specialization ? ` — ${doc.specialization}` : ""}
+                    {doc.name}{doc.specialization ? ` - ${doc.specialization}` : ""}
                   </option>
                 ))}
               </select>
@@ -573,7 +624,7 @@ const JoinQueue = () => {
           onClick={() => setStep("options")}
           className="mt-3 w-full text-xs text-muted-foreground hover:text-primary"
         >
-          ← Back to options
+          Back to options
         </button>
       </div>
     </div>

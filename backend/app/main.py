@@ -13,7 +13,7 @@ from app.database.schema_checks import ensure_required_schema
 
 install_starlette_router_compat()
 
-from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports
+from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports, patient_history, sessions
 from app.services.email_service import send_queue_alert
 from app.services.appointment_maintenance import check_appointment_dates, cleanup_old_appointments
 import json
@@ -277,17 +277,17 @@ async def scheduled_midnight_cleanup():
     while True:
         try:
             now = datetime.now()
-            
+
             # Check if it's midnight (between 00:00 and 00:01)
             if now.hour == 0 and now.minute == 0:
                 print(f"[Midnight Cleanup] Running cleanup for {now.strftime('%Y-%m-%d')}...")
                 cleaned_count = await cleanup_old_appointments(delete_completed_before_yesterday=True)
                 print(f"[Midnight Cleanup] Cleaned up {cleaned_count} old appointments")
                 print("[Midnight Cleanup] Done!")
-            
+
             # Check every minute
             await asyncio.sleep(60)
-            
+
         except Exception as e:
             logger.error(f"Error in scheduled midnight cleanup: {e}")
             await asyncio.sleep(60)
@@ -478,6 +478,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE appointments "
             "ADD COLUMN IF NOT EXISTS slot_id INTEGER"
         )
+        await safe_exec("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS session_id INTEGER")
         await safe_exec(
             "ALTER TABLE appointments "
             "ADD COLUMN IF NOT EXISTS push_count INTEGER DEFAULT 0"
@@ -485,6 +486,10 @@ async def lifespan(app: FastAPI):
         await safe_exec(
             "ALTER TABLE appointments "
             "ADD COLUMN IF NOT EXISTS queue_position INTEGER"
+        )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS doctor_delay VARCHAR"
         )
 
         await safe_exec(
@@ -495,15 +500,21 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE qr_appointments "
             "ADD COLUMN IF NOT EXISTS slot_id INTEGER"
         )
+        await safe_exec("ALTER TABLE qr_appointments ADD COLUMN IF NOT EXISTS session_id INTEGER")
         await safe_exec(
             "ALTER TABLE qr_appointments "
             "ADD COLUMN IF NOT EXISTS queue_position INTEGER"
+        )
+        await safe_exec(
+            "ALTER TABLE qr_appointments "
+            "ADD COLUMN IF NOT EXISTS doctor_delay VARCHAR"
         )
 
         await safe_exec(
             "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS slot_id INTEGER"
         )
+        await safe_exec("ALTER TABLE completed_appointments ADD COLUMN IF NOT EXISTS session_id INTEGER")
         await safe_exec(
             "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS finished_at TIMESTAMP"
@@ -528,7 +539,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS push_count INTEGER DEFAULT 0"
         )
-        
+        await safe_exec("ALTER TABLE completed_appointments ADD COLUMN IF NOT EXISTS diagnosis VARCHAR")
+        await safe_exec("ALTER TABLE completed_appointments ADD COLUMN IF NOT EXISTS notes VARCHAR")
+
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS category VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS categories JSON")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS street_address VARCHAR")
@@ -546,6 +559,29 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS booking_cutoff_minutes INTEGER DEFAULT 15")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS manual_stop_date VARCHAR")
+        await safe_exec("ALTER TABLE patients ADD COLUMN IF NOT EXISTS blood_group VARCHAR")
+        await safe_exec("ALTER TABLE otp_verifications ADD COLUMN IF NOT EXISTS user_blood_group VARCHAR")
+
+        await safe_exec("""
+            CREATE TABLE IF NOT EXISTS doctor_sessions (
+                id SERIAL PRIMARY KEY,
+                clinic_id VARCHAR NOT NULL,
+                doctor_id VARCHAR,
+                session_name VARCHAR NOT NULL,
+                start_time VARCHAR NOT NULL,
+                end_time VARCHAR NOT NULL,
+                status VARCHAR DEFAULT 'available',
+                delay_minutes INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                slot_id INTEGER,
+                session_date VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_clinic_id ON doctor_sessions(clinic_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_slot_id ON doctor_sessions(slot_id)")
+
 
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS daily_toggle_counts JSON DEFAULT '[]'")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS slots JSON DEFAULT '[]'")
@@ -572,7 +608,7 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE pending_clinic_registrations DROP COLUMN IF EXISTS admin_notes")
         await safe_exec("ALTER TABLE pending_clinic_registrations DROP COLUMN IF EXISTS approved_at")
         await safe_exec("ALTER TABLE pending_clinic_registrations DROP COLUMN IF EXISTS approved_by")
-        
+
         await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS category VARCHAR")
         await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS categories JSON")
         await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS street_address VARCHAR")
@@ -676,7 +712,7 @@ async def lifespan(app: FastAPI):
             logger.info("Created admin accounts: admin1 and admin2")
 
         await ensure_required_schema(conn)
-    
+
     # Start background scheduled tasks
     pre_slot_task = asyncio.create_task(scheduled_pre_slot_notifications())
     midnight_cleanup_task = asyncio.create_task(scheduled_midnight_cleanup())
@@ -727,6 +763,8 @@ app.include_router(password_reset.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(patient_reports.router, prefix="/api")
+app.include_router(patient_history.router, prefix="/api")
+app.include_router(sessions.router, prefix="/api")
 
 @app.get("/")
 async def root():
