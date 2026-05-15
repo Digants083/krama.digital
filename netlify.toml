@@ -1,6 +1,6 @@
 [build]
   base = ""
-  command = "bun run build"
+  command = "npm run build"
   publish = "dist"
 
 [functions]
@@ -22,20 +22,15 @@
   force = true
 
 [[redirects]]
-  from = "/apple-touch-icon-precomposed.png"
-  to = "/apple-touch-icon.png"
-  status = 200
-
-[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
 [context.production]
-  command = "bun run build"
+  command = "npm run build"
 
 [context.deploy-preview]
-  command = "bun run build"
+  command = "npm run build"
 
 [context.branch-deploy]
-  command = "bun run build"
+  command = "npm run build"
