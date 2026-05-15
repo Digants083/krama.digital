@@ -12,7 +12,8 @@ import PatientFindClinics from "./pages/PatientFindClinics";
 import PatientReviews from "./pages/PatientReviews";
 import PatientWriteReview from "./pages/PatientWriteReview";
 import PatientProfile from "./pages/PatientProfile";
-import ClinicDashboard from "./pages/ClinicDashboard";
+import ClinicDashboard from "./pages/ClinicDashboardNew";
+import DoctorDashboard from "./pages/DoctorDashboard";
 import ClinicControlQueue from "./pages/ClinicControlQueue";
 import ClinicManageTime from "./pages/ClinicManageTime";
 import ClinicLook from "./pages/ClinicLook";
@@ -41,7 +42,6 @@ import AboutUs from "./pages/AboutUs";
 import YourDetails from "./pages/YourDetails";
 import NotFound from "./pages/NotFound";
 
-
 function App() {
   return (
     <QueueProvider>
@@ -64,6 +64,7 @@ function App() {
 
             {/* Clinic Auth with Header */}
             <Route path="/clinic/login" element={<MainLayout><ClinicLogin /></MainLayout>} />
+
             <Route path="/clinic/register" element={<MainLayout><ClinicSignup /></MainLayout>} />
             <Route path="/clinic/register/success" element={<MainLayout><ClinicRegistrationSuccess /></MainLayout>} />
             <Route path="/clinic/forgot-password" element={<MainLayout><PatientForgotPassword /></MainLayout>} />
@@ -92,6 +93,8 @@ function App() {
             <Route path="/clinic/look" element={<NoHeaderLayout><ClinicLook /></NoHeaderLayout>} />
             <Route path="/clinic/profile" element={<NoHeaderLayout><ClinicProfile /></NoHeaderLayout>} />
             <Route path="/clinic/reports" element={<NoHeaderLayout><ClinicPatientReports /></NoHeaderLayout>} />
+            <Route
+            path="/doctor-dashboard" element={<NoHeaderLayout><DoctorDashboard /></NoHeaderLayout>} />
 
             {/* Admin Area - Secure Routes */}
             <Route path="/admin" element={<Navigate to="/admin/login" replace />} />

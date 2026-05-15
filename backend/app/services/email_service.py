@@ -4,7 +4,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 import os
 import logging
-from typing import Optional
+from html import escape
+from typing import Optional, Iterable, Mapping, Any
 from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables (ensure we pick up backend/.env when running uvicorn)
@@ -68,7 +69,7 @@ class EmailService:
                 <p>This code expires in <strong>5 minutes</strong>.</p>
                 <p>If you didn't request this code, please ignore this email.</p>
                 <div class="footer">
-                    <p>© 2024 Krama Clinic. All rights reserved.</p>
+                    <p>(c) 2024 Krama Clinic. All rights reserved.</p>
                 </div>
             </div>
         </body>
@@ -86,7 +87,7 @@ class EmailService:
         
         If you didn't request this code, please ignore this email.
         
-        © 2024 Krama Clinic
+        (c) 2024 Krama Clinic
         """
         
         return self._send_email(to_email, subject, text_content, html_content)
@@ -108,7 +109,6 @@ class EmailService:
         safe_clinic = clinic_name or "the clinic"
         safe_token = token_number or "TBD"
         safe_doctor = doctor_name or "Assigned Doctor"
-
         # Generate Google Maps link if coordinates are available
         if latitude and longitude:
             google_maps_url = f"https://maps.google.com/?q={latitude},{longitude}"
@@ -265,6 +265,76 @@ def send_queue_alert(
     )
 
 
+def send_delay_summary_email(
+    to_email: str,
+    clinic_name: str,
+    doctor_name: str,
+    delay: str,
+    current_patient: Optional[Mapping[str, Any]],
+    queue_items: Iterable[Mapping[str, Any]],
+) -> bool:
+    """Send the clinic/system email summary for a doctor delay announcement."""
+    safe_clinic = clinic_name or "the clinic"
+    safe_doctor = doctor_name or "Assigned Doctor"
+    safe_delay = delay or "a short while"
+    rows = []
+    text_rows = []
+
+    for item in queue_items:
+        name = str(item.get("patient_name") or item.get("name") or "Patient")
+        token = str(item.get("token") or item.get("appointment_token") or "TBD")
+        blood_group = str(item.get("blood_group") or "N/A")
+        wait = item.get("estimated_wait_minutes")
+        status = str(item.get("status") or "waiting")
+        wait_label = f"{wait} min" if wait is not None else "TBD"
+        rows.append(
+            "<tr>"
+            f"<td>{escape(token)}</td>"
+            f"<td>{escape(name)}</td>"
+            f"<td>{escape(blood_group)}</td>"
+            f"<td>{escape(status)}</td>"
+            f"<td>{escape(wait_label)}</td>"
+            "</tr>"
+        )
+        text_rows.append(f"- {token}: {name} | Blood group: {blood_group} | Status: {status} | Est. wait: {wait_label}")
+
+    current_name = (current_patient or {}).get("patient_name") or (current_patient or {}).get("name") or "None"
+    current_token = (current_patient or {}).get("token") or (current_patient or {}).get("appointment_token") or "N/A"
+    current_blood = (current_patient or {}).get("blood_group") or "N/A"
+
+    subject = f"Delay announced for {safe_clinic}"
+    text_content = f"""
+    Doctor delay announced
+
+    Clinic: {safe_clinic}
+    Doctor: {safe_doctor}
+    Delay Duration: {safe_delay}
+    Current Patient: {current_token} - {current_name} (Blood group: {current_blood})
+
+    Queue Updates:
+    {chr(10).join(text_rows) if text_rows else 'No waiting patients.'}
+    """.strip()
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333;">
+      <div style="max-width: 720px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #92400e;">Doctor Delay Announced</h2>
+        <p><strong>Clinic:</strong> {escape(safe_clinic)}</p>
+        <p><strong>Doctor:</strong> {escape(safe_doctor)}</p>
+        <p><strong>Delay Duration:</strong> {escape(safe_delay)}</p>
+        <p><strong>Current Patient:</strong> {escape(str(current_token))} - {escape(str(current_name))} (Blood group: {escape(str(current_blood))})</p>
+        <table cellspacing="0" cellpadding="8" style="border-collapse: collapse; width: 100%; border: 1px solid #ead7aa;">
+          <thead><tr style="background: #fffbeb;"><th align="left">Token</th><th align="left">Patient</th><th align="left">Blood Group</th><th align="left">Status</th><th align="left">Estimated Wait</th></tr></thead>
+          <tbody>{''.join(rows) if rows else '<tr><td colspan="5">No waiting patients.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </body>
+    </html>
+    """.strip()
+
+    return email_service._send_email(to_email, subject, text_content, html_content)
 # ============ Clinic Registration Email Functions ============
 
 def send_clinic_registration_received_email(to_email: str, clinic_name: str) -> bool:
@@ -309,7 +379,7 @@ def send_clinic_registration_received_email(to_email: str, clinic_name: str) -> 
                 <strong>Krama Care Team</strong></p>
             </div>
             <div class="footer">
-                <p>© 2024 Krama Care. All rights reserved.</p>
+                <p>(c) 2024 Krama Care. All rights reserved.</p>
             </div>
         </div>
     </body>
@@ -334,7 +404,7 @@ def send_clinic_registration_received_email(to_email: str, clinic_name: str) -> 
     Best regards,
     Krama Care Team
     
-    © 2024 Krama Care. All rights reserved.
+    (c) 2024 Krama Care. All rights reserved.
     """
     
     return email_service._send_email(to_email, subject, text_content, html_content)
@@ -387,7 +457,7 @@ def send_clinic_approval_email(to_email: str, clinic_name: str, clinic_id: str) 
                 <strong>Krama Care Team</strong></p>
             </div>
             <div class="footer">
-                <p>© 2024 Krama Care. All rights reserved.</p>
+                <p>(c) 2024 Krama Care. All rights reserved.</p>
             </div>
         </div>
     </body>
@@ -413,7 +483,7 @@ def send_clinic_approval_email(to_email: str, clinic_name: str, clinic_id: str) 
     Best regards,
     Krama Care Team
     
-    © 2024 Krama Care. All rights reserved.
+    (c) 2024 Krama Care. All rights reserved.
     """
     
     return email_service._send_email(to_email, subject, text_content, html_content)
@@ -598,7 +668,7 @@ def send_clinic_rejection_email(to_email: str, clinic_name: str, reason: str = N
                 <strong>Krama Care Team</strong></p>
             </div>
             <div class="footer">
-                <p>© 2024 Krama Care. All rights reserved.</p>
+                <p>(c) 2024 Krama Care. All rights reserved.</p>
             </div>
         </div>
     </body>
@@ -621,7 +691,7 @@ def send_clinic_rejection_email(to_email: str, clinic_name: str, reason: str = N
     Best regards,
     Krama Care Team
 
-    © 2024 Krama Care. All rights reserved.
+    (c) 2024 Krama Care. All rights reserved.
     """
 
     return email_service._send_email(to_email, subject, text_content, html_content)
@@ -709,7 +779,7 @@ def send_patient_report_email(
                 </div>
 
                 <div style="background: #f0f0f0; padding: 20px; text-align: center; font-size: 12px; color: #888;">
-                    <p style="margin: 0;">© 2024 Krama Care. All rights reserved.</p>
+                    <p style="margin: 0;">(c) 2024 Krama Care. All rights reserved.</p>
                 </div>
             </div>
         </body>
@@ -734,7 +804,7 @@ def send_patient_report_email(
         Best regards,
         {clinic_name} Team
 
-        © 2024 Krama Care. All rights reserved.
+        (c) 2024 Krama Care. All rights reserved.
         """
 
         # Create email with attachment
@@ -828,7 +898,7 @@ def send_admin_otp_email(to_email: str, otp_code: str, admin_username: str) -> b
 
                 <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #999; font-size: 12px;">
                     <p style="margin: 0;">This is an automated email from Krama Admin System.</p>
-                    <p style="margin: 5px 0 0 0;">© 2024 Krama Care. All rights reserved.</p>
+                    <p style="margin: 5px 0 0 0;">(c) 2024 Krama Care. All rights reserved.</p>
                 </div>
             </div>
         </body>
@@ -847,7 +917,7 @@ def send_admin_otp_email(to_email: str, otp_code: str, admin_username: str) -> b
         For security reasons, never share your OTP with anyone.
 
         This is an automated email from Krama Admin System.
-        © 2024 Krama Care. All rights reserved.
+        (c) 2024 Krama Care. All rights reserved.
         """
 
         # Create email
@@ -879,3 +949,162 @@ def send_admin_otp_email(to_email: str, otp_code: str, admin_username: str) -> b
     except Exception as e:
         logger.error("Unexpected error sending admin OTP email to %s: %s", to_email, str(e))
         return False
+
+
+def send_patient_delay_email(
+    to_email: str,
+    patient_name: str,
+    clinic_name: str,
+    delay: str,
+    session_name: Optional[str] = None,
+    token_number: Optional[str] = None,
+) -> bool:
+    """Send a session-specific delay notice to one patient."""
+    try:
+        email_service = EmailService()
+        if not email_service.smtp_user or not email_service.smtp_password:
+            logger.warning("Patient delay email skipped for %s: SMTP not configured", to_email)
+            return False
+
+        safe_patient = patient_name or "Patient"
+        safe_clinic = clinic_name or "Clinic"
+        safe_delay = delay or "a short while"
+        safe_session = session_name or "your session"
+        safe_token = token_number or "your token"
+        subject = f"Session Delay Update - {safe_delay}"
+
+        text_content = f"""
+Hello {safe_patient},
+
+Your appointment session at {safe_clinic} is delayed by {safe_delay}.
+Session: {safe_session}
+Token: {safe_token}
+
+Please follow your live ticket for updated queue movement.
+
+Regards,
+{safe_clinic}
+"""
+        html_content = f"""
+        <html><body style="font-family: Arial, sans-serif; color: #1f2937;">
+          <h2>Session Delay Update</h2>
+          <p>Hello {escape(str(safe_patient))},</p>
+          <p>Your appointment session at <strong>{escape(str(safe_clinic))}</strong> is delayed by <strong>{escape(str(safe_delay))}</strong>.</p>
+          <p><strong>Session:</strong> {escape(str(safe_session))}<br/><strong>Token:</strong> {escape(str(safe_token))}</p>
+          <p>Please follow your live ticket for updated queue movement.</p>
+        </body></html>
+        """
+
+        msg = MIMEMultipart("alternative")
+        msg["From"] = email_service.sender_email
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(text_content, "plain"))
+        msg.attach(MIMEText(html_content, "html"))
+
+        with smtplib.SMTP(email_service.smtp_host, email_service.smtp_port, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(email_service.smtp_user, email_service.smtp_password)
+            server.sendmail(email_service.sender_email, to_email, msg.as_string())
+
+        return True
+    except Exception as exc:
+        logger.error("Failed to send patient delay email to %s: %s", to_email, exc)
+        return False
+
+def send_delay_alert(
+    to_email: str,
+    delay: str,
+    appointments,
+    clinic_name: str,
+    doctor_name: Optional[str] = None,
+) -> bool:
+    """Send a clinic delay summary email without raising caller-facing exceptions."""
+    try:
+        safe_to_email = (to_email or "").strip()
+        if not safe_to_email:
+            logger.warning("Delay email skipped: missing clinic recipient email")
+            return False
+
+        safe_clinic = clinic_name or "Clinic"
+        safe_delay = delay or "a short while"
+        safe_doctor = doctor_name or "Assigned Doctor"
+        rows = []
+        text_rows = []
+
+        for index, appointment in enumerate(appointments or [], start=1):
+            if isinstance(appointment, Mapping):
+                patient_name = appointment.get("patient_name") or appointment.get("name") or "Patient"
+                token = appointment.get("token") or appointment.get("appointment_token") or "TBD"
+                blood_group = appointment.get("blood_group") or "N/A"
+                queue_position = appointment.get("queue_position") or index
+                status = appointment.get("status") or "waiting"
+            else:
+                patient_name = getattr(appointment, "patient_name", None) or getattr(appointment, "name", None) or "Patient"
+                token = getattr(appointment, "appointment_token", None) or getattr(appointment, "token", None) or "TBD"
+                blood_group = getattr(appointment, "blood_group", None) or "N/A"
+                queue_position = getattr(appointment, "queue_position", None) or index
+                status = getattr(appointment, "status", None) or "waiting"
+
+            rows.append(
+                "<tr>"
+                f"<td style='padding:8px;border-bottom:1px solid #ead7aa;'>{escape(str(queue_position))}</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #ead7aa;'>{escape(str(token))}</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #ead7aa;'>{escape(str(patient_name))}</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #ead7aa;'>{escape(str(blood_group))}</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #ead7aa;'>{escape(str(status))}</td>"
+                "</tr>"
+            )
+            text_rows.append(
+                f"{queue_position}. Token {token} - {patient_name} | Blood group: {blood_group} | Status: {status}"
+            )
+
+        subject = f"Doctor Delay Alert - {safe_delay}"
+        queue_text = "\n".join(text_rows) if text_rows else "No waiting patients found."
+        queue_html = "".join(rows) if rows else "<tr><td colspan='5' style='padding:8px;'>No waiting patients found.</td></tr>"
+
+        text_content = f"""
+Doctor delay announcement
+
+Clinic: {safe_clinic}
+Doctor: {safe_doctor}
+Delay Duration: {safe_delay}
+
+Queue Information:
+{queue_text}
+        """.strip()
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #333;">
+  <div style="max-width:720px;margin:0 auto;padding:20px;">
+    <h2 style="color:#92400e;">Doctor Delay Alert</h2>
+    <p><strong>Clinic:</strong> {escape(str(safe_clinic))}</p>
+    <p><strong>Doctor:</strong> {escape(str(safe_doctor))}</p>
+    <p><strong>Delay Duration:</strong> {escape(str(safe_delay))}</p>
+    <h3 style="color:#92400e;">Queue Information</h3>
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;border:1px solid #ead7aa;">
+      <thead>
+        <tr style="background:#fffbeb;">
+          <th align="left" style="padding:8px;">#</th>
+          <th align="left" style="padding:8px;">Token</th>
+          <th align="left" style="padding:8px;">Patient</th>
+          <th align="left" style="padding:8px;">Blood Group</th>
+          <th align="left" style="padding:8px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>{queue_html}</tbody>
+    </table>
+  </div>
+</body>
+</html>
+        """.strip()
+
+        return email_service._send_email(safe_to_email, subject, text_content, html_content)
+    except Exception as exc:
+        logger.exception("Delay email failed for %s: %s", to_email, exc)
+        return False
+

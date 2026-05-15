@@ -1,14 +1,17 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
-import { CalendarDays, Clock, Hash, MapPin, Stethoscope, Timer, Users } from "lucide-react";
+import { CalendarDays, Clock, Hash, MapPin, Stethoscope, Timer, Users, type LucideIcon } from "lucide-react";
 
 interface ConfirmationState {
   clinic: string;
   doctor: string;
   date: string;
   time: string;
+  sessionName?: string;
+  sessionTime?: string;
+  sessionId?: number;
   address: string;
   token: string;
   patient_name?: string;
@@ -28,6 +31,10 @@ interface AppointmentDetails {
   time: string;
   appointment_token: string;
   status: string;
+  slot_id?: number;
+  session_id?: number;
+  session_name?: string;
+  session_time?: string;
   address?: string;
   created_at: string;
 }
@@ -38,6 +45,9 @@ interface QueuePosition {
   your_position: number;
   total_in_queue: number;
   now_serving_token?: string;
+  doctor_delay?: string | null;
+  session_id?: number;
+  slot_id?: number;
 }
 
 const AppointmentConfirmation = () => {
@@ -92,6 +102,8 @@ const AppointmentConfirmation = () => {
     };
 
     void fetchAppointmentDetails();
+    const interval = window.setInterval(fetchAppointmentDetails, 10000);
+    return () => window.clearInterval(interval);
   }, []);
 
   const token = state?.token || appointmentDetails?.appointment_token || "T-1";
@@ -100,9 +112,12 @@ const AppointmentConfirmation = () => {
   const doctorName = state?.doctor || appointmentDetails?.doctor_name || "Available Doctor";
   const dateText = state?.date || appointmentDetails?.date || "";
   const timeText = state?.time || appointmentDetails?.time || "";
+  const sessionName = state?.sessionName || appointmentDetails?.session_name || (appointmentDetails?.session_id ? `Session ${appointmentDetails.session_id}` : "Session");
+  const sessionTime = state?.sessionTime || appointmentDetails?.session_time || timeText;
   const patientsAhead = queuePosition?.patients_ahead ?? 0;
   const estimatedWait = queuePosition?.estimated_wait_minutes ?? 0;
   const nowServing = queuePosition?.now_serving_token || token;
+  const delayNotice = queuePosition?.doctor_delay || null;
 
   useEffect(() => {
     if (!token || !clinicName || !doctorName || !dateText || !timeText) return;
@@ -174,6 +189,7 @@ const AppointmentConfirmation = () => {
           <div className="space-y-4">
             <DetailRow icon={MapPin} label="Clinic" value={clinicName} subvalue={clinicAddress} />
             <DetailRow icon={Stethoscope} label="Doctor" value={doctorName} />
+            <DetailRow icon={Clock} label="Session" value={sessionName} subvalue={sessionTime} />
             <DetailRow icon={CalendarDays} label="Appointment" value={`${dateText} at ${timeText}`} />
             <div className="grid grid-cols-2 gap-4 rounded-[20px] bg-secondary/60 p-4">
               <div>
@@ -206,7 +222,7 @@ const DetailRow = ({
   value,
   subvalue,
 }: {
-  icon: any;
+  icon: LucideIcon;
   label: string;
   value: string;
   subvalue?: string;

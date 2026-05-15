@@ -3,17 +3,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, and_, func, or_, text
-from sqlalchemy.exc import SQLAlchemyError
-from app.database.db import get_db
-from app.database.models import Appointment, CompletedAppointment, QRAppointment, ClinicTimeSlot, Clinic
-from app.services.email_service import send_queue_alert
-from app.services.queue_metrics import get_live_queue_metrics
 import json
 import logging
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import and_, func, select, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.db import get_db
+from app.database.models import Appointment, Clinic, ClinicTimeSlot, CompletedAppointment, Patient, QRAppointment
+from app.services.email_service import send_delay_alert, send_queue_alert
+from app.services.queue_metrics import get_live_queue_metrics
 router = APIRouter(prefix="/auth", tags=["queue"])
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 logger = logging.getLogger(__name__)
@@ -25,6 +26,17 @@ def _clinic_now() -> datetime:
 
 def _clinic_today_str() -> str:
     return _clinic_now().strftime("%Y-%m-%d")
+
+
+def _delay_minutes(delay: Optional[str]) -> int:
+    if not delay:
+        return 0
+    lowered = str(delay).strip().lower()
+    digits = "".join(ch for ch in lowered if ch.isdigit())
+    if not digits:
+        return 0
+    amount = int(digits)
+    return amount * 60 if "hour" in lowered else amount
 
 
 def _sort_datetime(value):
@@ -1276,6 +1288,121 @@ async def push_patient_to_next_slot(
         "email_sent": patient_email is not None
     }
 
+@router.post("/doctor/announce-delay/{clinic_id}/{delay}")
+async def announce_delay(
+    clinic_id: str,
+    delay: str,
+    session_id: Optional[int] = Query(None, description="Optional session/slot ID"),
+    slot_id: Optional[int] = Query(None, description="Optional legacy slot ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Store a doctor delay and email the clinic a queue summary."""
+    clean_delay = (delay or "").strip()
+    if not clean_delay:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Delay is required")
+
+    try:
+        today = _clinic_today_str()
+
+        clinic_result = await db.execute(
+            select(Clinic).where(Clinic.clinic_id == clinic_id)
+        )
+        clinic = clinic_result.scalar_one_or_none()
+        if not clinic:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+
+        target_slot_id = session_id or slot_id
+        appointment_filters = [
+            Appointment.clinic_id == clinic_id,
+            Appointment.date == today,
+            Appointment.status.notin_(["completed", "not_served", "auto_finished", "cancelled"]),
+        ]
+        if target_slot_id is not None:
+            appointment_filters.append(Appointment.slot_id == target_slot_id)
+
+        appointment_result = await db.execute(
+            select(Appointment).where(and_(*appointment_filters)).order_by(Appointment.queue_position, Appointment.id)
+        )
+        appointments = appointment_result.scalars().all()
+
+        queue_summary = []
+        for index, appointment in enumerate(appointments, start=1):
+            appointment.doctor_delay = clean_delay
+
+            blood_group = "N/A"
+            if getattr(appointment, "patient_id", None):
+                patient_result = await db.execute(
+                    select(Patient).where(Patient.patient_id == appointment.patient_id)
+                )
+                patient = patient_result.scalar_one_or_none()
+                blood_group = (getattr(patient, "blood_group", None) or "N/A") if patient else "N/A"
+
+            queue_summary.append({
+                "patient_name": appointment.patient_name or "Patient",
+                "token": appointment.appointment_token or "TBD",
+                "blood_group": blood_group,
+                "queue_position": appointment.queue_position or index,
+                "status": appointment.status or "waiting",
+            })
+
+        if target_slot_id is not None:
+            slot_result = await db.execute(
+                select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+            )
+            slot_record = slot_result.scalar_one_or_none()
+            if slot_record:
+                slots = _load_slots(slot_record.slots)
+                slot_index = int(target_slot_id) - 1
+                if 0 <= slot_index < len(slots):
+                    slots[slot_index]["delay_minutes"] = _delay_minutes(clean_delay)
+                    slots[slot_index]["status_override"] = "delayed"
+                    slot_record.slots = slots
+
+        await db.commit()
+
+        clinic_email = (getattr(clinic, "email", None) or "").strip()
+        email_sent = False
+        if clinic_email:
+            email_sent = send_delay_alert(
+                to_email=clinic_email,
+                delay=clean_delay,
+                appointments=queue_summary,
+                clinic_name=clinic.clinic_name or clinic.clinic_id,
+                doctor_name=getattr(clinic, "doctor_name", None),
+            )
+        else:
+            logger.warning("Delay email skipped for clinic %s: missing clinic email", clinic_id)
+
+        return {
+            "success": True,
+            "message": "Delay announced successfully" if email_sent else "Delay saved; clinic email was not sent",
+            "clinic_id": clinic_id,
+            "delay": clean_delay,
+            "session_id": target_slot_id,
+            "slot_id": target_slot_id,
+            "updated_count": len(appointments),
+            "clinic_email": clinic_email,
+            "email_sent": email_sent,
+            "clinic_notified_count": 1 if email_sent else 0,
+            "notified_count": 1 if email_sent else 0,
+            "queue": queue_summary,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Failed to announce delay for clinic %s: %s", clinic_id, exc)
+        return {
+            "success": False,
+            "message": "Delay announcement failed",
+            "clinic_id": clinic_id,
+            "delay": clean_delay,
+            "updated_count": 0,
+            "email_sent": False,
+            "clinic_notified_count": 0,
+            "notified_count": 0,
+            "error": str(exc),
+        }
 
 @router.get("/clinic/completed-appointments")
 async def get_completed_appointments(
@@ -1650,6 +1777,7 @@ async def join_queue(
         date=today,
         status="booked",
         slot_id=slot_id,
+        session_id=slot_id,
         queue_position=total_appointments + 1
     )
     db.add(walkin)
@@ -1666,7 +1794,8 @@ async def join_queue(
         "patient_name": payload.patient_name,
         "clinic_id": payload.clinic_id,
         "source": "walkin",
-        "slot_id": slot_id
+        "slot_id": slot_id,
+        "session_id": slot_id
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2367,7 +2496,10 @@ async def auto_finish_unserved_patients(
     return {
         "auto_finished_count": len(auto_finished),
         "auto_finished_patients": auto_finished
+
     }
+
+
 
 
 @router.get("/clinic/slot-queue-counts")
@@ -2378,12 +2510,13 @@ async def get_slot_queue_counts(
     """
     Get patient counts per time slot for today.
     Returns how many patients are currently waiting in each slot.
+    
     """
+
     from datetime import datetime
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # Get all appointments for today, grouped by slot_id
     result = await db.execute(
         select(
             Appointment.slot_id,
@@ -2396,6 +2529,7 @@ async def get_slot_queue_counts(
     )
 
     slot_counts = {}
+
     for row in result.all():
         if row.slot_id is not None:
             slot_counts[row.slot_id] = row.count
@@ -2405,3 +2539,42 @@ async def get_slot_queue_counts(
         "clinic_id": clinic_id,
         "slot_counts": slot_counts
     }
+
+
+@router.get("/doctor/today-slots/{clinic_id}")
+async def get_today_slots(
+    clinic_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+
+    result = await db.execute(
+        select(Appointment)
+        .where(Appointment.clinic_id == clinic_id)
+        .order_by(Appointment.queue_position)
+    )
+
+    appointments = result.scalars().all()
+
+    final = []
+
+    for appt in appointments:
+
+        patient_result = await db.execute(
+            select(Patient)
+            .where(Patient.patient_id == appt.patient_id)
+        )
+
+        patient = patient_result.scalar_one_or_none()
+
+        final.append({
+            "id": appt.id,
+            "token": appt.appointment_token,
+            "name": appt.patient_name,
+            "email": appt.patient_email,
+            "phone": appt.patient_phone,
+            "blood_group": patient.blood_group if patient else "N/A",
+            "time": appt.time,
+            "status": appt.status
+        })
+
+    return final

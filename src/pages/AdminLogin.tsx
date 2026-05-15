@@ -198,7 +198,7 @@ const AdminLogin = () => {
                   className="text-center text-lg tracking-widest"
                   required
                 />
-                <p className="text-xs text-slate-500">Sent to: digitalkrama@gmail.com</p>
+                <p className="text-xs text-slate-500">Sent to: reddit098609@gmail.com</p>
               </div>
 
               <Button type="submit" className="w-full" disabled={loading}>

@@ -56,6 +56,7 @@ class Patient(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
     phone = Column(String, nullable=False)
+    blood_group = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Appointment(Base):
@@ -72,11 +73,13 @@ class Appointment(Base):
     date = Column(String, nullable=False)
     time = Column(String, nullable=False)
     status = Column(String, default="booked")
+    doctor_delay = Column(String, nullable=True)
     notification_stage = Column(String, default="pending")
     last_email_sent_at = Column(DateTime(timezone=True), nullable=True)  # Track when email was actually sent
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     source = Column(String, default="online")
     slot_id = Column(Integer, nullable=True)
+    session_id = Column(Integer, nullable=True)
     push_count = Column(Integer, default=0)  # Number of times patient has been pushed to next slot
     queue_position = Column(Integer, nullable=True)  # Position in queue for ordering
 
@@ -95,13 +98,34 @@ class CompletedAppointment(Base):
     date = Column(String, nullable=False)
     time = Column(String, nullable=False)
     slot_id = Column(Integer, nullable=True)
+    session_id = Column(Integer, nullable=True)
     served_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True))
     status = Column(String, default="served")  # served, completed, skipped
     wait_time_minutes = Column(Integer, nullable=True)  # how long they waited
     outcome = Column(String, default="served")  # served or not_served
+    diagnosis = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
     served = Column(Boolean, default=True)  # True if served normally or after push, False if not served
     push_count = Column(Integer, default=0)  # Number of times patient was pushed to next slot
+
+class DoctorSession(Base):
+    """Canonical doctor session metadata. Existing slot_id queues map to session_id."""
+    __tablename__ = "doctor_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    doctor_id = Column(String, nullable=True)
+    session_name = Column(String, nullable=False)
+    start_time = Column(String, nullable=False)
+    end_time = Column(String, nullable=False)
+    status = Column(String, default="available")
+    delay_minutes = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    slot_id = Column(Integer, nullable=True)
+    session_date = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 class ClinicTimeSlot(Base):
     """Model for storing clinic operating time slots - one row per clinic with all slots as JSON array"""
@@ -133,6 +157,7 @@ class OTPVerification(Base):
     user_name = Column(String(255), nullable=False)
     user_password = Column(String(255), nullable=False)  # Bcrypt hash = ~60 chars
     user_phone = Column(String(50), nullable=False)
+    user_blood_group = Column(String(20), nullable=True)
 
 class Review(Base):
     """Model for storing patient reviews for clinics"""
@@ -170,8 +195,10 @@ class QRAppointment(Base):
     doctor_name = Column(String, nullable=True)
     date = Column(String, nullable=False)
     status = Column(String, default="booked")
+    doctor_delay = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     slot_id = Column(Integer, nullable=True)
+    session_id = Column(Integer, nullable=True)
     queue_position = Column(Integer, nullable=True)  # Position in queue for ordering
 
 class PendingClinicRegistration(Base):
@@ -308,3 +335,4 @@ class CompletedReport(Base):
     report_pdf = Column(String, nullable=True)  # Path to PDF file
     report_type = Column(String, nullable=True)  # sent, collected, no_report
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
+

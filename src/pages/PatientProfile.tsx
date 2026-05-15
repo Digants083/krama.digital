@@ -347,6 +347,7 @@ const PatientProfile = () => {
             <div className="mt-8 grid gap-4 md:grid-cols-3">
               <ProfileStat label="Patient ID" value={dbProfile.patient_id} mono />
               <ProfileStat label="Phone" value={dbProfile.phone} />
+              <ProfileStat label="Blood Group" value={dbProfile.blood_group || "N/A"} />
               <ProfileStat label="Member Since" value={new Date(dbProfile.created_at).toLocaleDateString()} />
             </div>
           )}
@@ -561,7 +562,7 @@ const PatientProfile = () => {
                 <>
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                     <p className="text-sm text-amber-800">
-                      ✓ Password verified! We've sent an OTP to your email. Verify to delete your account.
+                      OK Password verified! We've sent an OTP to your email. Verify to delete your account.
                     </p>
                   </div>
                   <Button variant="outline" onClick={() => { setDeletePasswordVerified(false); setDeletePassword(""); }}>
@@ -689,3 +690,4 @@ const ProfileCard = ({
 );
 
 export default PatientProfile;
+

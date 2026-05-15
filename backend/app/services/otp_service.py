@@ -62,7 +62,8 @@ class OTPService:
         email: str,
         name: str,
         password: str,
-        phone: str
+        phone: str,
+        blood_group: Optional[str] = None
     ) -> Tuple[str, bool]:
         """
         Create a new OTP with user data for pending registration
@@ -73,6 +74,7 @@ class OTPService:
             name: User's full name
             password: Hashed password
             phone: User's phone number
+            blood_group: User's blood group
             
         Returns:
             tuple: (OTP code, success status)
@@ -115,7 +117,8 @@ class OTPService:
             expires_at=expires_at,
             user_name=name,
             user_password=password,
-            user_phone=phone
+            user_phone=phone,
+            user_blood_group=blood_group
         )
         db.add(otp_record)
         await db.commit()
@@ -148,7 +151,8 @@ class OTPService:
             db, email,
             otp_record.user_name,
             otp_record.user_password,
-            otp_record.user_phone
+            otp_record.user_phone,
+            getattr(otp_record, "user_blood_group", None)
         )
         
         if not success:
@@ -216,7 +220,8 @@ class OTPService:
                     name=otp_record.user_name,
                     email=otp_record.email,
                     password=otp_record.user_password,
-                    phone=otp_record.user_phone
+                    phone=otp_record.user_phone,
+                    blood_group=getattr(otp_record, "user_blood_group", None)
                 )
                 db.add(new_patient)
                 
@@ -451,3 +456,4 @@ class OTPService:
 
 # Singleton instance
 otp_service = OTPService()
+

@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatTimeRange } from "@/lib/timeFormat";
+import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 
 interface Review {
   id: number;
@@ -13,11 +14,52 @@ interface Review {
   dislikes: number;
   created_at: string;
 }
+interface ClinicData {
+  clinic_id?: string;
+  clinic_name?: string;
+  doctor_name?: string;
+  street_address?: string;
+  road?: string;
+  layout?: string;
+  section?: string;
+  city?: string;
+  pincode?: string;
+  address?: string;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+  is_active?: boolean;
+  available?: boolean;
+}
+
+interface ClinicSlot {
+  slot_name: string;
+  time_range: number[];
+  slot_id?: number;
+  is_open: boolean | string | number | null;
+  is_expired?: boolean;
+  display_status?: string;
+}
+
+interface DisplayClinicSlot extends Omit<ClinicSlot, "is_open" | "is_expired" | "display_status"> {
+  is_open: boolean;
+  is_expired: boolean;
+  display_status: string;
+}
+
+interface AppointmentSummary {
+  clinic_id?: string;
+  status?: string;
+  date?: string;
+  time?: string;
+  appointment_token?: string;
+  patient_name?: string;
+  patient_phone?: string;
+}
 
 const ClinicDetails = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [clinic, setClinic] = useState<any>(null);
+  const [clinic, setClinic] = useState<ClinicData | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [averageRating, setAverageRating] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -27,7 +69,7 @@ const ClinicDetails = () => {
   const [selectedDate, setSelectedDate] = useState("");
   const [booking, setBooking] = useState(false);
   const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
-  const [timeSlots, setTimeSlots] = useState<any[]>([]);
+  const [timeSlots, setTimeSlots] = useState<DisplayClinicSlot[]>([]);
   const [userReactions, setUserReactions] = useState<{[key: number]: string}>({});
   const [patientId, setPatientId] = useState<string>("");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
@@ -163,34 +205,22 @@ const ClinicDetails = () => {
       const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${id}`);
       if (response.ok) {
         const data = await response.json();
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentTimeMinutes = currentHour * 60 + currentMinute;
-
         // Use slot array from database to determine open/close status
         const slotArray = data.slot || [];
 
         // Process slots and add disabled status based on current time
-        const processedSlots = (data.slots || []).map((slot: any, idx: number) => {
-          const startHour = slot.time_range[0];
-          const endHour = slot.time_range[1];
-          const endTimeMinutes = endHour * 60;
-          const cutoffTime = endTimeMinutes - 15; // 15 min before slot ends
-
-          // Check if slot is expired (current time past cutoff)
-          const isExpired = currentTimeMinutes >= cutoffTime;
-          // Use slot array to determine if open or closed
-          const isOpen = slotArray[idx] === "open";
+        const processedSlots = (data.slots || []).map((slot: ClinicSlot, idx: number) => {
+          const isOpen = isSlotManuallyOpen(slot, slotArray, idx);
+          const slotStatus = getPatientSlotStatus(slot.time_range, isOpen);
 
           return {
             ...slot,
             slot_id: idx + 1,
-            is_open: isOpen,
-            is_expired: isExpired,
-            display_status: isExpired ? "Expired" : (isOpen ? "Available" : "Not Available")
+            is_open: slotStatus.is_open,
+            is_expired: slotStatus.is_expired,
+            display_status: slotStatus.display_status
           };
-        }).sort((a: any, b: any) => {
+        }).sort((a: DisplayClinicSlot, b: DisplayClinicSlot) => {
           const aStart = a.time_range?.[0] ?? Number.POSITIVE_INFINITY;
           const bStart = b.time_range?.[0] ?? Number.POSITIVE_INFINITY;
           return aStart - bStart;
@@ -235,7 +265,7 @@ const ClinicDetails = () => {
     setShowTimeSelection(true);
   };
 
-  const handleSlotSelect = (slot: any, slotIndex: number) => {
+  const handleSlotSelect = (slot: DisplayClinicSlot, slotIndex: number) => {
     if (!slot.is_open || slot.is_expired) return;
     
     const timeString = `${slot.slot_name} ${formatTimeRange(slot.time_range)}`;
@@ -279,7 +309,7 @@ const ClinicDetails = () => {
         const appointmentsResponse = await fetch(`/api/auth/patient/appointments?email=${patientEmail}`);
         if (appointmentsResponse.ok) {
           const appointmentsData = await appointmentsResponse.json();
-          const activeBooking = appointmentsData.appointments?.find((apt: any) => 
+          const activeBooking = appointmentsData.appointments?.find((apt: AppointmentSummary) => 
             apt.clinic_id === clinicId && 
             apt.status !== "served" && 
             apt.status !== "completed" &&
