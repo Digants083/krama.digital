@@ -37,6 +37,7 @@ class PatientSignup(BaseModel):
     email: EmailStr
     password: str
     phone: str
+    blood_group: Optional[str] = None
 
 class PatientLogin(BaseModel):
     email: EmailStr

@@ -122,7 +122,7 @@ async def send_admin_otp(
 ):
     """
     Send OTP to admin's email and confirmation email.
-    For admin1: sends to diganths083@gmail.com and digitalkrama@gmail.com
+    For admin1: sends to reddit098609@gmail.com and reddit098609@gmail.com
     For admin2: sends to yashavanthb28@gmail.com and digitalkrama@gmail.com
     """
     username = request.username

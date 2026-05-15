@@ -34,46 +34,48 @@ def generate_patient_id():
 
 class OTPService:
     """Service for OTP generation, validation, and management"""
-    
+
     OTP_LENGTH = 6
     OTP_EXPIRY_MINUTES = 5
     MAX_ATTEMPTS = 5
     RESEND_COOLDOWN_MINUTES = 1
     MAX_OTP_PER_DAY = 10
-    
+
     @staticmethod
     def generate_otp() -> str:
         """Generate a secure random 6-digit OTP"""
         return ''.join(secrets.choice('0123456789') for _ in range(OTPService.OTP_LENGTH))
-    
+
     @staticmethod
     def hash_otp(otp: str) -> str:
         """Hash OTP for secure storage"""
         return hashlib.sha256(otp.encode()).hexdigest()
-    
+
     @staticmethod
     def verify_otp_hash(stored_hash: str, provided_otp: str) -> bool:
         """Verify OTP against stored hash"""
         return stored_hash == OTPService.hash_otp(provided_otp)
-    
+
     @staticmethod
     async def create_otp_with_user_data(
         db: AsyncSession,
         email: str,
         name: str,
         password: str,
-        phone: str
+        phone: str,
+        blood_group: Optional[str] = None
     ) -> Tuple[str, bool]:
         """
         Create a new OTP with user data for pending registration
-        
+
         Args:
             db: Database session
             email: User email address
             name: User's full name
             password: Hashed password
             phone: User's phone number
-            
+            blood_group: User's blood group
+
         Returns:
             tuple: (OTP code, success status)
         """
@@ -82,12 +84,12 @@ class OTPService:
             select(OTPVerification).where(OTPVerification.email == email)
         )
         existing_otp = result.scalar_one_or_none()
-        
+
         # Check if email is already verified/registered
         if existing_otp and existing_otp.is_verified:
             logger.warning(f"Email {email} already has a verified OTP")
             return "", False
-        
+
         # Check rate limiting
         if existing_otp and not existing_otp.is_verified:
             # Check if within cooldown period
@@ -96,18 +98,18 @@ class OTPService:
                 remaining_time = OTPService.RESEND_COOLDOWN_MINUTES - time_since_creation.seconds // 60
                 logger.warning(f"OTP resend rate limited for {email}. Try again in {remaining_time} minutes.")
                 return "", False
-            
+
             # Delete old OTP record
             await db.delete(existing_otp)
             await db.commit()
-        
+
         # Generate new OTP
         otp_code = OTPService.generate_otp()
         hashed_otp = OTPService.hash_otp(otp_code)
         expires_at = _utc_now_for(existing_otp.created_at if existing_otp else None) + timedelta(
             minutes=OTPService.OTP_EXPIRY_MINUTES
         )
-        
+
         # Store in database with user data
         otp_record = OTPVerification(
             email=email,
@@ -115,23 +117,24 @@ class OTPService:
             expires_at=expires_at,
             user_name=name,
             user_password=password,
-            user_phone=phone
+            user_phone=phone,
+            user_blood_group=blood_group
         )
         db.add(otp_record)
         await db.commit()
-        
+
         logger.info(f"OTP created with user data for {email}")
         return otp_code, True
-    
+
     @staticmethod
     async def send_otp(db: AsyncSession, email: str) -> Tuple[bool, str]:
         """
         Generate and send OTP via email
-        
+
         Args:
             db: Database session
             email: Recipient email
-            
+
         Returns:
             tuple: (success, message)
         """
@@ -140,38 +143,39 @@ class OTPService:
             select(OTPVerification).where(OTPVerification.email == email)
         )
         otp_record = result.scalar_one_or_none()
-        
+
         if not otp_record:
             return False, "No pending registration found. Please signup first."
-        
+
         otp_code, success = await OTPService.create_otp_with_user_data(
             db, email,
             otp_record.user_name,
             otp_record.user_password,
-            otp_record.user_phone
+            otp_record.user_phone,
+            getattr(otp_record, "user_blood_group", None)
         )
-        
+
         if not success:
             return False, "Please wait before requesting a new OTP"
-        
+
         # Send OTP via email
         email_sent = send_otp_email(email, otp_code)
-        
+
         if not email_sent:
             return False, "Failed to send OTP email. Please try again."
-        
+
         return True, f"OTP sent to {email}"
-    
+
     @staticmethod
     async def verify_otp(db: AsyncSession, email: str, provided_otp: str) -> Tuple[bool, str]:
         """
         Verify the OTP code and create patient account
-        
+
         Args:
             db: Database session
             email: User email
             provided_otp: OTP code to verify
-            
+
         Returns:
             tuple: (success, message)
         """
@@ -180,71 +184,72 @@ class OTPService:
             select(OTPVerification).where(OTPVerification.email == email)
         )
         otp_record = result.scalar_one_or_none()
-        
+
         if not otp_record:
             return False, "No OTP found. Please request a new OTP."
-        
+
         # Check if already verified
         if otp_record.is_verified:
             return False, "OTP already verified."
-        
+
         # Check expiry
         if _utc_now_for(otp_record.expires_at) > otp_record.expires_at:
             await db.delete(otp_record)
             await db.commit()
             return False, "OTP has expired. Please request a new OTP."
-        
+
         # Increment attempt count
         otp_record.attempt_count += 1
         await db.commit()
-        
+
         # Check max attempts
         if otp_record.attempt_count > OTPService.MAX_ATTEMPTS:
             await db.delete(otp_record)
             await db.commit()
             return False, "Too many failed attempts. Please request a new OTP."
-        
+
         # Verify OTP
         if OTPService.verify_otp_hash(otp_record.otp_code, provided_otp):
             # OTP valid - create patient account from stored data
             try:
                 # Generate unique patient_id
                 patient_id = generate_patient_id()
-                
+
                 new_patient = Patient(
                     patient_id=patient_id,
                     name=otp_record.user_name,
                     email=otp_record.email,
                     password=otp_record.user_password,
-                    phone=otp_record.user_phone
+                    phone=otp_record.user_phone,
+                    blood_group=getattr(otp_record, "user_blood_group", None)
                 )
                 db.add(new_patient)
-                
+
                 # Delete OTP record
                 await db.delete(otp_record)
                 await db.commit()
-                
+
                 logger.info(f"Patient account created for {email} after OTP verification")
                 return True, "OTP verified successfully. Account created!"
             except Exception as e:
                 await db.rollback()
                 logger.error(f"Error creating patient account: {e}")
                 return False, "Failed to create account. Please try again."
-        
+
         remaining_attempts = OTPService.MAX_ATTEMPTS - otp_record.attempt_count
         return False, f"Invalid OTP. {remaining_attempts} attempts remaining."
-    
+
     @staticmethod
     async def verify_otp_only(db: AsyncSession, email: str, provided_otp: str) -> Tuple[bool, str]:
         """
         Verify OTP code without creating any account.
         Used for clinic verification where account creation is handled separately.
-        
+
         Args:
             db: Database session
             email: User email
             provided_otp: OTP code to verify
-            
+
         Returns:
             tuple: (success, message)
         """
@@ -252,53 +257,53 @@ class OTPService:
             select(OTPVerification).where(OTPVerification.email == email)
         )
         otp_record = result.scalar_one_or_none()
-        
+
         if not otp_record:
             return False, "No OTP found. Please request a new OTP."
-        
+
         if otp_record.is_verified:
             return False, "OTP already verified."
-        
+
         if _utc_now_for(otp_record.expires_at) > otp_record.expires_at:
             return False, "OTP has expired. Please request a new OTP."
-        
+
         otp_record.attempt_count += 1
         await db.commit()
-        
+
         if otp_record.attempt_count > OTPService.MAX_ATTEMPTS:
             await db.delete(otp_record)
             await db.commit()
             return False, "Too many failed attempts. Please request a new OTP."
-        
+
         if OTPService.verify_otp_hash(otp_record.otp_code, provided_otp):
             return True, "OTP verified successfully."
-        
+
         remaining_attempts = OTPService.MAX_ATTEMPTS - otp_record.attempt_count
         return False, f"Invalid OTP. {remaining_attempts} attempts remaining."
-    
+
     @staticmethod
     async def resend_otp(db: AsyncSession, email: str) -> Tuple[bool, str]:
         """
         Resend OTP for the given email
-        
+
         Args:
             db: Database session
             email: User email
-            
+
         Returns:
             tuple: (success, message)
         """
         return await OTPService.send_otp(db, email)
-    
+
     @staticmethod
     async def delete_otp(db: AsyncSession, email: str) -> bool:
         """
         Delete OTP record after verification
-        
+
         Args:
             db: Database session
             email: User email
-            
+
         Returns:
             bool: True if deleted, False if not found
         """
@@ -306,22 +311,22 @@ class OTPService:
             select(OTPVerification).where(OTPVerification.email == email)
         )
         otp_record = result.scalar_one_or_none()
-        
+
         if otp_record:
             await db.delete(otp_record)
             await db.commit()
             return True
         return False
-    
+
     @staticmethod
     async def is_email_verified(db: AsyncSession, email: str) -> bool:
         """
         Check if email has been verified
-        
+
         Args:
             db: Database session
             email: User email
-            
+
         Returns:
             bool: True if verified
         """
@@ -334,11 +339,11 @@ class OTPService:
     async def create_otp_for_password_reset(self, email: str, db: AsyncSession) -> tuple[bool, str]:
         """
         Create OTP for password reset.
-        
+
         Args:
             email: User email
             db: Database session
-            
+
         Returns:
             tuple[bool, str]: Success status and message
         """
@@ -348,16 +353,16 @@ class OTPService:
                 select(OTPVerification).where(OTPVerification.email == email)
             )
             existing_otp = result.scalar_one_or_none()
-            
+
             # Delete existing OTP if any
             if existing_otp:
                 await db.delete(existing_otp)
                 await db.commit()
-            
+
             # Generate new OTP
             otp_code = self.generate_otp()
             expires_at = datetime.utcnow() + timedelta(minutes=self.OTP_EXPIRY_MINUTES)
-            
+
             # Create OTP record without user data (password reset doesn't need it)
             otp_record = OTPVerification(
                 email=email,
@@ -369,14 +374,14 @@ class OTPService:
                 user_password="",  # Not needed for password reset
                 user_phone=""  # Not needed for password reset
             )
-            
+
             db.add(otp_record)
             await db.commit()
-            
+
             # Send OTP email
             from app.services.email_service import send_otp
             email_sent = send_otp(email, otp_code)
-            
+
             if email_sent:
                 logger.info(f"Password reset OTP sent to {email}")
                 return True, "OTP sent to your email"
@@ -384,7 +389,7 @@ class OTPService:
                 await db.delete(otp_record)
                 await db.commit()
                 return False, "Failed to send OTP. Please try again."
-                
+
         except Exception as e:
             logger.error(f"Error creating password reset OTP: {e}")
             await db.rollback()
@@ -393,12 +398,12 @@ class OTPService:
     async def verify_password_reset_otp(self, email: str, provided_otp: str, db: AsyncSession) -> tuple[bool, str]:
         """
         Verify OTP for password reset.
-        
+
         Args:
             email: User email
             provided_otp: OTP provided by user
             db: Database session
-            
+
         Returns:
             tuple[bool, str]: Success status and message
         """
@@ -407,26 +412,26 @@ class OTPService:
                 select(OTPVerification).where(OTPVerification.email == email)
             )
             otp_record = result.scalar_one_or_none()
-            
+
             if not otp_record:
                 return False, "Invalid OTP. Please request a new one."
-            
+
             # Check expiry
             if datetime.utcnow() > otp_record.expires_at:
                 await db.delete(otp_record)
                 await db.commit()
                 return False, "OTP has expired. Please request a new one."
-            
+
             # Check attempts
             if otp_record.attempt_count >= self.MAX_ATTEMPTS:
                 await db.delete(otp_record)
                 await db.commit()
                 return False, "Too many failed attempts. Please request a new OTP."
-            
+
             # Increment attempt count
             otp_record.attempt_count += 1
             await db.commit()
-            
+
             # Verify OTP
             if self.verify_otp_hash(otp_record.otp_code, provided_otp):
                 otp_record.is_verified = True
@@ -442,7 +447,7 @@ class OTPService:
                     await db.delete(otp_record)
                     await db.commit()
                     return False, "Too many failed attempts. Please request a new OTP."
-                    
+
         except Exception as e:
             logger.error(f"Error verifying password reset OTP: {e}")
             await db.rollback()

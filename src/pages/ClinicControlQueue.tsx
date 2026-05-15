@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
@@ -336,59 +336,51 @@ const ClinicControlQueue = () => {
 
   const startDisabledReason = getStartDisabledReason();
 
-  // Check if current time is past the viewing slot's start time
-  const canServeInCurrentSlot = () => {
-    if (timeSlots.length === 0) return false;
-
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentTimeDecimal = currentHour + currentMinute / 60.0;
-
-    // Check if can serve in ANY available slot
-    for (const slot of timeSlots) {
-      if (!slot.is_open) continue;
-
-      const [startHour, endHour] = slot.time_range;
-
-      const unlockTime = startHour - SERVE_UNLOCK_LEAD_MINUTES / 60;
-      if (currentTimeDecimal >= unlockTime && currentTimeDecimal < endHour) {
-        return true;
-      }
-    }
-
-    // Can serve if there are patients in queue (even after all slot end times)
-    if (queue.length > 0) {
-      return timeSlots
-        .filter((slot) => slot.is_open)
-        .every((slot) => currentTimeDecimal >= slot.time_range[1]);
-    }
-
-    return false;
-  };
-
   const getCurrentTimeDecimal = () => {
     const now = new Date();
     return now.getHours() + now.getMinutes() / 60.0;
   };
 
-  const isSlotExpired = (slot: TimeSlot): boolean => {
-    const [, endHour] = slot.time_range;
-    return getCurrentTimeDecimal() >= endHour;
+  const getTimelineTimeDecimal = () => {
+    const current = getCurrentTimeDecimal();
+    const activeOvernightSlot = timeSlots.some((slot, index) => {
+      if (!isSlotAvailable(slot, index)) return false;
+      const [, endHour] = slot.time_range;
+      return endHour > 24 && current < endHour - 24;
+    });
+    return activeOvernightSlot ? current + 24 : current;
   };
 
-  // Check if a slot is currently available based on time and status
-  const isSlotCurrentlyAvailable = (slot: TimeSlot, index: number): boolean => {
-    // Check if slot is marked as "close" in the slotStatus array
-    if (slotStatus[index] === "close") return false;
-    
-    if (!slot.is_open) return false;
-
+  const isTimeInsideSlot = (slot: TimeSlot) => {
+    const timelineNow = getTimelineTimeDecimal();
     const [startHour, endHour] = slot.time_range;
+    const unlockTime = startHour - SERVE_UNLOCK_LEAD_MINUTES / 60;
+    return timelineNow >= unlockTime && timelineNow < endHour;
+  };
 
-    // Slot is available if it's open and end time hasn't passed yet
-    // (can be in the past, current, or future - as long as not expired)
-    return getCurrentTimeDecimal() < endHour;
+  // Check if the currently viewed slot can serve patients now.
+  const canServeInCurrentSlot = () => {
+    if (timeSlots.length === 0) return false;
+
+    const slotId = selectedSlotId ?? viewingSlotId ?? activeSlotId;
+    if (typeof slotId === "number") {
+      const slot = timeSlots[slotId - 1];
+      if (!slot || !isSlotAvailable(slot, slotId - 1)) return false;
+      return isTimeInsideSlot(slot);
+    }
+
+    return timeSlots.some((slot, index) => isSlotAvailable(slot, index) && isTimeInsideSlot(slot));
+  };
+
+  const isSlotExpired = (slot: TimeSlot): boolean => {
+    const [, endHour] = slot.time_range;
+    return getTimelineTimeDecimal() >= endHour;
+  };
+
+  // Check if a slot is available based on manual status and the normalized timeline.
+  const isSlotCurrentlyAvailable = (slot: TimeSlot, index: number): boolean => {
+    if (!isSlotAvailable(slot, index)) return false;
+    return getTimelineTimeDecimal() < slot.time_range[1];
   };
 
   const isServingAllowedForViewingSlot =
@@ -724,7 +716,7 @@ const ClinicControlQueue = () => {
                 variant="outline"
                 className="flex-1 border-slate-300 text-slate-600 hover:bg-slate-100 rounded-xl transition-all duration-200 py-3 font-semibold"
                 onClick={() => skipPatient()}
-                disabled={queue.length === 0 || !canServeInCurrentSlot()}
+                disabled={queue.length < 2 || !canServeInCurrentSlot()}
               >
                 <SkipForward className="mr-2 h-5 w-5" />
                 Skip

@@ -1,10 +1,14 @@
-﻿import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useRef } from "react";
 
 type QueueItem = {
   token: string;
   name: string;
   phone?: string;
+  patient_id?: string;
   patient_email?: string;
+  blood_group?: string;
+  doctor_delay?: string | null;
+  estimated_wait_minutes?: number | null;
   source: "online" | "desk" | "walkin" | "skipped";
   clinic_id: string;
   appointment_id?: number;
@@ -24,9 +28,44 @@ type CurrentServing = {
   token: string;
   position: number;
   startTime: Date | null;
+  phone?: string;
+  patient_id?: string;
+  patient_email?: string;
+  blood_group?: string;
+  doctor_delay?: string | null;
+  estimated_wait_minutes?: number | null;
   appointmentId?: number;
   clinicId?: string;
   source?: "online" | "desk" | "walkin" | "skipped";
+};
+
+type QueueAppointment = {
+  id?: number;
+  token?: string;
+  patient_name?: string;
+  patient_phone?: string;
+  patient_id?: string;
+  patient_email?: string;
+  blood_group?: string;
+  doctor_delay?: string | null;
+  estimated_wait_minutes?: number | null;
+  source?: string;
+  clinic_id?: string;
+  queue_position?: number;
+  slot_id?: number;
+  status?: string;
+  created_at?: string;
+};
+
+type QueueSnapshot = {
+  queue: QueueItem[];
+  currentServing: CurrentServing | null;
+  completedCount: number;
+  skippedCount: number;
+  totalToday: number;
+  currentToken: number;
+  activeSlotId: number | null;
+  viewingSlotId: number | null;
 };
 
 type WalkinPayload = {
@@ -56,7 +95,7 @@ type QueueContextType = {
   completePatient: () => Promise<void>;
   skipPatient: () => Promise<void>;
   fetchQueueStats: (clinicId: string) => void;
-  fetchQueueForClinic: (clinicId: string, slotId?: number | null, preserveStartTime?: Date) => void;
+  fetchQueueForClinic: (clinicId: string, slotId?: number | null, preserveStartTime?: Date) => Promise<QueueSnapshot | null>;
   addWalkinToQueue: (payload: WalkinPayload) => Promise<WalkinResult>;
   addPatient: (name: string, source: "online" | "desk") => void;
   resetQueue: () => void;
@@ -82,8 +121,11 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentServing, setCurrentServing] = useState<CurrentServing | null>(null);
   const [activeSlotId, setActiveSlotId] = useState<number | null>(null);
   const [viewingSlotId, setViewingSlotId] = useState<number | null>(null);
+  const latestQueueRequest = useRef(0);
 
-  const fetchQueueForClinic = useCallback(async (clinicId: string, slotId?: number | null, preserveStartTime?: Date) => {
+  const fetchQueueForClinic = useCallback(async (clinicId: string, slotId?: number | null, preserveStartTime?: Date): Promise<QueueSnapshot | null> => {
+    const requestId = ++latestQueueRequest.current;
+
     try {
       const params = new URLSearchParams({ clinic_id: clinicId });
       if (typeof slotId === "number") {
@@ -91,61 +133,89 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       const response = await fetch(`${API_BASE}/auth/appointments/today?${params.toString()}`);
-      if (response.ok) {
-        const data = await response.json();
-        const appointments = data.appointments || [];
+      if (!response.ok) return null;
 
-        setActiveSlotId(typeof data.active_slot_id === "number" ? data.active_slot_id : null);
-        setViewingSlotId(typeof data.viewing_slot_id === "number" ? data.viewing_slot_id : null);
+      const data = await response.json();
+      const appointments: QueueAppointment[] = data.appointments || [];
+      const nextActiveSlotId = typeof data.active_slot_id === "number" ? data.active_slot_id : null;
+      const nextViewingSlotId = typeof data.viewing_slot_id === "number" ? data.viewing_slot_id : null;
 
-        const servingAppointment = appointments.find((apt: any) => apt.status === "serving");
-        const waitingAppointments = appointments.filter((apt: any) => apt.status !== "serving");
+      const servingAppointment = appointments.find((apt) => apt.status === "serving");
+      const waitingAppointments = appointments.filter((apt) => apt.status !== "serving");
 
-        const queueItems: QueueItem[] = waitingAppointments.map((apt: any, index: number) => ({
-          token: apt.token || `T-${index + 1}`,
-          name: apt.patient_name,
-          phone: apt.patient_phone,
-          patient_email: apt.patient_email,
-          source: apt.source === "walkin" ? "walkin" : "online",
-          clinic_id: apt.clinic_id,
-          appointment_id: apt.id,
-          queue_position: apt.queue_position,
-          slot_id: apt.slot_id,
-        }));
+      const queueItems: QueueItem[] = waitingAppointments.map((apt, index) => ({
+        token: apt.token || `T-${index + 1}`,
+        name: apt.patient_name || "Patient",
+        phone: apt.patient_phone,
+        patient_id: apt.patient_id,
+        patient_email: apt.patient_email,
+        blood_group: apt.blood_group,
+        doctor_delay: apt.doctor_delay,
+        estimated_wait_minutes: apt.estimated_wait_minutes,
+        source: apt.source === "walkin" ? "walkin" : "online",
+        clinic_id: apt.clinic_id || clinicId,
+        appointment_id: apt.id,
+        queue_position: apt.queue_position,
+        slot_id: apt.slot_id,
+      }));
 
-        setQueue(queueItems);
-        setTotalToday(appointments.length);
-
-        if (servingAppointment) {
-          setCurrentServing({
-            patientName: servingAppointment.patient_name,
-            token: servingAppointment.token,
+      const nextCurrentServing: CurrentServing | null = servingAppointment
+        ? {
+            patientName: servingAppointment.patient_name || "Patient",
+            token: servingAppointment.token || "T-1",
             position: 1,
-            // Use preserveStartTime if provided (from Next button), otherwise use created_at
+            phone: servingAppointment.patient_phone,
+            patient_id: servingAppointment.patient_id,
+            patient_email: servingAppointment.patient_email,
+            blood_group: servingAppointment.blood_group,
+            doctor_delay: servingAppointment.doctor_delay,
+            estimated_wait_minutes: servingAppointment.estimated_wait_minutes,
             startTime: preserveStartTime || (servingAppointment.created_at ? new Date(servingAppointment.created_at) : null),
             appointmentId: servingAppointment.id,
             clinicId: servingAppointment.clinic_id,
             source: servingAppointment.source === "walkin" ? "walkin" : "online",
-          });
-        } else {
-          setCurrentServing(null);
-        }
+          }
+        : null;
 
-        setCurrentToken(
-          servingAppointment?.token
-            ? Number.parseInt(String(servingAppointment.token).replace(/[^\d]/g, ""), 10) || 0
-            : 0
-        );
-      }
+      const nextCurrentToken = servingAppointment?.token
+        ? Number.parseInt(String(servingAppointment.token).replace(/[^\d]/g, ""), 10) || 0
+        : 0;
 
+      let nextCompletedCount = 0;
+      let nextSkippedCount = 0;
       const statsResponse = await fetch(`${API_BASE}/auth/queue/history/stats?clinic_id=${clinicId}${typeof slotId === "number" ? `&slot_id=${slotId}` : ""}`);
       if (statsResponse.ok) {
         const statsData = await statsResponse.json();
-        setCompletedCount(statsData.total_patients_served || 0);
-        setSkippedCount(statsData.total_skipped || 0);
+        nextCompletedCount = statsData.total_patients_served || 0;
+        nextSkippedCount = statsData.total_skipped || 0;
       }
+
+      const snapshot: QueueSnapshot = {
+        queue: queueItems,
+        currentServing: nextCurrentServing,
+        completedCount: nextCompletedCount,
+        skippedCount: nextSkippedCount,
+        totalToday: appointments.length,
+        currentToken: nextCurrentToken,
+        activeSlotId: nextActiveSlotId,
+        viewingSlotId: nextViewingSlotId,
+      };
+
+      if (requestId === latestQueueRequest.current) {
+        setActiveSlotId(nextActiveSlotId);
+        setViewingSlotId(nextViewingSlotId);
+        setQueue(queueItems);
+        setTotalToday(appointments.length);
+        setCurrentServing(nextCurrentServing);
+        setCurrentToken(nextCurrentToken);
+        setCompletedCount(nextCompletedCount);
+        setSkippedCount(nextSkippedCount);
+      }
+
+      return snapshot;
     } catch (error) {
       console.error("Failed to fetch queue:", error);
+      return null;
     }
   }, []);
 
@@ -164,7 +234,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
   const addWalkinToQueue = useCallback(
     async (payload: WalkinPayload): Promise<WalkinResult> => {
-      const res = await fetch(`${API_BASE}/queue/join`, {
+      const res = await fetch(`${API_BASE}/auth/queue/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -225,6 +295,12 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             patientName: patient.name,
             token: patient.token,
             position: 1,
+            phone: patient.phone,
+            patient_id: patient.patient_id,
+            patient_email: patient.patient_email,
+            blood_group: patient.blood_group,
+            doctor_delay: patient.doctor_delay,
+            estimated_wait_minutes: patient.estimated_wait_minutes,
             startTime: startTimeNow, // Start timer NOW when clicking Next
             appointmentId: patient.appointment_id,
             clinicId: patient.clinic_id,
@@ -243,7 +319,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         console.error("Error serving patient:", error);
       }
     }
-  }, [queue, viewingSlotId]);
+  }, [queue, viewingSlotId, fetchQueueForClinic]);
 
   const completePatient = useCallback(async () => {
     if (currentServing && currentServing.appointmentId) {
@@ -266,7 +342,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         console.error("Error completing patient:", error);
       }
     }
-  }, [currentServing, viewingSlotId]);
+  }, [currentServing, viewingSlotId, fetchQueueForClinic]);
 
   const skipPatient = useCallback(async () => {
     if (queue.length > 0) {
@@ -290,7 +366,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         console.error("Error skipping patient:", error);
       }
     }
-  }, [queue, viewingSlotId, currentServing]);
+  }, [queue, viewingSlotId, currentServing, fetchQueueForClinic]);
 
   const addPatient = useCallback(
     (name: string, source: "online" | "desk") => {

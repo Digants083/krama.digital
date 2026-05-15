@@ -91,6 +91,19 @@ def _slot_booking_cutoff_passed(slot: dict, now: datetime) -> bool:
     current_time = now.hour + now.minute / 60.0
     return current_time >= end_time - 0.25
 
+
+def _delay_minutes(delay: Optional[str]) -> int:
+    if not delay:
+        return 0
+    lowered = delay.strip().lower()
+    match = re.search(r"\d+", lowered)
+    if not match:
+        return 0
+    amount = int(match.group(0))
+    if "hour" in lowered:
+        return amount * 60
+    return amount
+
 from app.schemas import (
 
     ClinicSignup, ClinicLogin, PatientSignup, PatientLogin,
@@ -167,7 +180,7 @@ def generate_clinic_id():
 
     more_letters = ''.join(random.choices(string.ascii_uppercase, k=3))
 
-    
+
 
     return f"{letters}{digits}{more_letters}"
 
@@ -191,7 +204,7 @@ def generate_patient_id():
 
     alphanumeric = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
 
-    
+
 
     return f"PA-{letters}{alphanumeric}"
 
@@ -655,13 +668,13 @@ async def clinic_send_signup_otp(
 
     logger = logging.getLogger(__name__)
 
-    
+
 
     email = request.email.strip().lower()
 
     logger.info(f"Clinic signup OTP request for email: {email}")
 
-    
+
 
     # Check if email exists in approved clinics
 
@@ -693,7 +706,7 @@ async def clinic_send_signup_otp(
 
         )
 
-    
+
 
     # Check if email exists in pending registrations
 
@@ -717,7 +730,7 @@ async def clinic_send_signup_otp(
 
         )
 
-    
+
 
     # Validate password strength
 
@@ -867,13 +880,13 @@ async def clinic_verify_signup(
 
     email = request.email.strip().lower()
 
-    
+
 
     # Verify OTP (without creating patient account)
 
     is_valid, message = await OTPService.verify_otp_only(db, email, request.otp)
 
-    
+
 
     if not is_valid:
 
@@ -899,7 +912,7 @@ async def clinic_verify_signup(
 
         )
 
-    
+
 
     try:
 
@@ -931,7 +944,7 @@ async def clinic_verify_signup(
 
             )
 
-        
+
 
         result = await db.execute(
 
@@ -953,13 +966,13 @@ async def clinic_verify_signup(
 
             )
 
-        
+
 
         # Hash password
 
         hashed_password = hash_password(request.password)
 
-        
+
 
         # Generate unique clinic ID
 
@@ -1015,7 +1028,7 @@ async def clinic_verify_signup(
 
         )
 
-        
+
 
         db.add(new_pending_registration)
 
@@ -1023,13 +1036,13 @@ async def clinic_verify_signup(
 
         await db.refresh(new_pending_registration)
 
-        
+
 
         # Delete OTP after successful registration
 
         await OTPService.delete_otp(db, email)
 
-        
+
 
         # Send registration received email
 
@@ -1041,7 +1054,7 @@ async def clinic_verify_signup(
 
         )
 
-        
+
 
         return AuthResponse(
 
@@ -1083,7 +1096,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if clinic:
 
@@ -1123,7 +1136,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
         )
 
-    
+
 
     # Check if there's a pending registration with this email
 
@@ -1139,7 +1152,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
     pending_reg = result.scalar_one_or_none()
 
-    
+
 
     if pending_reg:
 
@@ -1155,7 +1168,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
             )
 
-    
+
 
     # Check if there was a rejected registration
 
@@ -1171,7 +1184,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
     rejected_reg = result.scalar_one_or_none()
 
-    
+
 
     if rejected_reg:
 
@@ -1185,7 +1198,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
             )
 
-    
+
 
     raise HTTPException(
 
@@ -1205,7 +1218,7 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
     existing_patient = result.scalar_one_or_none()
 
-    
+
 
     if existing_patient:
 
@@ -1217,7 +1230,7 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
         )
 
-    
+
 
     valid, error_msg = validate_password_strength(patient_data.password)
 
@@ -1231,13 +1244,13 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
         )
 
-    
+
 
     # Generate unique patient ID
 
     patient_id = generate_patient_id()
 
-    
+
 
     # Ensure patient_id is unique
 
@@ -1251,11 +1264,11 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
         patient_id = generate_patient_id()
 
-    
+
 
     hashed_password = hash_password(patient_data.password)
 
-    
+
 
     new_patient = Patient(
 
@@ -1267,11 +1280,13 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
         password=hashed_password,
 
-        phone=patient_data.phone
+        phone=patient_data.phone,
+
+        blood_group=patient_data.blood_group
 
     )
 
-    
+
 
     db.add(new_patient)
 
@@ -1279,7 +1294,7 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
     await db.refresh(new_patient)
 
-    
+
 
     return AuthResponse(
 
@@ -1291,7 +1306,9 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
             "name": patient_data.name,
 
-            "email": patient_data.email
+            "email": patient_data.email,
+
+            "blood_group": patient_data.blood_group
 
         }
 
@@ -1307,7 +1324,7 @@ async def patient_login(login_data: PatientLogin, db: AsyncSession = Depends(get
 
     patient = result.scalar_one_or_none()
 
-    
+
 
     if not patient or not verify_password(login_data.password, patient.password):
 
@@ -1319,7 +1336,7 @@ async def patient_login(login_data: PatientLogin, db: AsyncSession = Depends(get
 
         )
 
-    
+
 
     return AuthResponse(
 
@@ -1333,7 +1350,9 @@ async def patient_login(login_data: PatientLogin, db: AsyncSession = Depends(get
 
             "name": patient.name,
 
-            "email": patient.email
+            "email": patient.email,
+
+            "blood_group": patient.blood_group
 
         }
 
@@ -1357,7 +1376,7 @@ async def get_patient_data(
 
     patient = result.scalar_one_or_none()
 
-    
+
 
     if not patient:
 
@@ -1369,7 +1388,7 @@ async def get_patient_data(
 
         )
 
-    
+
 
     # Return patient data (excluding password)
 
@@ -1384,6 +1403,8 @@ async def get_patient_data(
         "email": patient.email,
 
         "phone": patient.phone,
+
+        "blood_group": patient.blood_group,
 
         "created_at": patient.created_at
 
@@ -1407,7 +1428,7 @@ async def get_clinic_data(
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if not clinic:
 
@@ -1419,7 +1440,7 @@ async def get_clinic_data(
 
         )
 
-    
+
 
     # Return clinic data (excluding password)
 
@@ -1508,7 +1529,7 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
 
     clinics_updated = False
 
-    
+
 
     clinic_list = []
 
@@ -1554,7 +1575,7 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
 
         ] or ["general"]
 
-        
+
 
         # Build doctors array from actual doctor_name
 
@@ -1572,7 +1593,7 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
 
             })
 
-        
+
 
         clinic_list.append({
 
@@ -1632,7 +1653,7 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
 
         await db.commit()
 
-    
+
 
     return {"clinics": clinic_list}
 
@@ -1708,7 +1729,7 @@ async def clinic_change_phone(
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if not clinic:
 
@@ -1720,7 +1741,7 @@ async def clinic_change_phone(
 
         )
 
-    
+
 
     await _verify_profile_otp_or_raise(db, clinic.email, request.otp_code)
 
@@ -1730,7 +1751,7 @@ async def clinic_change_phone(
 
     await db.commit()
 
-    
+
 
     return {"message": "Phone number updated successfully"}
 
@@ -1753,16 +1774,16 @@ async def clinic_change_password(
         result = await db.execute(select(Clinic).where(Clinic.clinic_id == request.clinic_id))
 
         clinic = result.scalar_one_or_none()
-        
+
         if not clinic:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Clinic not found"
             )
-        
+
         # Verify current password (skip for forgot password flow)
         is_forgot_flow = request.current_password == "FORGOT_PASSWORD_PLACEHOLDER"
-        
+
         if not is_forgot_flow and not verify_password(request.current_password, clinic.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1783,7 +1804,7 @@ async def clinic_change_password(
         clinic.password = hash_password(request.new_password)
 
         await db.commit()
-        
+
         return {"message": "Password changed successfully"}
     except HTTPException:
         raise
@@ -1973,7 +1994,7 @@ async def update_clinic_profile(
 
     longitude = request.get("longitude")
 
-    
+
 
     if not clinic_id:
 
@@ -1985,13 +2006,13 @@ async def update_clinic_profile(
 
         )
 
-    
+
 
     result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if not clinic:
 
@@ -2003,7 +2024,7 @@ async def update_clinic_profile(
 
         )
 
-    
+
 
     # Update address if provided
 
@@ -2045,7 +2066,7 @@ async def update_clinic_profile(
 
         clinic.longitude = longitude
 
-    
+
 
     # Update image URLs if provided (max 5 images)
 
@@ -2113,13 +2134,13 @@ async def update_clinic_profile(
 
         full_parts.append(clinic.pincode)
 
-    
+
 
     full_formatted_address = ", ".join(full_parts) if full_parts else clinic.address
 
     clinic.address = full_formatted_address
 
-    
+
 
     if address_changed:
 
@@ -2129,11 +2150,11 @@ async def update_clinic_profile(
 
         clinic.has_pinned_location = False
 
-    
+
 
     await db.commit()
 
-    
+
 
     return {
 
@@ -2185,7 +2206,7 @@ async def update_clinic_location(
 
     address = request.get("address")
 
-    
+
 
     if not clinic_id:
 
@@ -2197,7 +2218,7 @@ async def update_clinic_location(
 
         )
 
-    
+
 
     if not latitude or not longitude:
 
@@ -2209,13 +2230,13 @@ async def update_clinic_location(
 
         )
 
-    
+
 
     result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if not clinic:
 
@@ -2227,7 +2248,7 @@ async def update_clinic_location(
 
         )
 
-    
+
 
     clinic.latitude = latitude
 
@@ -2235,17 +2256,17 @@ async def update_clinic_location(
 
     clinic.has_pinned_location = True
 
-    
+
 
     if address:
 
         clinic.address = address
 
-    
+
 
     await db.commit()
 
-    
+
 
     return {
 
@@ -2275,7 +2296,7 @@ async def upload_clinic_image(
 
     """Upload clinic image and store binary data in database"""
 
-    
+
 
     # Validate clinic exists
 
@@ -2283,7 +2304,7 @@ async def upload_clinic_image(
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if not clinic:
 
@@ -2295,7 +2316,7 @@ async def upload_clinic_image(
 
         )
 
-    
+
 
     # Check current image count
 
@@ -2311,7 +2332,7 @@ async def upload_clinic_image(
 
         )
 
-    
+
 
     # Validate file type - accept any image type
 
@@ -2325,7 +2346,7 @@ async def upload_clinic_image(
 
         )
 
-    
+
 
     # Validate file size (max 5MB)
 
@@ -2343,7 +2364,7 @@ async def upload_clinic_image(
 
         )
 
-    
+
 
     # Convert to base64
 
@@ -2351,7 +2372,7 @@ async def upload_clinic_image(
 
     image_data_b64 = base64.b64encode(contents).decode('utf-8')
 
-    
+
 
     # Find or create ClinicImage record for this clinic
 
@@ -2359,7 +2380,7 @@ async def upload_clinic_image(
 
     clinic_image_record = result.scalar_one_or_none()
 
-    
+
 
     if not clinic_image_record:
 
@@ -2391,13 +2412,13 @@ async def upload_clinic_image(
 
         current_images = list(clinic_image_record.images) if clinic_image_record.images else []
 
-        
+
 
         # Count non-null images
 
         non_null_count = sum(1 for img in current_images if img is not None)
 
-        
+
 
         if non_null_count >= 5:
 
@@ -2409,7 +2430,7 @@ async def upload_clinic_image(
 
             )
 
-        
+
 
         # Find first empty slot (null)
 
@@ -2423,7 +2444,7 @@ async def upload_clinic_image(
 
                 break
 
-        
+
 
         if empty_slot_index is not None:
 
@@ -2453,13 +2474,13 @@ async def upload_clinic_image(
 
             })
 
-        
+
 
         clinic_image_record.images = current_images
 
         await db.flush()
 
-    
+
 
     # Sync clinic.image_urls - keep nulls for deleted images
 
@@ -2479,11 +2500,11 @@ async def upload_clinic_image(
 
     clinic.image_urls = new_urls
 
-    
+
 
     await db.commit()
 
-    
+
 
     # Return the filled slot index
 
@@ -2505,7 +2526,7 @@ async def upload_clinic_image(
 
                 break
 
-    
+
 
     return {
 
@@ -2539,13 +2560,13 @@ async def get_clinic_image(
 
     import base64
 
-    
+
 
     result = await db.execute(select(ClinicImage).where(ClinicImage.clinic_id == clinic_id))
 
     clinic_image_record = result.scalar_one_or_none()
 
-    
+
 
     if not clinic_image_record or not clinic_image_record.images:
 
@@ -2557,7 +2578,7 @@ async def get_clinic_image(
 
         )
 
-    
+
 
     images = clinic_image_record.images
 
@@ -2571,13 +2592,13 @@ async def get_clinic_image(
 
         )
 
-    
+
 
     image_data = images[image_index]
 
     image_bytes = base64.b64decode(image_data["image_data"])
 
-    
+
 
     from fastapi.responses import Response
 
@@ -2611,7 +2632,7 @@ async def delete_clinic_image(
 
     clinic_image_record = result.scalar_one_or_none()
 
-    
+
 
     if not clinic_image_record or not clinic_image_record.images:
 
@@ -2623,7 +2644,7 @@ async def delete_clinic_image(
 
         )
 
-    
+
 
     images = clinic_image_record.images or []
 
@@ -2637,7 +2658,7 @@ async def delete_clinic_image(
 
         )
 
-    
+
 
     # Remove the image at index and renumber remaining
 
@@ -2645,7 +2666,7 @@ async def delete_clinic_image(
 
     clinic_image_record.images = remaining_images
 
-    
+
 
     # Update clinic.image_urls with renumbered URLs
 
@@ -2659,15 +2680,15 @@ async def delete_clinic_image(
 
         clinic.image_urls = new_urls
 
-    
+
 
     await db.commit()
 
-    
+
 
     return {
 
-        "message": "Image deleted successfully", 
+        "message": "Image deleted successfully",
 
         "deleted_index": image_index,
 
@@ -2693,7 +2714,7 @@ async def clinic_delete_account(
 
     clinic = result.scalar_one_or_none()
 
-    
+
 
     if not clinic:
 
@@ -2705,7 +2726,7 @@ async def clinic_delete_account(
 
         )
 
-    
+
 
     # Verify password
 
@@ -2719,7 +2740,7 @@ async def clinic_delete_account(
 
         )
 
-    
+
 
     # Verify confirmation
 
@@ -2743,7 +2764,7 @@ async def clinic_delete_account(
 
     await db.commit()
 
-    
+
 
     return {"message": "Account deleted successfully"}
 
@@ -2809,7 +2830,7 @@ async def patient_change_password(
 
     patient = result.scalar_one_or_none()
 
-    
+
 
     if not patient:
 
@@ -2821,11 +2842,11 @@ async def patient_change_password(
 
         )
 
-    
+
 
     # Verify current password (skip for forgot password flow)
     is_forgot_flow = request.current_password == "FORGOT_PASSWORD_PLACEHOLDER"
-    
+
     if not is_forgot_flow and not verify_password(request.current_password, patient.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -2856,7 +2877,7 @@ async def patient_change_password(
 
     await db.commit()
 
-    
+
 
     return {"message": "Password changed successfully"}
 
@@ -3020,7 +3041,7 @@ async def patient_change_phone(
 
     patient = result.scalar_one_or_none()
 
-    
+
 
     if not patient:
 
@@ -3032,7 +3053,7 @@ async def patient_change_phone(
 
         )
 
-    
+
 
     await _verify_profile_otp_or_raise(db, patient.email, request.otp_code)
 
@@ -3042,7 +3063,7 @@ async def patient_change_phone(
 
     await db.commit()
 
-    
+
 
     return {"message": "Phone number updated successfully"}
 
@@ -3062,7 +3083,7 @@ async def patient_delete_account(
 
     patient = result.scalar_one_or_none()
 
-    
+
 
     if not patient:
 
@@ -3074,7 +3095,7 @@ async def patient_delete_account(
 
         )
 
-    
+
 
     # Verify password
 
@@ -3088,7 +3109,7 @@ async def patient_delete_account(
 
         )
 
-    
+
 
     # Verify confirmation
 
@@ -3112,7 +3133,7 @@ async def patient_delete_account(
 
     await db.commit()
 
-    
+
 
     return {"message": "Account deleted successfully"}
 
@@ -3222,7 +3243,7 @@ async def register_send_otp(
 
     email = request.email.strip().lower()
 
-    
+
 
     # Check if patient already exists (already verified)
 
@@ -3230,7 +3251,7 @@ async def register_send_otp(
 
     existing_patient = result.scalar_one_or_none()
 
-    
+
 
     if existing_patient:
 
@@ -3242,7 +3263,7 @@ async def register_send_otp(
 
         )
 
-    
+
 
     valid, error_msg = validate_password_strength(request.password)
 
@@ -3256,7 +3277,7 @@ async def register_send_otp(
 
         )
 
-    
+
 
     # Check if there's already a pending OTP
 
@@ -3270,7 +3291,7 @@ async def register_send_otp(
 
     existing_otp = otp_result.scalar_one_or_none()
 
-    
+
 
     if existing_otp and not existing_otp.is_verified:
 
@@ -3280,13 +3301,13 @@ async def register_send_otp(
 
         await db.commit()
 
-    
+
 
     # Hash password
 
     hashed_password = hash_password(request.password)
 
-    
+
 
     # Create OTP with user data
 
@@ -3298,11 +3319,13 @@ async def register_send_otp(
 
         password=hashed_password,
 
-        phone=request.phone
+        phone=request.phone,
+
+        blood_group=request.blood_group
 
     )
 
-    
+
 
     if not success:
 
@@ -3314,7 +3337,7 @@ async def register_send_otp(
 
         )
 
-    
+
 
     # Send OTP via email
 
@@ -3322,7 +3345,7 @@ async def register_send_otp(
 
     email_sent = send_otp_email(email, otp_code)
 
-    
+
 
     if not email_sent:
 
@@ -3350,7 +3373,7 @@ async def register_send_otp(
 
         )
 
-    
+
 
     return {
 
@@ -3376,7 +3399,7 @@ async def send_otp(request: SendOTPRequest, db: AsyncSession = Depends(get_db)):
 
     email = request.email.strip().lower()
 
-    
+
 
     # Check if patient already exists (already verified)
 
@@ -3384,7 +3407,7 @@ async def send_otp(request: SendOTPRequest, db: AsyncSession = Depends(get_db)):
 
     existing_patient = result.scalar_one_or_none()
 
-    
+
 
     if existing_patient:
 
@@ -3396,13 +3419,13 @@ async def send_otp(request: SendOTPRequest, db: AsyncSession = Depends(get_db)):
 
         )
 
-    
+
 
     # Send OTP
 
     success, message = await OTPService.send_otp(db, email)
 
-    
+
 
     if not success:
 
@@ -3414,7 +3437,7 @@ async def send_otp(request: SendOTPRequest, db: AsyncSession = Depends(get_db)):
 
         )
 
-    
+
 
     return {
 
@@ -3442,13 +3465,13 @@ async def verify_otp(request: VerifyOTPRequest, db: AsyncSession = Depends(get_d
 
     otp_code = request.otp_code.strip()
 
-    
+
 
     # Verify OTP
 
     success, message = await OTPService.verify_otp(db, email, otp_code)
 
-    
+
 
     if not success:
 
@@ -3462,13 +3485,13 @@ async def verify_otp(request: VerifyOTPRequest, db: AsyncSession = Depends(get_d
 
         )
 
-    
+
 
     # OTP verified - delete the OTP record
 
     await OTPService.delete_otp(db, email)
 
-    
+
 
     return OTPVerifyResponse(
 
@@ -3494,13 +3517,13 @@ async def resend_otp(request: SendOTPRequest, db: AsyncSession = Depends(get_db)
 
     email = request.email.strip().lower()
 
-    
+
 
     # Resend OTP
 
     success, message = await OTPService.resend_otp(db, email)
 
-    
+
 
     if not success:
 
@@ -3512,7 +3535,7 @@ async def resend_otp(request: SendOTPRequest, db: AsyncSession = Depends(get_db)
 
         )
 
-    
+
 
     return {
 
@@ -3540,7 +3563,7 @@ async def get_otp_status(email: str = Query(..., description="Email to check"), 
 
     is_verified = await OTPService.is_email_verified(db, email)
 
-    
+
 
     return {
 
@@ -3556,6 +3579,7 @@ async def get_otp_status(email: str = Query(..., description="Email to check"), 
 
 
 
+@router.post("/appointments")
 @router.post("/appointments/create")
 
 async def create_appointment(
@@ -3578,7 +3602,7 @@ async def create_appointment(
 
         from datetime import datetime, timedelta
 
-        
+
 
         clinic_id = request.get("clinic_id")
 
@@ -3596,9 +3620,9 @@ async def create_appointment(
 
         time = request.get("time")
 
-        slot_id = request.get("slot_id")
+        slot_id = request.get("slot_id") or request.get("session_id")
 
-        
+
 
         if not all([clinic_id, patient_id, patient_name, patient_email, date, time]):
 
@@ -3610,7 +3634,7 @@ async def create_appointment(
 
             )
 
-        
+
 
         result = await db.execute(
 
@@ -3620,7 +3644,7 @@ async def create_appointment(
 
         clinic = result.scalar_one_or_none()
 
-        
+
 
         if not clinic:
 
@@ -3704,7 +3728,7 @@ async def create_appointment(
 
                 )
 
-        
+
 
         if slot_id is None and clinic.end is not None:
 
@@ -3734,11 +3758,11 @@ async def create_appointment(
 
                     status_code=status.HTTP_400_BAD_REQUEST,
 
-                    detail=f"Booking closed — doctor will not be available before end time. Last booking at {cutoff_time.strftime('%H:%M')}."
+                    detail=f"Booking closed - doctor will not be available before end time. Last booking at {cutoff_time.strftime('%H:%M')}."
 
                 )
 
-        
+
 
         result = await db.execute(
 
@@ -3756,7 +3780,7 @@ async def create_appointment(
 
         existing_appointment = result.scalar_one_or_none()
 
-        
+
 
         if existing_appointment:
 
@@ -3770,49 +3794,33 @@ async def create_appointment(
 
 
 
-        result = await db.execute(
+        active_filters = [
+            Appointment.clinic_id == clinic_id,
+            Appointment.date == date,
+            Appointment.status.in_(["booked", "serving"]),
+        ]
+        walkin_filters = [
+            QRAppointment.clinic_id == clinic_id,
+            QRAppointment.date == date,
+            QRAppointment.status.in_(["booked", "serving"]),
+        ]
+        if slot_id is not None:
+            active_filters.append(Appointment.slot_id == slot_id)
+            walkin_filters.append(QRAppointment.slot_id == slot_id)
 
-            select(Appointment).where(
-
-                Appointment.clinic_id == clinic_id,
-
-                Appointment.date == date,
-
-                Appointment.status.in_(["booked", "serving"])
-
-            )
-
-        )
-
+        result = await db.execute(select(Appointment).where(*active_filters))
         active_online = len(result.scalars().all())
 
-
-
-        result = await db.execute(
-
-            select(QRAppointment).where(
-
-                QRAppointment.clinic_id == clinic_id,
-
-                QRAppointment.date == date,
-
-                QRAppointment.status.in_(["booked", "serving"])
-
-            )
-
-        )
-
+        result = await db.execute(select(QRAppointment).where(*walkin_filters))
         active_walkin = len(result.scalars().all())
-
-
 
         is_first_active_patient = (active_online + active_walkin) == 0
 
-        
+
 
         max_token = -1
 
-        
+
 
         result = await db.execute(
 
@@ -3844,7 +3852,7 @@ async def create_appointment(
 
                     pass
 
-        
+
 
         result = await db.execute(
 
@@ -3946,11 +3954,13 @@ async def create_appointment(
 
             slot_id=slot_id,
 
+            session_id=slot_id,
+
             queue_position=queue_position
 
         )
 
-        
+
 
         db.add(new_appointment)
 
@@ -4100,6 +4110,21 @@ async def create_appointment(
 
 
 
+        session_name = None
+        session_time = None
+        if slot_id is not None:
+            slot_result = await db.execute(select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id))
+            slot_record = slot_result.scalar_one_or_none()
+            if slot_record:
+                slots = slot_record.slots
+                if isinstance(slots, str):
+                    slots = json.loads(slots)
+                slot_index = int(slot_id) - 1
+                if 0 <= slot_index < len(slots or []):
+                    selected_slot = slots[slot_index]
+                    session_name = selected_slot.get("session_name") or selected_slot.get("slot_name")
+                    session_time = selected_slot.get("time_label") or str(selected_slot.get("time_range", ""))
+
         return {
 
             "message": "Appointment booked successfully",
@@ -4108,7 +4133,15 @@ async def create_appointment(
 
             "token": appointment_token,
 
+            "appointment_token": appointment_token,
+
             "slot_id": slot_id,
+
+            "session_id": slot_id,
+
+            "session_name": session_name,
+
+            "session_time": session_time,
 
             "patient_name": patient_name,
 
@@ -4135,77 +4168,37 @@ async def create_appointment(
 
 
 @router.get("/appointments/clinic/{clinic_id}")
-
 async def get_clinic_appointments(
-
     clinic_id: str,
-
     db: AsyncSession = Depends(get_db)
-
 ):
-
-    """
-
-    Get all appointments for a specific clinic.
-
-    """
-
+    """Get all appointments for a specific clinic."""
     result = await db.execute(
-
         select(Appointment).where(Appointment.clinic_id == clinic_id).order_by(Appointment.id)
-
     )
-
     appointments = result.scalars().all()
 
-    
-
     appointment_list = []
-
     for apt in appointments:
-
+        patient_result = await db.execute(select(Patient).where(Patient.patient_id == apt.patient_id))
+        patient = patient_result.scalar_one_or_none()
         appointment_list.append({
-
             "id": apt.id,
-
             "token": apt.appointment_token,
-
             "patient_id": apt.patient_id,
-
             "patient_name": apt.patient_name,
-
             "patient_email": apt.patient_email,
-
             "patient_phone": apt.patient_phone,
-
+            "blood_group": patient.blood_group if patient and patient.blood_group else "N/A",
+            "doctor_delay": apt.doctor_delay,
             "doctor_name": apt.doctor_name,
-
             "date": apt.date,
-
             "time": apt.time,
-
             "status": apt.status,
-
             "created_at": apt.created_at
-
         })
 
-    
-
-    return {
-
-        "appointments": appointment_list,
-
-        "total": len(appointment_list),
-
-        "active_slot_id": active_slot_id,
-
-        "viewing_slot_id": viewing_slot_id,
-
-    }
-
-
-
+    return {"appointments": appointment_list, "total": len(appointment_list)}
 @router.get("/appointments/patient/{patient_id}")
 
 async def get_patient_appointments(
@@ -4230,7 +4223,7 @@ async def get_patient_appointments(
 
     appointments = result.scalars().all()
 
-    
+
 
     appointment_list = []
 
@@ -4254,7 +4247,7 @@ async def get_patient_appointments(
 
         })
 
-    
+
 
     return {"appointments": appointment_list, "total": len(appointment_list)}
 
@@ -4280,7 +4273,7 @@ async def get_patient_appointments_by_email(
 
         from app.database.models import Clinic
 
-        
+
 
         result = await db.execute(
 
@@ -4290,7 +4283,7 @@ async def get_patient_appointments_by_email(
 
         appointments = result.scalars().all()
 
-        
+
 
         appointment_list = []
 
@@ -4323,11 +4316,35 @@ async def get_patient_appointments_by_email(
             else:
                 full_formatted_address = ""
 
+            session_name = None
+            session_time = None
+            if getattr(apt, "slot_id", None) is not None:
+                slot_result = await db.execute(select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == apt.clinic_id))
+                slot_record = slot_result.scalar_one_or_none()
+                if slot_record:
+                    slots = slot_record.slots
+                    if isinstance(slots, str):
+                        slots = json.loads(slots)
+                    slot_index = int(apt.slot_id) - 1
+                    if 0 <= slot_index < len(slots or []):
+                        selected_slot = slots[slot_index]
+                        session_name = selected_slot.get("session_name") or selected_slot.get("slot_name")
+                        time_range = selected_slot.get("time_range") or []
+                        session_time = str(time_range)
+
             appointment_list.append({
 
                 "id": apt.id,
 
                 "appointment_token": apt.appointment_token,
+
+                "slot_id": getattr(apt, "slot_id", None),
+
+                "session_id": getattr(apt, "session_id", None) or getattr(apt, "slot_id", None),
+
+                "session_name": session_name,
+
+                "session_time": session_time,
 
                 "clinic_id": apt.clinic_id,
 
@@ -4355,7 +4372,7 @@ async def get_patient_appointments_by_email(
 
             })
 
-        
+
 
         return {"appointments": appointment_list, "total": len(appointment_list)}
 
@@ -4366,81 +4383,41 @@ async def get_patient_appointments_by_email(
 
 
 @router.get("/clinic/appointments")
-
 async def get_clinic_appointments(
-
     clinic_id: str = Query(..., description="Clinic ID"),
-
     db: AsyncSession = Depends(get_db)
-
 ):
-
-    """
-
-    Get today's appointments for a specific clinic with patient details.
-
-    Only fetches appointments for today's date.
-
-    """
-
-    from datetime import datetime
-
+    """Get today's appointments for a specific clinic with patient details."""
     today = datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
-
-    
-
     result = await db.execute(
-
         select(Appointment).where(
-
             Appointment.clinic_id == clinic_id,
-
             Appointment.date == today
-
         ).order_by(Appointment.id)
-
     )
-
     appointments = result.scalars().all()
 
-    
-
     appointment_list = []
-
     for apt in appointments:
-
+        patient_result = await db.execute(select(Patient).where(Patient.patient_id == apt.patient_id))
+        patient = patient_result.scalar_one_or_none()
         appointment_list.append({
-
             "id": apt.id,
-
             "token": apt.appointment_token,
-
             "patient_id": apt.patient_id,
-
             "patient_name": apt.patient_name,
-
             "patient_email": apt.patient_email,
-
             "patient_phone": apt.patient_phone,
-
+            "blood_group": patient.blood_group if patient and patient.blood_group else "N/A",
+            "doctor_delay": apt.doctor_delay,
             "doctor_name": apt.doctor_name,
-
             "date": apt.date,
-
             "time": apt.time,
-
             "status": apt.status,
-
             "created_at": apt.created_at
-
         })
 
-    
-
     return {"appointments": appointment_list, "total": len(appointment_list)}
-
-
-
 @router.get("/appointments/today")
 
 async def get_today_appointments(
@@ -4738,6 +4715,14 @@ async def get_today_appointments(
 
     for apt in online_appointments:
 
+        patient_result = await db.execute(
+
+            select(Patient).where(Patient.patient_id == apt.patient_id)
+
+        )
+
+        patient = patient_result.scalar_one_or_none()
+
         appointment_list.append({
 
             "id": apt.id,
@@ -4755,6 +4740,10 @@ async def get_today_appointments(
             "patient_email": apt.patient_email,
 
             "patient_phone": apt.patient_phone,
+
+            "blood_group": patient.blood_group if patient and patient.blood_group else "N/A",
+
+            "doctor_delay": apt.doctor_delay,
 
             "doctor_name": apt.doctor_name,
 
@@ -4796,6 +4785,10 @@ async def get_today_appointments(
 
             "patient_phone": apt.patient_phone,
 
+            "blood_group": "N/A",
+
+            "doctor_delay": getattr(apt, "doctor_delay", None),
+
             "doctor_name": apt.doctor_name,
 
             "date": apt.date,
@@ -4827,6 +4820,14 @@ async def get_today_appointments(
 
 
 
+    active_delay = next((item.get("doctor_delay") for item in appointment_list if item.get("doctor_delay")), None)
+
+    delay_minutes = _delay_minutes(active_delay)
+
+    for index, item in enumerate(appointment_list):
+
+        item["estimated_wait_minutes"] = delay_minutes + (index * 15)
+
     return {
 
         "appointments": appointment_list,
@@ -4835,7 +4836,11 @@ async def get_today_appointments(
 
         "active_slot_id": active_slot_id,
 
-        "viewing_slot_id": viewing_slot_id
+        "viewing_slot_id": viewing_slot_id,
+
+        "active_delay": active_delay,
+
+        "delay_minutes": delay_minutes
 
     }
 
@@ -5029,6 +5034,12 @@ async def get_queue_position(
 
         "now_serving_token": metrics["now_serving_token"],
 
+        "doctor_delay": getattr(current_appointment, "doctor_delay", None),
+
+        "session_id": getattr(current_appointment, "session_id", None) or getattr(current_appointment, "slot_id", None),
+
+        "slot_id": getattr(current_appointment, "slot_id", None),
+
         "status": "in_queue"
 
     }
@@ -5057,7 +5068,7 @@ async def get_patient_reviews(
 
     reviews = result.scalars().all()
 
-    
+
 
     review_list = []
 
@@ -5085,7 +5096,7 @@ async def get_patient_reviews(
 
         })
 
-    
+
 
     return {"reviews": review_list, "total": len(review_list)}
 
@@ -5111,7 +5122,7 @@ async def get_clinic_reviews(
 
     reviews = result.scalars().all()
 
-    
+
 
     # Calculate average rating
 
@@ -5119,7 +5130,7 @@ async def get_clinic_reviews(
 
     avg_rating = round(total_rating / len(reviews), 1) if reviews else 0
 
-    
+
 
     review_list = []
 
@@ -5143,7 +5154,7 @@ async def get_clinic_reviews(
 
         })
 
-    
+
 
     return {
 
@@ -5179,7 +5190,7 @@ async def create_review(
 
     review_text = request.get("review_text", "")
 
-    
+
 
     if not clinic_id or not patient_id or not rating:
 
@@ -5191,7 +5202,7 @@ async def create_review(
 
         )
 
-    
+
 
     # Check if review already exists for this patient and clinic
 
@@ -5209,7 +5220,7 @@ async def create_review(
 
     existing_review = result.scalar_one_or_none()
 
-    
+
 
     if existing_review:
 
@@ -5221,7 +5232,7 @@ async def create_review(
 
         )
 
-    
+
 
     # Create review
 
@@ -5243,7 +5254,7 @@ async def create_review(
 
     )
 
-    
+
 
     db.add(new_review)
 
@@ -5251,7 +5262,7 @@ async def create_review(
 
     await db.refresh(new_review)
 
-    
+
 
     return {
 
@@ -5297,7 +5308,7 @@ async def get_patient_completed_appointments(
 
     completed = result.scalars().all()
 
-    
+
 
     # Get patient's existing reviews
 
@@ -5311,7 +5322,7 @@ async def get_patient_completed_appointments(
 
     reviewed_clinic_ids = set(r.clinic_id for r in reviews)
 
-    
+
 
     # Get clinic names for all visited clinics
 
@@ -5333,7 +5344,7 @@ async def get_patient_completed_appointments(
 
             clinic_names[clinic.clinic_id] = clinic.clinic_name
 
-    
+
 
     # Group by clinic_id and get the most recent visit per clinic
 
@@ -5359,11 +5370,11 @@ async def get_patient_completed_appointments(
 
             }
 
-    
+
 
     visit_list = list(clinic_visits.values())
 
-    
+
 
     return {"visits": visit_list, "total": len(visit_list)}
 
@@ -5393,7 +5404,7 @@ async def like_review(
 
     review = result.scalar_one_or_none()
 
-    
+
 
     if not review:
 
@@ -5405,7 +5416,7 @@ async def like_review(
 
         )
 
-    
+
 
     # Check if patient already reacted to this review
 
@@ -5423,7 +5434,7 @@ async def like_review(
 
     existing = result.scalar_one_or_none()
 
-    
+
 
     if existing:
 
@@ -5491,7 +5502,7 @@ async def dislike_review(
 
     review = result.scalar_one_or_none()
 
-    
+
 
     if not review:
 
@@ -5503,7 +5514,7 @@ async def dislike_review(
 
         )
 
-    
+
 
     # Check if patient already reacted to this review
 
@@ -5521,7 +5532,7 @@ async def dislike_review(
 
     existing = result.scalar_one_or_none()
 
-    
+
 
     if existing:
 
@@ -5589,13 +5600,13 @@ async def get_user_reactions(
 
     review_ids = [r.id for r in reviews]
 
-    
+
 
     if not review_ids:
 
         return {"reactions": {}}
 
-    
+
 
     result = await db.execute(
 
@@ -5611,7 +5622,7 @@ async def get_user_reactions(
 
     reactions = result.scalars().all()
 
-    
+
 
     return {"reactions": {str(r.review_id): r.reaction_type for r in reactions}}
 
@@ -5647,35 +5658,35 @@ async def search_clinic_patients(
 
             query = select(model).where(model.clinic_id == clinic_id)
 
-            
+
 
             if from_date and to_date:
 
                 query = query.where(model.date >= from_date, model.date <= to_date)
 
-            
+
 
             if patient_id:
 
                 query = query.where(model.patient_id == patient_id)
 
-            
+
 
             if email:
 
                 query = query.where(model.patient_email.ilike(f"%{email}%"))
 
-            
+
 
             if phone:
 
                 query = query.where(model.patient_phone.ilike(f"%{phone}%"))
 
-            
+
 
             return query.order_by(model.date.desc(), model.time.desc())
 
-        
+
 
         # Search appointments table
 
@@ -5685,7 +5696,7 @@ async def search_clinic_patients(
 
         appointments = result.scalars().all()
 
-        
+
 
         # Search completed_appointments table
 
@@ -5695,13 +5706,13 @@ async def search_clinic_patients(
 
         completed = result.scalars().all()
 
-        
+
 
         # Combine and format results
 
         patients = []
 
-        
+
 
         # Add appointments
 
@@ -5729,7 +5740,7 @@ async def search_clinic_patients(
 
             })
 
-        
+
 
         # Add completed appointments
 
@@ -5757,7 +5768,7 @@ async def search_clinic_patients(
 
             })
 
-        
+
 
         # Remove duplicates by patient_id + date + time
 
@@ -5775,7 +5786,7 @@ async def search_clinic_patients(
 
                 unique_patients.append(p)
 
-        
+
 
         return {"patients": unique_patients, "total": len(unique_patients)}
 
@@ -5811,7 +5822,7 @@ async def create_token(
 
     from datetime import datetime
 
-    
+
 
     clinic_id = request.get("clinicId")
 
@@ -5823,7 +5834,7 @@ async def create_token(
 
     source = request.get("source", "ONLINE")  # QR, ONLINE, etc.
 
-    
+
 
     # Validate required fields
 
@@ -5837,15 +5848,17 @@ async def create_token(
 
         )
 
-    
 
-    # Get current date
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    # Use the same clinic-local day as the live queue endpoints so newly
 
-    
+    # created tokens appear on the doctor dashboard immediately.
 
-    # Get all active appointments for this clinic today (booked, serving status)
+    today = _clinic_today_str()
+
+
+
+    # Get all active appointments for this clinic today across both online and QR/walk-in sources.
 
     result = await db.execute(
 
@@ -5855,19 +5868,43 @@ async def create_token(
 
             Appointment.date == today,
 
-            Appointment.status.in_(["booked", "serving"])
+            Appointment.status.in_(["booked", "pending", "serving", "skipped"])
 
-        ).order_by(Appointment.id)
+        ).order_by(Appointment.queue_position, Appointment.id)
 
     )
 
-    existing_appointments = result.scalars().all()
+    existing_online = result.scalars().all()
 
-    
+    result = await db.execute(
 
-    # Calculate next token number (append to end of queue)
+        select(QRAppointment).where(
 
-    next_token_number = len(existing_appointments)
+            QRAppointment.clinic_id == clinic_id,
+
+            QRAppointment.date == today,
+
+            QRAppointment.status.in_(["booked", "pending", "serving", "skipped"])
+
+        ).order_by(QRAppointment.queue_position, QRAppointment.id)
+
+    )
+
+    existing_walkins = result.scalars().all()
+
+    existing_appointments = [*existing_online, *existing_walkins]
+
+
+
+    # Calculate next token number (append to end of queue).
+
+    max_token_number = 0
+
+    for appointment in existing_appointments:
+
+        max_token_number = max(max_token_number, _token_number(appointment.appointment_token))
+
+    next_token_number = max_token_number + 1
 
     token_label = f"T-{next_token_number}"
 
@@ -5921,7 +5958,7 @@ async def create_token(
 
         date=today,
 
-        time=datetime.now().strftime("%H:%M"),
+        time=datetime.now(CLINIC_TIMEZONE).strftime("%H:%M"),
 
         status="booked",
 
@@ -5929,7 +5966,7 @@ async def create_token(
 
     )
 
-    
+
 
     db.add(new_appointment)
 
@@ -5937,7 +5974,7 @@ async def create_token(
 
     await db.refresh(new_appointment)
 
-    
+
 
     return {
 
@@ -5945,11 +5982,15 @@ async def create_token(
 
         "tokenLabel": token_label,
 
+        "token_label": token_label,
+
         "tokenNumber": next_token_number,
 
-        "position": next_token_number + 1,  # 1-based position for display
+        "token_number": next_token_number,
 
-        "patientsAhead": next_token_number,
+        "position": queue_position,
+
+        "patientsAhead": queue_position - 1,
 
         "appointmentId": new_appointment.id,
 
@@ -5962,4 +6003,3 @@ async def create_token(
     }
 
     return {"patients": unique_patients, "count": len(unique_patients)}
-

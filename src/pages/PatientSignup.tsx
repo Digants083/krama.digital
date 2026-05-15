@@ -1,10 +1,10 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AuthCard from "@/components/auth/AuthCard";
-import { User, Phone, Mail, Lock, ArrowRight, Check, X } from "lucide-react";
+import { User, Phone, Mail, Lock, ArrowRight, Check, X, Droplet } from "lucide-react";
 
 const validatePassword = (password: string) => ({
   length: password.length >= 8,
@@ -30,7 +30,7 @@ const PatientSignup = () => {
   const location = useLocation();
   const fromJoinQueue = location.state as { fromJoinQueue?: boolean; clinic_id?: string } | null;
   const [step, setStep] = useState<"form" | "otp">("form");
-  const [form, setForm] = useState({ name: "", phone: "", email: "", password: "", confirm: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", password: "", confirm: "", blood_group: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [passwordValid, setPasswordValid] = useState({
@@ -55,7 +55,7 @@ const PatientSignup = () => {
     if (!form.name || !form.email || !form.password) return setError("Please fill all required fields.");
     if (form.password !== form.confirm) return setError("Passwords do not match.");
     if (!allValid) return setError("Please meet all password requirements.");
-    
+
     setError("");
     setLoading(true);
 
@@ -71,6 +71,7 @@ const PatientSignup = () => {
           email: form.email,
           password: form.password,
           phone: form.phone,
+          blood_group: form.blood_group,
         }),
       });
 
@@ -84,7 +85,7 @@ const PatientSignup = () => {
 
       // Store email for OTP verification
       localStorage.setItem("pending_verification_email", form.email);
-      
+
       // Move to OTP step
       setStep("otp");
     } catch (err) {
@@ -96,11 +97,11 @@ const PatientSignup = () => {
 
   if (step === "otp") {
     return (
-      <OTPVerificationPage 
+      <OTPVerificationPage
         email={form.email}
         onBack={() => setStep("form")}
         fromJoinQueue={fromJoinQueue}
-        userData={{ name: form.name, phone: form.phone }}
+        userData={{ name: form.name, phone: form.phone, blood_group: form.blood_group }}
       />
     );
   }
@@ -146,6 +147,13 @@ const PatientSignup = () => {
             </div>
           </div>
 
+          <div className="space-y-1.5">
+            <Label htmlFor="blood_group">Blood Group</Label>
+            <div className="relative">
+              <Droplet className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input id="blood_group" placeholder="B+" value={form.blood_group} onChange={(e) => update("blood_group", e.target.value.toUpperCase())} className="pl-9" />
+            </div>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
@@ -196,11 +204,11 @@ const PatientSignup = () => {
 };
 
 // OTP Verification Page Component
-const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: { 
-  email: string, 
+const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: {
+  email: string,
   onBack: () => void,
   fromJoinQueue?: { fromJoinQueue?: boolean; clinic_id?: string } | null,
-  userData?: { name: string; phone: string }
+  userData?: { name: string; phone: string; blood_group?: string }
 }) => {
   const navigate = useNavigate();
   const [otp, setOtp] = useState("");
@@ -255,7 +263,8 @@ const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: {
       localStorage.setItem("patientData", JSON.stringify({
         email: email,
         name: userData?.name || "",
-        phone: userData?.phone || ""
+        phone: userData?.phone || "",
+        blood_group: userData?.blood_group || ""
       }));
 
       setSuccess(true);
@@ -268,7 +277,7 @@ const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: {
 
   const handleResend = async () => {
     if (countdown > 0) return;
-    
+
     setResendLoading(true);
     try {
       const response = await fetch("/api/auth/resend-otp", {
