@@ -11,7 +11,7 @@
   "theme_color": "#005f5f",
   "icons": [
     {
-      "src": "/digi-favicon-v2.png",
+      "src": "/favicon-new.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
