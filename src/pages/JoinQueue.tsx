@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
-import { formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
+import { formatDelayedStartTime, formatDelayLabel, formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
 import { ArrowRight, MapPinned, Search, Ticket } from "lucide-react";
 import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 
@@ -16,6 +16,7 @@ interface TimeSlot {
   is_open: boolean;
   is_expired: boolean;
   display_status: string;
+  delay_minutes?: number;
 }
 
 type RawTimeSlot = Omit<TimeSlot, "is_open" | "is_expired" | "display_status"> & {
@@ -33,6 +34,7 @@ type SessionSlot = {
   time_label?: string;
   status?: string;
   is_open?: boolean;
+  delay_minutes?: number;
 };
 
 // Types
@@ -122,13 +124,15 @@ const JoinQueue = () => {
         is_open: slotStatus.is_open,
         is_expired: slotStatus.is_expired,
         display_status: slotStatus.display_status,
+        delay_minutes: Number(session.delay_minutes || 0),
       };
     };
 
-    const mapLegacySlot = (slot: RawTimeSlot, idx: number, slotArray: string[]): TimeSlot => {
+    const mapLegacySlot = (slot: RawTimeSlot, idx: number, slotArray: string[], slotDelays: number[]): TimeSlot => {
       const isOpen = isSlotManuallyOpen(slot, slotArray, idx);
       const slotStatus = getPatientSlotStatus(slot.time_range, isOpen);
       const slotId = idx + 1;
+      const delayMinutes = Number(slot.delay_minutes || slotDelays[idx] || 0);
       return {
         ...slot,
         slot_name: toDisplayName({ ...slot, slot_id: slotId }),
@@ -136,7 +140,8 @@ const JoinQueue = () => {
         session_id: slotId,
         is_open: slotStatus.is_open,
         is_expired: slotStatus.is_expired,
-        display_status: slotStatus.display_status,
+        display_status: delayMinutes > 0 && slotStatus.is_open && !slotStatus.is_expired ? "Delayed" : slotStatus.display_status,
+        delay_minutes: delayMinutes,
       };
     };
 
@@ -162,7 +167,8 @@ const JoinQueue = () => {
         const legacyResponse = await fetch(`/api/auth/clinic/time-slots?clinic_id=${encodeURIComponent(qrClinicId)}`);
         const legacyData = await legacyResponse.json();
         const slotArray = legacyData.slot || [];
-        const slots = (legacyData.slots || []).map((slot: RawTimeSlot, idx: number) => mapLegacySlot(slot, idx, slotArray)).sort(sortSlots);
+        const slotDelays = legacyData.slot_delays || [];
+        const slots = (legacyData.slots || []).map((slot: RawTimeSlot, idx: number) => mapLegacySlot(slot, idx, slotArray, slotDelays)).sort(sortSlots);
         setTimeSlots(slots);
       } catch (error) {
         console.error("Error fetching time slots:", error);
@@ -533,6 +539,7 @@ const JoinQueue = () => {
                   const slotNum = slot.slot_id ?? idx + 1;
                   const isUnavailable = !slot.is_open || slot.is_expired;
                   const isSelected = selectedSlotId === slotNum;
+                  const delayLabel = formatDelayLabel(slot.delay_minutes);
                   const statusBadgeClass = slot.display_status === "Expired"
                     ? "bg-red-100 text-red-700"
                     : slot.display_status === "Delayed"
@@ -563,6 +570,13 @@ const JoinQueue = () => {
                         <span className={isSelected ? "mt-0.5 block text-xs text-white/75" : "mt-0.5 block text-xs text-muted-foreground"}>
                           {slot.time_label || formatTimeRange(slot.time_range[0], slot.time_range[1])}
                         </span>
+                        {delayLabel && !slot.is_expired && (
+                          <span className={isSelected ? "mt-2 block rounded-lg bg-white/15 px-3 py-2 text-xs font-semibold text-white" : "mt-2 block rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700"}>
+                            Delay: {delayLabel}
+                            <br />
+                            New time: {formatDelayedStartTime(slot.time_range, slot.delay_minutes)}
+                          </span>
+                        )}
                       </span>
                       <span
                         className={[

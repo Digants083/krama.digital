@@ -6,7 +6,7 @@ import { ArrowLeft, CalendarDays, Check, Clock, MapPin, Phone, Building2, Users 
 import { Button } from "@/components/ui/button";
 import DoctorCard from "@/components/shared/DoctorCard";
 import PatientTermsModal from "@/components/auth/PatientTermsModal";
-import { formatHourDecimal24, formatTimeRange } from "@/lib/timeFormat";
+import { formatDelayedStartTime, formatDelayedTimeRange, formatDelayLabel, formatHourDecimal24, formatTimeRange } from "@/lib/timeFormat";
 
 interface ClinicTimeSlot {
   session_id: number;
@@ -89,14 +89,17 @@ const BookAppointment = () => {
   };
 
   const navigateToConfirmation = (booking: { token: string; appointment_id?: number }) => {
+    const delayLabel = formatDelayLabel(selectedTimeSlot?.delay_minutes);
     navigate("/confirmation", {
       state: {
         clinic: clinic.name,
         doctor: selectedDoctor?.name,
         date: dates.find((d) => d.value === selectedDate)?.label,
-        time: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
+        time: selectedTimeSlot ? formatDelayedTimeRange(selectedTimeSlot.time_range, selectedTimeSlot.delay_minutes) : "",
         sessionName: selectedTimeSlot?.session_name || selectedTimeSlot?.slot_name,
-        sessionTime: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
+        sessionTime: selectedTimeSlot ? formatDelayedStartTime(selectedTimeSlot.time_range, selectedTimeSlot.delay_minutes) : "",
+        delay: delayLabel,
+        originalSessionTime: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
         sessionId: selectedTimeSlot?.session_id,
         address: clinic.address,
         token: booking.token,
@@ -186,7 +189,7 @@ const BookAppointment = () => {
       </div>
 
       <main className="mx-auto max-w-3xl px-4 pb-12">
-        {/* Step 0 — Clinic Info */}
+        {/* Step 0 - Clinic Info */}
         {step === 0 && (
           <section className="space-y-6">
             <div className="bg-card rounded-xl border border-border p-6 shadow-sm">
@@ -219,7 +222,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 1 — Select Time Slot */}
+        {/* Step 1 - Select Time Slot */}
         {step === 1 && (
           <section className="space-y-4">
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
@@ -239,32 +242,42 @@ const BookAppointment = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {timeSlots.map((slot, index) => (
-                  <button
-                    key={index}
-                    onClick={() => { setSelectedTimeSlot(slot); setSelectedSlotIndex(index); }}
-                    className={`p-4 rounded-xl border-2 text-left transition-all ${
-                      selectedSlotIndex === index
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-card hover:border-primary/50"
-                    }`}
-                  >
-                    <p className={`font-semibold ${selectedSlotIndex === index ? "text-primary" : "text-foreground"}`}>
-                      {slot.slot_name} • {formatTimeRange(slot.time_range)}
-                    </p>
-                  </button>
-                ))}
+                {timeSlots.map((slot, index) => {
+                  const delayLabel = formatDelayLabel(slot.delay_minutes);
+                  const isSelected = selectedSlotIndex === index;
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => { setSelectedTimeSlot(slot); setSelectedSlotIndex(index); }}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-card hover:border-primary/50"
+                      }`}
+                    >
+                      <p className={`font-semibold ${isSelected ? "text-primary" : "text-foreground"}`}>
+                        {slot.slot_name} - {formatTimeRange(slot.time_range)}
+                      </p>
+                      {delayLabel && (
+                        <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">
+                          <p>Delay: {delayLabel}</p>
+                          <p>New time: {formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</p>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </section>
         )}
 
-        {/* Step 2 — Select Doctor */}
+        {/* Step 2 - Select Doctor */}
         {step === 2 && (
           <section className="space-y-3">
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
               <p className="text-sm text-primary font-medium">
-                Selected: {selectedTimeSlot && `${selectedTimeSlot.session_name || selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`}
+                Selected: {selectedTimeSlot && `${selectedTimeSlot.session_name || selectedTimeSlot.slot_name} ${formatDelayedTimeRange(selectedTimeSlot.time_range, selectedTimeSlot.delay_minutes)}`}
               </p>
             </div>
             <h2 className="text-lg font-semibold text-foreground">Select a Doctor</h2>
@@ -274,12 +287,12 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 3 — Select Date */}
+        {/* Step 3 - Select Date */}
         {step === 3 && (
           <section>
             <div className="bg-primary/5 rounded-lg p-3 mb-4">
               <p className="text-sm text-primary font-medium">
-                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatTimeRange(selectedTimeSlot.time_range)}`} • {selectedDoctor?.name}
+                {selectedTimeSlot && `${selectedTimeSlot.slot_name} ${formatDelayedTimeRange(selectedTimeSlot.time_range, selectedTimeSlot.delay_minutes)}`} - {selectedDoctor?.name}
               </p>
             </div>
             <h2 className="mb-4 text-lg font-semibold text-foreground">
@@ -304,7 +317,7 @@ const BookAppointment = () => {
           </section>
         )}
 
-        {/* Step 4 — Confirm */}
+        {/* Step 4 - Confirm */}
         {step === 4 && (
           <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-foreground">Confirm Your Appointment</h2>
@@ -312,7 +325,10 @@ const BookAppointment = () => {
               <div className="flex justify-between"><dt className="text-muted-foreground">Clinic</dt><dd className="font-medium text-foreground">{clinic.name}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Doctor</dt><dd className="font-medium text-foreground">{selectedDoctor?.name}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Session</dt><dd className="font-medium text-foreground">{selectedTimeSlot && `${selectedTimeSlot.session_name || selectedTimeSlot.slot_name}`}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Time</dt><dd className="font-medium text-foreground">{selectedTimeSlot && formatTimeRange(selectedTimeSlot.time_range)}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Time</dt><dd className="font-medium text-foreground">{selectedTimeSlot && formatDelayedTimeRange(selectedTimeSlot.time_range, selectedTimeSlot.delay_minutes)}</dd></div>
+              {formatDelayLabel(selectedTimeSlot?.delay_minutes) && (
+                <div className="flex justify-between"><dt className="text-muted-foreground">Delay</dt><dd className="font-medium text-orange-700">{formatDelayLabel(selectedTimeSlot?.delay_minutes)}</dd></div>
+              )}
               <div className="flex justify-between"><dt className="text-muted-foreground">Date</dt><dd className="font-medium text-foreground">{dates.find((d) => d.value === selectedDate)?.label}</dd></div>
             </dl>
             <p className="mt-4 rounded-lg bg-accent/10 px-4 py-2 text-sm text-accent">

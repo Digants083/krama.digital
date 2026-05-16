@@ -92,35 +92,35 @@ const PatientDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <main className="section-container px-4 py-8 md:px-8 md:py-10">
-        <section className="rounded-[32px] bg-primary px-6 py-8 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] md:px-8">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm uppercase tracking-[0.22em] text-primary-foreground/70">Patient Dashboard</p>
-              <h1 className="mt-3 font-display text-4xl font-bold tracking-tight md:text-5xl">{profile.name}</h1>
-              <p className="mt-3 text-primary-foreground/78">
+    <div className="min-h-screen bg-[#f5f3ee]">
+      <main className="section-container px-4 py-6 md:px-8 md:py-10">
+        <section className="rounded-[24px] bg-primary px-4 py-6 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] sm:rounded-[32px] sm:px-6 sm:py-8 md:px-8">
+          <div className="flex items-start justify-between gap-3 sm:gap-4">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.18em] text-primary-foreground/70 sm:text-sm sm:tracking-[0.22em]">Patient Dashboard</p>
+              <h1 className="mt-2 truncate font-display text-3xl font-bold tracking-tight sm:mt-3 sm:text-4xl md:text-5xl">{profile.name}</h1>
+              <p className="mt-2 text-sm text-primary-foreground/78 sm:mt-3 sm:text-base">
                 {appointments.length > 0 ? "Your appointments are confirmed." : "Book a clinic visit and track it here."}
               </p>
             </div>
 
             <Link
               to="/patient/profile"
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20 sm:h-12 sm:w-12"
               aria-label="Profile"
             >
               <User className="h-5 w-5" />
             </Link>
           </div>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:grid-cols-3 sm:gap-4">
             <Link
               to="/patient/find-clinics"
-              className="rounded-[22px] bg-white/10 px-6 py-6 text-center transition hover:bg-white/20"
+              className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
             >
-              <CalendarCheck className="mx-auto h-8 w-8" />
-              <p className="mt-2 text-sm text-primary-foreground/70">Book</p>
-              <p className="mt-1 text-xl font-bold text-white">New Appointment</p>
+              <CalendarCheck className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
+              <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Book</p>
+              <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">New Appointment</p>
             </Link>
             {appointments.length > 0 ? (
               <Link
@@ -136,29 +136,29 @@ const PatientDashboard = () => {
                   sessionId: appointments[0].session_id,
                   address: appointments[0].address || "",
                 }}
-                className="rounded-[22px] bg-white/10 px-6 py-6 text-center transition hover:bg-white/20"
+                className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
               >
-                <Hash className="mx-auto h-8 w-8" />
-                <p className="mt-2 text-sm text-primary-foreground/70">Appointment</p>
-                <p className="mt-1 text-xl font-bold text-white">{appointments[0].appointment_token}</p>
+                <Hash className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
+                <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Appointment</p>
+                <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">{appointments[0].appointment_token}</p>
               </Link>
             ) : (
               <Link
                 to="/confirmation"
-                className="rounded-[22px] bg-white/10 px-6 py-6 text-center transition hover:bg-white/20"
+                className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
               >
-                <Hash className="mx-auto h-8 w-8" />
-                <p className="mt-2 text-sm text-primary-foreground/70">Appointment</p>
-                <p className="mt-1 text-xl font-bold text-white">Booked Appointment</p>
+                <Hash className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
+                <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Appointment</p>
+                <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">Booked Appointment</p>
               </Link>
             )}
             <Link
               to="/patient/reviews"
-              className="rounded-[22px] bg-white/10 px-6 py-6 text-center transition hover:bg-white/20"
+              className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
             >
-              <Star className="mx-auto h-8 w-8" />
-              <p className="mt-2 text-sm text-primary-foreground/70">Review</p>
-              <p className="mt-1 text-xl font-bold text-white">Write Feedback</p>
+              <Star className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
+              <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Review</p>
+              <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">Write Feedback</p>
             </Link>
           </div>
         </section>

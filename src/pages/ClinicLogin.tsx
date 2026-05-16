@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import AuthCard from "@/components/auth/AuthCard";
 
 import { Building2, Lock, ArrowRight } from "lucide-react";
@@ -11,7 +12,7 @@ import { Building2, Lock, ArrowRight } from "lucide-react";
 const ClinicLogin = () => {
   const navigate = useNavigate();
 
-  const [clinicId, setClinicId] = useState("");
+  const [loginIdentifier, setLoginIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,7 +27,7 @@ const ClinicLogin = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!clinicId.trim() || !password.trim()) {
+    if (!loginIdentifier.trim() || !password.trim()) {
       setError("Please fill all fields.");
       return;
     }
@@ -41,7 +42,7 @@ const ClinicLogin = () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email: clinicId,
+          email: loginIdentifier,
           password: password,
         }),
       });
@@ -57,7 +58,7 @@ const ClinicLogin = () => {
       localStorage.setItem("user", JSON.stringify({
         id: data.user_id,
         type: data.user_type,
-        email: clinicId
+        email: data.email || loginIdentifier
       }));
 
       // Also store clinic_id for profile access
@@ -65,7 +66,7 @@ const ClinicLogin = () => {
         localStorage.setItem("clinic_id", data.clinic_id);
       }
 
-      // ?? Redirect to clinic dashboard immediately
+      // Redirect to clinic dashboard immediately
       navigate("/clinic");
     } catch (err) {
       setError("Network error. Please try again.");
@@ -108,9 +109,9 @@ const ClinicLogin = () => {
               <Label htmlFor="clinicId">Clinic ID / Email</Label>
               <Input
                 id="clinicId"
-                placeholder="clinic@example.com"
-                value={clinicId}
-                onChange={(e) => setClinicId(e.target.value)}
+                placeholder="FA23W3 or clinic@example.com"
+                value={loginIdentifier}
+                onChange={(e) => setLoginIdentifier(e.target.value)}
               />
             </div>
 
@@ -126,10 +127,9 @@ const ClinicLogin = () => {
               </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
+                <PasswordInput
                   id="password"
-                  type="password"
-                  placeholder="••••••••"
+                  placeholder="********"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-9"

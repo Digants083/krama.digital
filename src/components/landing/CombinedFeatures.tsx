@@ -5,8 +5,8 @@ const features = [
   { icon: Radio, title: "Live Queue Tracking", desc: "Real-time token updates for patients and staff." },
   { icon: Ticket, title: "Smart Token Management", desc: "Automatic digital tokens replace manual numbering." },
   { icon: MapPin, title: "GPS-Based Clinic Discovery", desc: "Patients find the nearest clinics instantly." },
-  { icon: Smartphone, title: "Mobile-First System", desc: "Works on any device browser — no app download." },
-  { icon: Users, title: "No App Installation", desc: "Zero friction for patients — just scan and go." },
+  { icon: Smartphone, title: "Mobile-First System", desc: "Works on any device browser - no app download." },
+  { icon: Users, title: "No App Installation", desc: "Zero friction for patients - just scan and go." },
   { icon: Scale, title: "Fair Queue Handling", desc: "Transparent, first-come-first-serve token order." },
 ];
 

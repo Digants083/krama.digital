@@ -5,9 +5,9 @@ export type Language = 'en' | 'hi' | 'kn';
 
 // Language configuration
 export const LANGUAGES = {
-  en: { name: 'English', code: 'en', flag: '🇬🇧' },
-  hi: { name: 'हिंदी', code: 'hi', flag: '🇮🇳' },
-  kn: { name: 'ಕನ್ನಡ', code: 'kn', flag: '🇮🇳' }
+  en: { name: 'English', code: 'en', flag: 'EN' },
+  hi: { name: 'Hindi', code: 'hi', flag: 'HI' },
+  kn: { name: 'Kannada', code: 'kn', flag: 'KN' }
 } as const;
 
 // Translation cache

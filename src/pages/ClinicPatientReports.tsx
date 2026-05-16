@@ -60,32 +60,32 @@ const PendingReportCard = ({
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#00555A]/10 bg-white shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)]">
+    <div className="overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)]">
       {/* Header - always visible */}
       <div 
         className="cursor-pointer p-4 transition-colors hover:bg-[#00555A]/5"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-[#00555A]/10 p-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3 sm:items-center">
+            <div className="shrink-0 rounded-lg bg-[#00555A]/10 p-2">
               <User className="h-5 w-5 text-[#00555A]" />
             </div>
-            <div>
-              <h3 className="font-semibold text-[#0F172A]">{report.patient_name}</h3>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Mail className="h-3 w-3" />
-                  {report.patient_email}
+            <div className="min-w-0">
+              <h3 className="truncate font-semibold text-[#0F172A]">{report.patient_name}</h3>
+              <div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
+                <span className="flex min-w-0 items-center gap-1">
+                  <Mail className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{report.patient_email}</span>
                 </span>
-                <span className="flex items-center gap-1">
-                  <Phone className="h-3 w-3" />
-                  {report.patient_phone}
+                <span className="flex min-w-0 items-center gap-1">
+                  <Phone className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{report.patient_phone}</span>
                 </span>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
             <span className="rounded-full border border-[#FFC107]/40 bg-[#FFC107]/20 px-3 py-1 text-xs font-semibold text-[#7A5800]">
               Pending
             </span>
@@ -100,14 +100,14 @@ const PendingReportCard = ({
 
       {/* Expanded Content */}
       {expanded && (
-        <div className="border-t border-[#00555A]/10 bg-secondary/50 p-4">
+        <div className="border-t border-[#e6ded3] bg-[#f0ede6] p-4">
           {/* Booking Details */}
           <div className="mb-4">
             <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#00555A]">
               <Calendar className="h-4 w-4" />
               Appointment Details
             </h4>
-            <div className="rounded-lg border border-[#00555A]/10 bg-white p-3 text-sm">
+            <div className="rounded-lg border border-[#e6ded3] bg-[#fffdf8] p-3 text-sm">
               <p className="text-[#0F172A]">
                 <span className="font-medium">Booked on:</span> {formatDate(report.created_at)}
               </p>
@@ -123,12 +123,12 @@ const PendingReportCard = ({
               <FileUp className="h-4 w-4" />
               Upload Report PDF
             </h4>
-            <div className="flex gap-2 items-center">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <input
                 type="file"
                 accept=".pdf"
                 onChange={(e) => onFileSelect(e, report.report_id)}
-                className="flex-1 text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-[#00555A] file:px-4 file:py-2 file:text-white hover:file:bg-[#004448]"
+                className="min-w-0 flex-1 text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-[#00555A] file:px-4 file:py-2 file:text-white hover:file:bg-[#004448]"
               />
               {selectedFile && !pdfPath && (
                 <Button
@@ -148,7 +148,7 @@ const PendingReportCard = ({
                     }
                   }}
                   disabled={uploading || uploadingPdf === report.report_id}
-                  className="border-[#00555A] text-[#00555A] hover:bg-[#00555A]/10"
+                  className="w-full border-[#00555A] text-[#00555A] hover:bg-[#00555A]/10 sm:w-auto"
                 >
                   {uploading || uploadingPdf === report.report_id ? (
                     <div className="animate-spin h-4 w-4 border-2 border-[#00555A] border-t-transparent rounded-full" />
@@ -186,12 +186,12 @@ const PendingReportCard = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:flex sm:flex-wrap">
             <Button
               onClick={() => onProcess(report, "send", pdfPath || undefined)}
               disabled={processing === report.report_id || uploading || (!pdfPath && !selectedFile)}
               size="sm"
-              className="gap-1 bg-[#00555A] text-white hover:bg-[#004448]"
+              className="w-full gap-1 bg-[#00555A] text-white hover:bg-[#004448] sm:w-auto"
             >
               {processing === report.report_id ? (
                 <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
@@ -207,7 +207,7 @@ const PendingReportCard = ({
               disabled={processing === report.report_id}
               size="sm"
               variant="outline"
-              className="gap-1 border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"
+              className="w-full gap-1 border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10 sm:w-auto"
             >
               <CheckCircle className="h-4 w-4" />
               Collected
@@ -217,7 +217,7 @@ const PendingReportCard = ({
               disabled={processing === report.report_id}
               size="sm"
               variant="outline"
-              className="gap-1 border-border text-muted-foreground hover:bg-secondary"
+              className="w-full gap-1 border-[#d8d1c6] text-muted-foreground hover:bg-[#f0ede6] sm:w-auto"
             >
               <XCircle className="h-4 w-4" />
               No Report
@@ -469,85 +469,85 @@ const ClinicPatientReports = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#f5f3ee]">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-[#00555A]/20 bg-white/95 shadow-sm backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/95 shadow-sm backdrop-blur-xl">
+        <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-3 px-4 py-2">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => navigate("/clinic")}
-              className="rounded-lg bg-[#00555A]/10 p-2 text-[#00555A] transition-colors hover:bg-[#00555A]/15"
+              className="shrink-0 rounded-lg bg-[#00555A]/10 p-2 text-[#00555A] transition-colors hover:bg-[#00555A]/15"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
-            <div>
-              <h1 className="text-xl font-bold text-[#0F172A]">Patient Reports</h1>
-              <p className="text-xs text-muted-foreground">Manage and send medical reports</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-bold text-[#0F172A] sm:text-xl">Patient Reports</h1>
+              <p className="hidden text-xs text-muted-foreground sm:block">Manage and send medical reports</p>
             </div>
           </div>
           <Button
             variant="outline"
-            className="rounded-lg border-[#00555A]/30 px-4 py-2 font-medium text-[#00555A] transition-all hover:bg-[#00555A]/10"
+            className="shrink-0 rounded-lg border-[#00555A]/30 px-3 py-2 font-medium text-[#00555A] transition-all hover:bg-[#00555A]/10 sm:px-4"
             onClick={() => {
               fetchPendingReports();
               fetchCompletedReports();
               fetchStats();
             }}
           >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:py-8">
         {/* Stats Cards */}
         {stats && (
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+          <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
                 <FileText className="h-5 w-5 text-[#00555A]" />
               </div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">Pending</p>
-              <p className="text-3xl font-bold text-[#0F172A]">{stats.pending}</p>
+              <p className="text-2xl font-bold text-[#0F172A] sm:text-3xl">{stats.pending}</p>
             </div>
-            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
                 <CheckCircle className="h-5 w-5 text-[#00555A]" />
               </div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">Provided</p>
-              <p className="text-3xl font-bold text-[#00555A]">{stats.provided}</p>
+              <p className="text-2xl font-bold text-[#00555A] sm:text-3xl">{stats.provided}</p>
             </div>
-            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFC107]/20">
                 <XCircle className="h-5 w-5 text-[#7A5800]" />
               </div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">No Report</p>
-              <p className="text-3xl font-bold text-[#7A5800]">{stats.no_report}</p>
+              <p className="text-2xl font-bold text-[#7A5800] sm:text-3xl">{stats.no_report}</p>
             </div>
-            <div className="rounded-2xl border border-[#00555A]/10 bg-white p-5 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
                 <Package className="h-5 w-5 text-[#00555A]" />
               </div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">Completed</p>
-              <p className="text-3xl font-bold text-[#00555A]">{stats.completed}</p>
+              <p className="text-2xl font-bold text-[#00555A] sm:text-3xl">{stats.completed}</p>
             </div>
           </div>
         )}
 
         {/* Tab Navigation */}
-        <div className="flex gap-2 mb-6">
+        <div className="mb-6 grid gap-2 sm:flex">
           <Button
             variant={activeTab === "pending" ? "default" : "outline"}
             onClick={() => setActiveTab("pending")}
-            className={activeTab === "pending" ? "bg-[#00555A] text-white hover:bg-[#004448]" : "border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"}
+            className={activeTab === "pending" ? "w-full bg-[#00555A] text-white hover:bg-[#004448] sm:w-auto" : "w-full border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10 sm:w-auto"}
           >
             Pending Reports ({stats?.pending || 0})
           </Button>
           <Button
             variant={activeTab === "completed" ? "default" : "outline"}
             onClick={() => setActiveTab("completed")}
-            className={activeTab === "completed" ? "bg-[#00555A] text-white hover:bg-[#004448]" : "border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"}
+            className={activeTab === "completed" ? "w-full bg-[#00555A] text-white hover:bg-[#004448] sm:w-auto" : "w-full border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10 sm:w-auto"}
           >
             Completed Reports ({stats?.completed || 0})
           </Button>
@@ -557,12 +557,12 @@ const ClinicPatientReports = () => {
         {activeTab === "pending" && (
           <div className="space-y-3">
             {loading ? (
-              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <div className="animate-spin h-8 w-8 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto mb-4"></div>
                 <p className="text-muted-foreground">Loading pending reports...</p>
               </div>
             ) : pendingReports.length === 0 ? (
-              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <FileText className="mx-auto mb-4 h-12 w-12 text-[#00555A]/35" />
                 <p className="mb-2 font-medium text-[#0F172A]">No pending reports</p>
                 <p className="text-sm text-muted-foreground">All patients have been processed</p>
@@ -588,12 +588,12 @@ const ClinicPatientReports = () => {
         {activeTab === "completed" && (
           <div className="space-y-4">
             {loading ? (
-              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <div className="animate-spin h-8 w-8 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto mb-4"></div>
                 <p className="text-muted-foreground">Loading completed reports...</p>
               </div>
             ) : completedReports.length === 0 ? (
-              <div className="rounded-2xl border border-[#00555A]/10 bg-white p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <Package className="mx-auto mb-4 h-12 w-12 text-[#00555A]/35" />
                 <p className="mb-2 font-medium text-[#0F172A]">No completed reports</p>
                 <p className="text-sm text-muted-foreground">Processed reports will appear here</p>
@@ -602,45 +602,45 @@ const ClinicPatientReports = () => {
               completedReports.map((report) => (
                 <div
                   key={report.report_id}
-                  className="overflow-hidden rounded-2xl border border-[#00555A]/10 bg-white shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)] transition-shadow hover:shadow-[0_20px_60px_-30px_rgba(19,55,50,0.55)]"
+                  className="overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)] transition-shadow hover:shadow-[0_20px_60px_-30px_rgba(19,55,50,0.55)]"
                 >
                   {/* Patient Header */}
-                  <div className="flex items-center justify-between border-b border-[#00555A]/10 bg-gradient-to-r from-[#00555A]/5 to-white px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg bg-[#00555A]/10 p-2">
+                  <div className="flex flex-col gap-3 border-b border-[#e6ded3] bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="shrink-0 rounded-lg bg-[#00555A]/10 p-2">
                         <User className="h-5 w-5 text-[#00555A]" />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-[#0F172A]">{report.patient_name}</h3>
+                      <div className="min-w-0">
+                        <h3 className="truncate font-semibold text-[#0F172A]">{report.patient_name}</h3>
                         <p className="text-xs text-muted-foreground">ID: {report.patient_id}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                       {getStatusIcon(report.status)}
                       {getReportTypeBadge(report.report_type)}
                     </div>
                   </div>
 
                   {/* Patient Content */}
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Mail className="h-4 w-4 text-[#00555A]" />
-                        <span className="text-muted-foreground">{report.patient_email}</span>
+                  <div className="p-4 sm:p-6">
+                    <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
+                      <div className="flex min-w-0 items-center gap-2 text-sm">
+                        <Mail className="h-4 w-4 shrink-0 text-[#00555A]" />
+                        <span className="truncate text-muted-foreground">{report.patient_email}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Phone className="h-4 w-4 text-[#00555A]" />
-                        <span className="text-muted-foreground">{report.patient_phone}</span>
+                      <div className="flex min-w-0 items-center gap-2 text-sm">
+                        <Phone className="h-4 w-4 shrink-0 text-[#00555A]" />
+                        <span className="truncate text-muted-foreground">{report.patient_phone}</span>
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-[#00555A]/10 bg-secondary/50 p-4">
+                    <div className="rounded-xl border border-[#e6ded3] bg-[#f0ede6] p-4">
                       <p className="mb-1 text-xs text-muted-foreground">Completed at:</p>
                       <p className="text-sm text-[#0F172A]">{formatDate(report.completed_at)}</p>
                     </div>
 
                     {/* Report Details */}
-                    <div className="flex items-center justify-between">
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="mb-1 text-xs text-muted-foreground">Report Status:</p>
                         <p className="text-sm font-medium text-[#0F172A]">
@@ -651,7 +651,7 @@ const ClinicPatientReports = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="gap-2 border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10"
+                          className="w-full gap-2 border-[#00555A]/30 text-[#00555A] hover:bg-[#00555A]/10 sm:w-auto"
                           onClick={() => openReportPdf(report.report_pdf!)}
                         >
                           <Download className="h-4 w-4" />

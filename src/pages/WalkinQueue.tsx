@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
-// ─── Types ────────────────────────────────────────────────────────────────────────────────
+// Types
 interface ClinicInfo {
   id: string;
   name: string;
@@ -10,7 +10,7 @@ interface ClinicInfo {
 
 type Step = "form" | "loading" | "success" | "error";
 
-// ─── Component ────────────────────────────────────────────────────────────────────────────────
+// Component
 const WalkinQueue = () => {
   // QR codes should link to /walkin?clinic_id=XYZ
   const [searchParams] = useSearchParams();
@@ -29,7 +29,7 @@ const WalkinQueue = () => {
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // ─── Fetch clinic info when clinic_id is known ────────────────────────────────────────────────
+  // Fetch clinic info when clinic_id is known
   useEffect(() => {
     if (!qrClinicId) {
       setClinicLoading(false);
@@ -51,13 +51,13 @@ const WalkinQueue = () => {
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
 
-  // ─── Validation ────────────────────────────────────────────────────────────────────────────────
+  // Validation
   const phoneRegex = /^[6-9]\d{9}$/;
   const isValid =
     name.trim().length >= 2 &&
     phoneRegex.test(phone.trim());
 
-  // ─── Submit ────────────────────────────────────────────────────────────────────────────────────
+  // Submit
   const handleJoin = async () => {
     if (!isValid || !clinicInfo) return;
     setStep("loading");
@@ -94,12 +94,12 @@ const WalkinQueue = () => {
     }
   };
 
-  // ─── Go back to home ────────────────────────────────────────────────────────────────────────────
+  // Go back to home
   const handleGoHome = () => {
     navigate("/");
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────────────────────────
+  // Render
 
   // Invalid QR code
   if (!qrClinicId) {

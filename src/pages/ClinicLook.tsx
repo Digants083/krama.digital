@@ -93,13 +93,13 @@ const ClinicLook = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#f5f3ee]">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur">
+      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-4xl items-center gap-3 px-4">
           <Link
             to="/clinic"
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground -ml-2"
+            className="-ml-2 flex shrink-0 items-center gap-2 text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-5 w-5" />
             <span className="text-sm font-medium">Dashboard</span>
@@ -108,16 +108,16 @@ const ClinicLook = () => {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground mb-6">Search Patients</h1>
+      <main className="mx-auto max-w-4xl px-4 py-6 sm:py-8">
+        <h1 className="mb-5 text-2xl font-bold text-foreground sm:mb-6">Search Patients</h1>
 
         {/* Search Type Buttons */}
-        <div className="flex flex-wrap gap-3 mb-6">
+        <div className="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:gap-3">
           <Button
             variant={searchType === "date" ? "default" : "outline"}
             size="lg"
             onClick={() => setSearchType("date")}
-            className="flex items-center gap-2"
+            className="w-full justify-start gap-2 lg:w-auto"
           >
             <Calendar className="h-5 w-5" />
             By Date Range
@@ -126,7 +126,7 @@ const ClinicLook = () => {
             variant={searchType === "patient_id" ? "default" : "outline"}
             size="lg"
             onClick={() => setSearchType("patient_id")}
-            className="flex items-center gap-2"
+            className="w-full justify-start gap-2 lg:w-auto"
           >
             <UserCircle className="h-5 w-5" />
             By Patient ID
@@ -135,7 +135,7 @@ const ClinicLook = () => {
             variant={searchType === "email" ? "default" : "outline"}
             size="lg"
             onClick={() => setSearchType("email")}
-            className="flex items-center gap-2"
+            className="w-full justify-start gap-2 lg:w-auto"
           >
             <Mail className="h-5 w-5" />
             By Email
@@ -144,7 +144,7 @@ const ClinicLook = () => {
             variant={searchType === "phone" ? "default" : "outline"}
             size="lg"
             onClick={() => setSearchType("phone")}
-            className="flex items-center gap-2"
+            className="w-full justify-start gap-2 lg:w-auto"
           >
             <Phone className="h-5 w-5" />
             By Phone
@@ -153,10 +153,10 @@ const ClinicLook = () => {
 
         {/* Search Panel */}
         {searchType && (
-          <div className="rounded-xl border border-border bg-card p-6 shadow-sm mb-6">
+          <div className="mb-6 rounded-xl border border-[#e6ded3] bg-[#fbfaf7] p-4 shadow-sm sm:p-6">
             {/* Search Inputs */}
             {searchType === "date" && (
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">From Date</label>
                   <Input
@@ -223,30 +223,34 @@ const ClinicLook = () => {
 
         {/* Results */}
         {searchCount > 0 && (
-          <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div className="rounded-xl border border-[#e6ded3] bg-[#fbfaf7] p-4 shadow-sm sm:p-6">
             <h2 className="text-lg font-semibold mb-4">
               Found <span className="text-[#00555A]">{searchCount}</span> patients
             </h2>
             <div className="space-y-3">
               {searchResults.map((patient, idx) => (
-                <div key={idx} className="p-4 rounded-lg bg-muted border border-border">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="font-semibold text-lg">{patient.patient_name}</span>
+                <div key={idx} className="rounded-lg border border-[#e6ded3] bg-[#f0ede6] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <span className="block truncate text-lg font-semibold">{patient.patient_name}</span>
                       <p className="text-muted-foreground text-sm mt-1">
                         ID: {patient.patient_id}
                       </p>
-                      <p className="text-muted-foreground text-sm">
-                        {patient.patient_email} • {patient.patient_phone}
+                      <p className="mt-1 flex min-w-0 flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+                        <span className="truncate">{patient.patient_email}</span>
+                        <span className="hidden sm:inline">-</span>
+                        <span className="truncate">{patient.patient_phone}</span>
                       </p>
                     </div>
-                    <span className="text-[#00555A] font-bold text-lg">{patient.appointment_token}</span>
+                    <span className="shrink-0 self-start rounded-lg bg-[#00555A]/10 px-3 py-1 text-lg font-bold text-[#00555A]">
+                      {patient.appointment_token}
+                    </span>
                   </div>
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+                  <div className="mt-3 flex flex-col gap-3 border-t border-[#e6ded3] pt-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="text-sm text-muted-foreground">
                       <span className="font-medium">{patient.date}</span> at <span className="font-medium">{patient.time}</span>
                     </div>
-                    <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium ${
+                    <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-medium ${
                       patient.status === 'completed' ? 'bg-green-100 text-green-700' :
                       patient.status === 'waiting' ? 'bg-amber-100 text-amber-700' :
                       patient.status === 'booked' ? 'bg-blue-100 text-blue-700' :
@@ -263,7 +267,7 @@ const ClinicLook = () => {
 
         {/* No results */}
         {searchType && searchCount === 0 && !searching && (
-          <div className="text-center py-12 text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-[#d8d1c6] bg-[#fbfaf7]/80 py-10 text-center text-muted-foreground sm:py-12">
             <Eye className="mx-auto h-12 w-12 mb-3" />
             <p>No patients found matching your search.</p>
           </div>

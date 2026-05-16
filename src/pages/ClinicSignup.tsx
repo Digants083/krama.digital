@@ -3,8 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import AuthCard from "@/components/auth/AuthCard";
-import { Building2, Mail, Lock, Phone, MapPin, Plus, X, User, ArrowRight, Stethoscope, Award, Calendar, Check } from "lucide-react";
+import { Building2, Mail, Lock, Phone, MapPin, Plus, X, User, ArrowRight, Stethoscope, Award, Calendar, Check, HeartPulse, Brain, Baby, Ear, Eye, Bone, Flower2, Dumbbell, PawPrint, Microscope, FlaskConical, Leaf, Droplets, Sparkles } from "lucide-react";
 
 const validatePassword = (password: string) => ({
   length: password.length >= 8,
@@ -27,24 +28,24 @@ const Requirement = ({ met, label }: { met: boolean; label: string }) => (
 
 // Clinic categories with icons
 const clinicCategories = [
-  { id: "general", name: "General", icon: "🏥", description: "General health, fever, cold" },
-  { id: "skin", name: "Skin", icon: "🧴", description: "Skin problems, allergies" },
-  { id: "dental", name: "Dental", icon: "🦷", description: "Teeth, gums, oral care" },
-  { id: "bone", name: "Bone & Joint", icon: "🦴", description: "Orthopedic, fractures, joint pain" },
-  { id: "eye", name: "Eye", icon: "👁️", description: "Vision, glasses, eye care" },
-  { id: "ent", name: "ENT", icon: "👂", description: "Ear, nose, throat" },
-  { id: "heart", name: "Cardiology", icon: "❤️", description: "Heart-related issues" },
-  { id: "neuro", name: "Neurology", icon: "🧠", description: "Brain, nerves, spine" },
-  { id: "child", name: "Pediatric", icon: "👶", description: "Child care, vaccination" },
-  { id: "women", name: "Gynecology", icon: "🌸", description: "Women's health" },
-  { id: "mental", name: "Mental Health", icon: "🧘", description: "Psychiatry, counseling" },
-  { id: "physio", name: "Physiotherapy", icon: "🏋️", description: "Physical therapy, rehab" },
-  { id: "vet", name: "Pet Hospital", icon: "🐾", description: "Pet care, veterinary" },
-  { id: "scanning", name: "Scanning Center", icon: "🔬", description: "X-ray, MRI, CT scan" },
-  { id: "lab", name: "Diagnostic Lab", icon: "🧪", description: "Blood tests, diagnostics" },
-  { id: "ayurveda", name: "Ayurveda", icon: "🌿", description: "Ayurvedic treatment" },
-  { id: "homeo", name: "Homeopathy", icon: "💧", description: "Homeopathic treatment" },
-  { id: "other", name: "Other", icon: "🏥", description: "Other specializations" }
+  { id: "general", name: "General", icon: Building2, description: "General health, fever, cold" },
+  { id: "skin", name: "Skin", icon: Sparkles, description: "Skin problems, allergies" },
+  { id: "dental", name: "Dental", icon: Stethoscope, description: "Teeth, gums, oral care" },
+  { id: "bone", name: "Bone & Joint", icon: Bone, description: "Orthopedic, fractures, joint pain" },
+  { id: "eye", name: "Eye", icon: Eye, description: "Vision, glasses, eye care" },
+  { id: "ent", name: "ENT", icon: Ear, description: "Ear, nose, throat" },
+  { id: "heart", name: "Cardiology", icon: HeartPulse, description: "Heart-related issues" },
+  { id: "neuro", name: "Neurology", icon: Brain, description: "Brain, nerves, spine" },
+  { id: "child", name: "Pediatric", icon: Baby, description: "Child care, vaccination" },
+  { id: "women", name: "Gynecology", icon: Flower2, description: "Women's health" },
+  { id: "mental", name: "Mental Health", icon: Brain, description: "Psychiatry, counseling" },
+  { id: "physio", name: "Physiotherapy", icon: Dumbbell, description: "Physical therapy, rehab" },
+  { id: "vet", name: "Pet Hospital", icon: PawPrint, description: "Pet care, veterinary" },
+  { id: "scanning", name: "Scanning Center", icon: Microscope, description: "X-ray, MRI, CT scan" },
+  { id: "lab", name: "Diagnostic Lab", icon: FlaskConical, description: "Blood tests, diagnostics" },
+  { id: "ayurveda", name: "Ayurveda", icon: Leaf, description: "Ayurvedic treatment" },
+  { id: "homeo", name: "Homeopathy", icon: Droplets, description: "Homeopathic treatment" },
+  { id: "other", name: "Other", icon: Building2, description: "Other specializations" }
 ];
 
 const ClinicSignup = () => {
@@ -337,27 +338,30 @@ const ClinicSignup = () => {
                 <div className="space-y-2">
                   <Label>Clinic Categories * (select one or more)</Label>
                   <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                    {clinicCategories.map((cat) => (
-                      <div
-                        key={cat.id}
-                        onClick={() => toggleCategory(cat.id)}
-                        className={`p-2 rounded-md cursor-pointer transition-all ${
-                          form.categories.includes(cat.id)
-                            ? 'bg-primary text-white border-primary' 
-                            : 'bg-muted/50 hover:bg-muted border border-transparent'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">{cat.icon}</span>
-                          <div className="text-left">
-                            <div className="text-sm font-medium">{cat.name}</div>
-                            <div className={`text-xs ${form.categories.includes(cat.id) ? 'text-white/80' : 'text-muted-foreground'}`}>
-                              {cat.description}
+                    {clinicCategories.map((cat) => {
+                      const CategoryIcon = cat.icon;
+                      return (
+                        <div
+                          key={cat.id}
+                          onClick={() => toggleCategory(cat.id)}
+                          className={`p-2 rounded-md cursor-pointer transition-all ${
+                            form.categories.includes(cat.id)
+                              ? 'bg-primary text-white border-primary' 
+                              : 'bg-muted/50 hover:bg-muted border border-transparent'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <CategoryIcon className="h-5 w-5 shrink-0" />
+                            <div className="text-left">
+                              <div className="text-sm font-medium">{cat.name}</div>
+                              <div className={`text-xs ${form.categories.includes(cat.id) ? 'text-white/80' : 'text-muted-foreground'}`}>
+                                {cat.description}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -470,10 +474,9 @@ const ClinicSignup = () => {
                     <Label htmlFor="password">Password *</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
+                      <PasswordInput
                         id="password"
-                        type="password"
-                        placeholder="••••••••"
+                        placeholder="********"
                         value={form.password}
                         onChange={(e) => update("password", e.target.value)}
                         className="pl-9"
@@ -499,9 +502,8 @@ const ClinicSignup = () => {
                     <Label htmlFor="confirm">Confirm Password *</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
+                      <PasswordInput
                         id="confirm"
-                        type="password"
                         placeholder="Confirm your password"
                         value={form.confirm}
                         onChange={(e) => update("confirm", e.target.value)}

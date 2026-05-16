@@ -32,6 +32,14 @@ def _load_json_list(value):
     return list(value or [])
 
 
+def _normalize_slot_delays(slot_delays: list, slots: list) -> list[int]:
+    delays = []
+    for index, slot in enumerate(slots):
+        raw_delay = slot_delays[index] if index < len(slot_delays) else slot.get("delay_minutes", 0)
+        delays.append(_parse_delay_minutes(raw_delay))
+    return delays
+
+
 def _slot_time_label(value: float) -> str:
     total_minutes = int(round(value * 60)) % (24 * 60)
     hour24 = total_minutes // 60
@@ -78,13 +86,15 @@ def _compute_session_status(slot: dict, slot_state: Optional[str], current_decim
         return "Closed"
     if override in {"ongoing", "started", "active"}:
         return "Ongoing"
-    if override in {"delayed", "paused"} or delay_minutes > 0:
-        return "Delayed"
 
     time_range = slot.get("time_range", [0, 0])
     start = float(time_range[0] if len(time_range) > 0 else 0)
     end = float(time_range[1] if len(time_range) > 1 else start)
 
+    if current_decimal >= end:
+        return "Expired"
+    if override in {"delayed", "paused"} or delay_minutes > 0:
+        return "Delayed"
     if current_decimal < start:
         return "Available"
     if start <= current_decimal < end:
@@ -119,9 +129,45 @@ async def _get_slots_and_states(clinic_id: str, db: AsyncSession):
     record = await _get_slot_record(clinic_id, db)
     slots = _load_json_list(record.slots)
     slot_states = _load_json_list(record.slot)
+    slot_delays = _normalize_slot_delays(_load_json_list(getattr(record, "slot_delays", [])), slots)
     while len(slot_states) < len(slots):
         slot_states.append("close")
-    return record, slots, slot_states
+
+    now = _clinic_now()
+    today = _today()
+    current_decimal = _timeline_now_for_sessions(slots, slot_states, now.hour + now.minute / 60.0)
+    last_change = getattr(record, "last_slot_change_date", None)
+    if last_change and last_change.tzinfo is None:
+        last_change = last_change.replace(tzinfo=timezone.utc)
+    last_change_date = last_change.astimezone(CLINIC_TIMEZONE).date().isoformat() if last_change else None
+    should_clear_all = bool(
+        last_change_date
+        and last_change_date < today
+        and any(slot_delays)
+    )
+    changed = False
+
+    for index, delay_minutes in enumerate(slot_delays):
+        if index < len(slots):
+            time_range = slots[index].get("time_range", [0, 0])
+            slot_end = float(time_range[1] if len(time_range) > 1 else 0)
+            if delay_minutes > 0 and (should_clear_all or current_decimal >= slot_end):
+                slot_delays[index] = 0
+                slots[index]["delay_minutes"] = 0
+                if slots[index].get("status_override") == "delayed":
+                    slots[index].pop("status_override", None)
+                changed = True
+            else:
+                slots[index]["delay_minutes"] = delay_minutes
+
+    if changed:
+        record.slots = slots
+        record.slot_delays = slot_delays
+        record.last_slot_change_date = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(record)
+
+    return record, slots, slot_states, slot_delays
 
 
 async def _active_counts(clinic_id: str, slot_id: int, db: AsyncSession):
@@ -197,27 +243,32 @@ async def _session_payload(clinic_id: str, slot_id: int, slot: dict, slot_state:
 
 
 async def _update_session_slot(clinic_id: str, session_id: int, db: AsyncSession, updates: dict, slot_state: Optional[str] = None):
-    record, slots, slot_states = await _get_slots_and_states(clinic_id, db)
+    record, slots, slot_states, slot_delays = await _get_slots_and_states(clinic_id, db)
     index = session_id - 1
     if index < 0 or index >= len(slots):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     slots[index].update(updates)
+    if "delay_minutes" in updates:
+        while len(slot_delays) < len(slots):
+            slot_delays.append(0)
+        slot_delays[index] = _parse_delay_minutes(updates["delay_minutes"])
     if slot_state is not None:
         slot_states[index] = slot_state
 
     record.slots = slots
     record.slot = slot_states
+    record.slot_delays = slot_delays
     record.last_slot_change_date = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(record)
-    return record, slots, slot_states
+    return record, slots, slot_states, slot_delays
 
 
 @router.get("/today/{clinic_id}")
 async def get_today_sessions(clinic_id: str, db: AsyncSession = Depends(get_db)):
     try:
-        _record, slots, slot_states = await _get_slots_and_states(clinic_id, db)
+        _record, slots, slot_states, _slot_delays = await _get_slots_and_states(clinic_id, db)
     except HTTPException as exc:
         if exc.status_code == status.HTTP_404_NOT_FOUND:
             return {"clinic_id": clinic_id, "date": _today(), "sessions": [], "active_session_id": None}
@@ -307,6 +358,7 @@ async def create_session(payload: SessionCreateRequest, db: AsyncSession = Depen
     record = result.scalar_one_or_none()
     slots = _load_json_list(record.slots) if record else []
     slot_states = _load_json_list(record.slot) if record else []
+    slot_delays = _normalize_slot_delays(_load_json_list(getattr(record, "slot_delays", [])), slots) if record else []
     if len(slots) >= 3:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Maximum 3 sessions allowed")
 
@@ -319,14 +371,16 @@ async def create_session(payload: SessionCreateRequest, db: AsyncSession = Depen
     }
     slots.append(new_slot)
     slot_states.append("open" if payload.is_active else "close")
+    slot_delays.append(0)
     slot_id = len(slots)
 
     if not record:
-        record = ClinicTimeSlot(clinic_id=payload.clinic_id, slots=slots, slot=slot_states, last_slot_change_date=datetime.now(timezone.utc))
+        record = ClinicTimeSlot(clinic_id=payload.clinic_id, slots=slots, slot=slot_states, slot_delays=slot_delays, last_slot_change_date=datetime.now(timezone.utc))
         db.add(record)
     else:
         record.slots = slots
         record.slot = slot_states
+        record.slot_delays = slot_delays
         record.last_slot_change_date = datetime.now(timezone.utc)
 
     db.add(DoctorSession(
@@ -351,6 +405,20 @@ async def _apply_delay_to_session(clinic_id: str, session_id: int, minutes: int,
     updates = {"delay_minutes": minutes, "status_override": "delayed" if minutes > 0 else None}
     await _update_session_slot(clinic_id, session_id, db, updates, "open")
 
+    session_result = await db.execute(
+        select(DoctorSession).where(
+            and_(
+                DoctorSession.clinic_id == clinic_id,
+                DoctorSession.slot_id == session_id,
+                DoctorSession.session_date == _today(),
+            )
+        )
+    )
+    doctor_session = session_result.scalar_one_or_none()
+    if doctor_session:
+        doctor_session.delay_minutes = minutes
+        doctor_session.status = "delayed" if minutes > 0 else "available"
+
     today = _today()
     result = await db.execute(
         select(Appointment).where(
@@ -363,8 +431,20 @@ async def _apply_delay_to_session(clinic_id: str, session_id: int, minutes: int,
     appointments = result.scalars().all()
     for apt in appointments:
         apt.doctor_delay = label
+
+    walkin_result = await db.execute(
+        select(QRAppointment).where(
+            QRAppointment.clinic_id == clinic_id,
+            QRAppointment.date == today,
+            QRAppointment.slot_id == session_id,
+            QRAppointment.status.in_(ACTIVE_STATUSES),
+        ).order_by(QRAppointment.queue_position, QRAppointment.id)
+    )
+    walkins = walkin_result.scalars().all()
+    for apt in walkins:
+        apt.doctor_delay = label
     await db.commit()
-    return appointments, label
+    return appointments + walkins, label
 
 
 @router.post("/{session_id}/delay")
@@ -375,11 +455,22 @@ async def delay_session(session_id: int, request: dict, db: AsyncSession = Depen
     minutes = _parse_delay_minutes(request.get("delay_minutes", request.get("delay")))
     if minutes <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="delay_minutes must be greater than 0")
+    _record, slots, slot_states, _slot_delays = await _get_slots_and_states(clinic_id, db)
+    slot_index = session_id - 1
+    if slot_index < 0 or slot_index >= len(slots):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    now = _clinic_now()
+    timeline_now = _timeline_now_for_sessions(slots, slot_states, now.hour + now.minute / 60.0)
+    session_status = _compute_session_status(slots[slot_index], slot_states[slot_index], timeline_now)
+    if session_status in {"Closed", "Expired"} or not _slot_is_open(slots[slot_index], slot_states[slot_index]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Delay can only be added to an available slot. This slot is {session_status}."
+        )
     appointments, label = await _apply_delay_to_session(clinic_id, session_id, minutes, db)
 
     clinic_result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
     clinic = clinic_result.scalar_one_or_none()
-    _record, slots, _slot_states = await _get_slots_and_states(clinic_id, db)
     session_name = slots[session_id - 1].get("session_name") or slots[session_id - 1].get("slot_name") if 0 <= session_id - 1 < len(slots) else f"Session {session_id}"
 
     queue_summary = []
@@ -457,6 +548,19 @@ async def resume_session(session_id: int, request: dict, db: AsyncSession = Depe
     if not clinic_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="clinic_id is required")
     await _update_session_slot(clinic_id, session_id, db, {"status_override": "ongoing", "delay_minutes": 0}, "open")
+    session_result = await db.execute(
+        select(DoctorSession).where(
+            and_(
+                DoctorSession.clinic_id == clinic_id,
+                DoctorSession.slot_id == session_id,
+                DoctorSession.session_date == _today(),
+            )
+        )
+    )
+    doctor_session = session_result.scalar_one_or_none()
+    if doctor_session:
+        doctor_session.delay_minutes = 0
+        doctor_session.status = "ongoing"
     today = _today()
     result = await db.execute(select(Appointment).where(Appointment.clinic_id == clinic_id, Appointment.date == today, Appointment.slot_id == session_id))
     for apt in result.scalars().all():

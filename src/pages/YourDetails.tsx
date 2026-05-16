@@ -15,6 +15,7 @@ interface AppointmentDetails {
   patients_ahead: number;
   estimated_wait_minutes: number;
   now_serving_token?: string;
+  doctor_delay?: string | null;
   status: string;
   source: string;
 }
@@ -29,6 +30,7 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
   const estimatedWait = appointment.estimated_wait_minutes ?? 0;
   const nowServing = appointment.now_serving_token || appointment.token_label;
   const positionText = appointment.position ? appointment.position.replace("/", " / ") : "1 / 1";
+  const appointmentTime = appointment.time.replace(/^(time|session)\s*\d+\s*/i, "").trim();
 
   return (
     <div className="rounded-3xl border border-primary/10 bg-white p-5 shadow-[0_18px_60px_-38px_rgba(19,55,50,0.55)]">
@@ -47,16 +49,24 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
           </div>
         </div>
 
-        <div className="mt-4 rounded-[24px] bg-white/10 p-5">
-          <p className="text-sm text-primary-foreground/70">Patients ahead</p>
-          <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
+        <div className={`mt-4 grid gap-4 ${appointment.doctor_delay ? "grid-cols-2" : "grid-cols-1"}`}>
+          <div className="rounded-[24px] bg-white/10 p-5">
+            <p className="text-sm text-primary-foreground/70">Patients ahead</p>
+            <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
+          </div>
+          {appointment.doctor_delay && (
+            <div className="rounded-[24px] bg-white/10 p-5">
+              <p className="text-sm text-primary-foreground/70">Delay</p>
+              <p className="mt-3 text-3xl font-bold">{appointment.doctor_delay}</p>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="mt-5 space-y-4">
         <DetailRow icon={Building2} label="Clinic" value={appointment.clinic_name} subvalue={appointment.clinic_address} />
         <DetailRow icon={UserCheck} label="Doctor" value={appointment.doctor_name || "Available Doctor"} />
-        <DetailRow icon={Clock} label="Appointment" value={`${appointment.date} at ${appointment.time}`} />
+        <DetailRow icon={Clock} label="Appointment" value={appointment.date} subvalue={appointmentTime} />
         <div className="grid grid-cols-2 gap-4 rounded-[20px] border border-primary/10 bg-primary/5 p-4">
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Token</p>

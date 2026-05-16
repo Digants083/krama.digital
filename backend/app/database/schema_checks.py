@@ -17,17 +17,20 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "slot_id": "INTEGER",
         "push_count": "INTEGER DEFAULT 0",
         "queue_position": "INTEGER",
+        "serving_started_at": "TIMESTAMP",
     },
     "qr_appointments": {
         "doctor_name": "VARCHAR",
         "slot_id": "INTEGER",
         "queue_position": "INTEGER",
+        "serving_started_at": "TIMESTAMP",
     },
     "completed_appointments": {
         "slot_id": "INTEGER",
         "finished_at": "TIMESTAMP",
         "status": "VARCHAR DEFAULT 'served'",
         "wait_time_minutes": "INTEGER",
+        "service_duration_seconds": "INTEGER",
         "outcome": "VARCHAR DEFAULT 'served'",
         "served": "BOOLEAN DEFAULT TRUE",
         "push_count": "INTEGER DEFAULT 0",
@@ -35,6 +38,7 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
     "clinic_time_slots": {
         "slots": "JSON DEFAULT '[]'",
         "slot": "VARCHAR[] DEFAULT '{}'",
+        "slot_delays": "JSON DEFAULT '[]'",
         "last_slot_change_date": "TIMESTAMP",
         "daily_toggle_counts": "JSON DEFAULT '[]'",
         "last_toggle_date": "TIMESTAMP",
@@ -52,6 +56,8 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "pincode": "VARCHAR",
         "latitude": "VARCHAR",
         "longitude": "VARCHAR",
+        "admin_pinned_latitude": "VARCHAR",
+        "admin_pinned_longitude": "VARCHAR",
         "specialization": "VARCHAR",
         "experience": "VARCHAR",
         "qualifications": "VARCHAR",
@@ -200,6 +206,7 @@ async def get_schema_report(conn: AsyncConnection) -> Dict[str, object]:
 async def _normalize_column_defaults(conn: AsyncConnection) -> None:
     await conn.execute(text("UPDATE clinic_time_slots SET slots = '[]' WHERE slots IS NULL"))
     await conn.execute(text("UPDATE clinic_time_slots SET slot = '{}' WHERE slot IS NULL"))
+    await conn.execute(text("UPDATE clinic_time_slots SET slot_delays = '[]' WHERE slot_delays IS NULL"))
     await conn.execute(
         text("UPDATE clinic_time_slots SET daily_toggle_counts = '[]' WHERE daily_toggle_counts IS NULL")
     )

@@ -7,7 +7,7 @@ const patientBenefits = [
   "Save hours every clinic visit",
   "Real-time queue position updates",
   "Predictable, stress-free visits",
-  "No app downloads — works on any browser",
+  "No app downloads - works on any browser",
 ];
 
 const clinicBenefits = [

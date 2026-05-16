@@ -55,6 +55,7 @@ type QueueAppointment = {
   slot_id?: number;
   status?: string;
   created_at?: string;
+  serving_started_at?: string;
 };
 
 type QueueSnapshot = {
@@ -170,7 +171,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             blood_group: servingAppointment.blood_group,
             doctor_delay: servingAppointment.doctor_delay,
             estimated_wait_minutes: servingAppointment.estimated_wait_minutes,
-            startTime: preserveStartTime || (servingAppointment.created_at ? new Date(servingAppointment.created_at) : null),
+            startTime: preserveStartTime || (servingAppointment.serving_started_at ? new Date(servingAppointment.serving_started_at) : null),
             appointmentId: servingAppointment.id,
             clinicId: servingAppointment.clinic_id,
             source: servingAppointment.source === "walkin" ? "walkin" : "online",
@@ -289,8 +290,10 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
-          // Set start time to NOW when clicking Next - this is the actual serving start time
-          const startTimeNow = new Date();
+          const servedAppointment: QueueAppointment = await response.json().then((data) => data.appointment || {});
+          const startTimeNow = servedAppointment.serving_started_at
+            ? new Date(servedAppointment.serving_started_at)
+            : new Date();
           setCurrentServing({
             patientName: patient.name,
             token: patient.token,
@@ -335,8 +338,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
-          // Preserve the current start time when refreshing
-          await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId, currentServing.startTime);
+          await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId);
         }
       } catch (error) {
         console.error("Error completing patient:", error);

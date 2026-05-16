@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.db import get_db
 from app.database.models import Appointment, Clinic, ClinicTimeSlot, CompletedAppointment, Patient, QRAppointment
-from app.services.email_service import send_delay_alert, send_queue_alert
+from app.services.email_service import send_delay_alert
 from app.services.queue_metrics import get_live_queue_metrics
 router = APIRouter(prefix="/auth", tags=["queue"])
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
@@ -59,6 +59,89 @@ def _load_slots(raw_slots):
     if isinstance(slots, str):
         slots = json.loads(slots)
     return list(slots or [])
+
+
+def _load_slot_delays(raw_delays, slots: list) -> list[int]:
+    delays = _load_slots(raw_delays)
+    normalized = []
+    for index, slot in enumerate(slots):
+        raw_delay = delays[index] if index < len(delays) else slot.get("delay_minutes", 0)
+        normalized.append(_delay_minutes(raw_delay))
+    return normalized
+
+
+def _delay_label(minutes: int) -> Optional[str]:
+    if minutes <= 0:
+        return None
+    if minutes == 60:
+        return "1 hour"
+    if minutes > 60 and minutes % 60 == 0:
+        return f"{minutes // 60} hours"
+    return f"{minutes} min"
+
+
+def _timeline_now_for_slots(slots: list, slot_status: list, current_decimal: float) -> float:
+    for index, slot in enumerate(slots or []):
+        if not _is_slot_available(slot, slot_status, index):
+            continue
+        time_range = slot.get("time_range", [0, 0])
+        if len(time_range) > 1 and float(time_range[1]) > 24 and current_decimal < float(time_range[1]) - 24:
+            return current_decimal + 24
+    return current_decimal
+
+
+async def _clear_stale_slot_delays(record: ClinicTimeSlot, db: AsyncSession) -> tuple[list, list[int]]:
+    slots = _load_slots(record.slots)
+    slot_status = _load_slot_status(record.slot)
+    slot_delays = _load_slot_delays(getattr(record, "slot_delays", []), slots)
+    now = _clinic_now()
+    today = _clinic_today_str()
+    current_decimal = _timeline_now_for_slots(slots, slot_status, now.hour + now.minute / 60.0)
+
+    last_change = getattr(record, "last_slot_change_date", None)
+    if last_change and last_change.tzinfo is None:
+        last_change = last_change.replace(tzinfo=timezone.utc)
+    last_change_date = last_change.astimezone(CLINIC_TIMEZONE).date().isoformat() if last_change else None
+    should_clear_all = bool(last_change_date and last_change_date < today and any(slot_delays))
+    changed = False
+
+    for index, delay_minutes in enumerate(slot_delays):
+        if index >= len(slots):
+            continue
+        time_range = slots[index].get("time_range", [0, 0])
+        slot_end = float(time_range[1] if len(time_range) > 1 else 0)
+        if delay_minutes > 0 and (should_clear_all or current_decimal >= slot_end):
+            slot_delays[index] = 0
+            slots[index]["delay_minutes"] = 0
+            if slots[index].get("status_override") == "delayed":
+                slots[index].pop("status_override", None)
+            changed = True
+        else:
+            slots[index]["delay_minutes"] = delay_minutes
+
+    if changed:
+        record.slots = slots
+        record.slot_delays = slot_delays
+        record.last_slot_change_date = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(record)
+
+    return slots, slot_delays
+
+
+async def _slot_delay_label(db: AsyncSession, clinic_id: str, slot_id: Optional[int]) -> Optional[str]:
+    if not slot_id:
+        return None
+    slot_result = await db.execute(select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id))
+    slot_record = slot_result.scalar_one_or_none()
+    if not slot_record:
+        return None
+    slots, slot_delays = await _clear_stale_slot_delays(slot_record, db)
+    slot_index = int(slot_id) - 1
+    if slot_index < 0 or slot_index >= len(slots):
+        return None
+    minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
+    return _delay_label(minutes)
 
 
 def _load_slot_status(raw_slot_status):
@@ -296,114 +379,6 @@ def _token_number(token: Optional[str]) -> int:
     return int(digits) if digits else 0
 
 
-async def _send_queue_notifications(clinic_id: str, db: AsyncSession) -> None:
-    """Notify patients when they are close to being served.
-
-    Queue-time logic:
-    - When a patient is currently serving, notify the next 2 online patients
-      to reach clinic immediately.
-    - This keeps the "third in line" behavior moving automatically whenever
-      queue advances.
-    """
-    from datetime import datetime
-    import logging
-
-    logger = logging.getLogger(__name__)
-    today = _clinic_today_str()
-
-    clinic_result = await db.execute(
-        select(Clinic).where(Clinic.clinic_id == clinic_id)
-    )
-    clinic = clinic_result.scalar_one_or_none()
-    clinic_name = clinic.clinic_name if clinic else clinic_id
-
-    online_result = await db.execute(
-        select(Appointment).where(
-            Appointment.clinic_id == clinic_id,
-            Appointment.date == today
-        )
-    )
-    walkin_result = await db.execute(
-        select(QRAppointment).where(
-            QRAppointment.clinic_id == clinic_id,
-            QRAppointment.date == today
-        )
-    )
-
-    combined_queue = []
-    for item in online_result.scalars().all():
-        combined_queue.append({
-            "kind": "online",
-            "item": item,
-            "token": item.appointment_token,
-            "created_at": item.created_at or datetime.min,
-            "status": item.status or "booked",
-        })
-    for item in walkin_result.scalars().all():
-        combined_queue.append({
-            "kind": "walkin",
-            "item": item,
-            "token": item.appointment_token,
-            "created_at": item.created_at or datetime.min,
-            "status": item.status or "booked",
-        })
-
-    combined_queue.sort(
-        key=lambda entry: (
-            0 if entry["status"] == "serving" else 1,
-            _token_number(entry["token"]),
-            entry["created_at"],
-        )
-    )
-
-    serving_index = next(
-        (index for index, entry in enumerate(combined_queue) if entry["status"] == "serving"),
-        None,
-    )
-    if serving_index is None:
-        return
-
-    for target_index in [serving_index + 2]:
-        if target_index >= len(combined_queue):
-            continue
-
-        entry = combined_queue[target_index]
-        if entry["kind"] != "online":
-            continue
-
-        appointment = entry["item"]
-        patient_email = (appointment.patient_email or "").strip()
-        if not patient_email:
-            continue
-
-        if appointment.notification_stage == "reach_turn":
-            continue
-
-        email_sent = send_queue_alert(
-            patient_email,
-            appointment.patient_name,
-            clinic_name,
-            "reach_turn",
-            token_number=appointment.appointment_token,
-            doctor_name=appointment.doctor_name or (clinic.doctor_name if clinic else ""),
-            clinic_location=clinic.address if clinic else "",
-            latitude=clinic.latitude if clinic else None,
-            longitude=clinic.longitude if clinic else None,
-        )
-        if email_sent:
-            appointment.notification_stage = "reach_turn"
-            logger.info(
-                "Reach-clinic alert sent to %s for clinic %s",
-                patient_email,
-                clinic_id,
-            )
-        else:
-            logger.warning(
-                "Reach-clinic alert email could not be sent to %s for clinic %s",
-                patient_email,
-                clinic_id,
-            )
-
 @router.post("/clinic/set-active")
 async def set_clinic_active(
     request: dict,
@@ -640,23 +615,26 @@ async def serve_patient(
         )
         record = result.scalar_one_or_none()
         if record:
-            slots = _load_slots(record.slots)
+            slots, slot_delays = await _clear_stale_slot_delays(record, db)
             if slot_index < len(slots):
+                delay_minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
                 slot_start = slots[slot_index].get("time_range", [0, 0])[0]
+                effective_slot_start = slot_start + (delay_minutes / 60.0)
                 now = _clinic_now()
                 current_time_decimal = now.hour + now.minute / 60.0
-                unlock_time = slot_start - (SERVE_UNLOCK_LEAD_MINUTES / 60.0)
+                unlock_time = effective_slot_start - (SERVE_UNLOCK_LEAD_MINUTES / 60.0)
                 if current_time_decimal < unlock_time:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Serving can start {SERVE_UNLOCK_LEAD_MINUTES} minutes before the official slot start time ({int(slot_start)}:00)."
+                        detail=f"Serving can start {SERVE_UNLOCK_LEAD_MINUTES} minutes before the delayed slot start time."
                     )
 
-    # Update status to serving
+    # Update status to serving and persist the real service start time.
+    serving_started_at = datetime.now(timezone.utc)
     appointment.status = "serving"
+    appointment.serving_started_at = serving_started_at
     if hasattr(appointment, "notification_stage"):
         appointment.notification_stage = "serving"
-    await _send_queue_notifications(clinic_id, db)
     await db.commit()
 
     return {
@@ -667,7 +645,8 @@ async def serve_patient(
             "patient_name": appointment.patient_name,
             "patient_email": getattr(appointment, "patient_email", ""),
             "patient_phone": appointment.patient_phone,
-            "status": "serving"
+            "status": "serving",
+            "serving_started_at": serving_started_at
         }
     }
 
@@ -727,13 +706,14 @@ async def finish_patient(
             detail="Appointment not found"
         )
 
-    # Calculate wait time in minutes
+    # Calculate service duration from the actual Next click, not booking time.
     from datetime import timezone
-    served_at = appointment.created_at
+    served_at = getattr(appointment, "serving_started_at", None) or datetime.now(timezone.utc)
     if served_at.tzinfo is None:
         served_at = served_at.replace(tzinfo=timezone.utc)
     finished_at = datetime.now(timezone.utc)
-    wait_time = int((finished_at - served_at).total_seconds() / 60)
+    service_duration_seconds = max(0, int((finished_at - served_at).total_seconds()))
+    wait_time = int(service_duration_seconds / 60)
 
     # Get push_count from appointment
     push_count = getattr(appointment, 'push_count', 0)
@@ -754,6 +734,7 @@ async def finish_patient(
         finished_at=finished_at,
         status="completed",
         wait_time_minutes=wait_time,
+        service_duration_seconds=service_duration_seconds,
         outcome="served",
         served=True,  # Patient was served (normally or after push)
         push_count=push_count  # Track how many times they were pushed
@@ -762,10 +743,6 @@ async def finish_patient(
 
     # Delete from the appropriate table
     await db.delete(appointment)
-    await db.commit()
-
-    # Queue order changed; notify next patients if needed.
-    await _send_queue_notifications(clinic_id, db)
     await db.commit()
 
     # Auto-add to reports table for all served patients (online patients only)
@@ -795,7 +772,8 @@ async def finish_patient(
             "patient_name": completed.patient_name,
             "served_at": completed.served_at,
             "finished_at": completed.finished_at,
-            "wait_time_minutes": completed.wait_time_minutes
+            "wait_time_minutes": completed.wait_time_minutes,
+            "service_duration_seconds": completed.service_duration_seconds
         }
     }
 
@@ -848,16 +826,18 @@ async def skip_patient(
         )
         slot_record = slot_result.scalar_one_or_none()
         if slot_record:
-            slots = _load_slots(slot_record.slots)
+            slots, slot_delays = await _clear_stale_slot_delays(slot_record, db)
             if slot_index < len(slots):
+                delay_minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
                 slot_start = slots[slot_index].get("time_range", [0, 0])[0]
+                effective_slot_start = slot_start + (delay_minutes / 60.0)
                 now = _clinic_now()
                 current_time_decimal = now.hour + now.minute / 60.0
-                unlock_time = slot_start - (SERVE_UNLOCK_LEAD_MINUTES / 60.0)
+                unlock_time = effective_slot_start - (SERVE_UNLOCK_LEAD_MINUTES / 60.0)
                 if current_time_decimal < unlock_time:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Skipping can start {SERVE_UNLOCK_LEAD_MINUTES} minutes before the official slot start time ({int(slot_start)}:00)."
+                        detail=f"Skipping can start {SERVE_UNLOCK_LEAD_MINUTES} minutes before the delayed slot start time."
                     )
 
     online_filters = [
@@ -1260,11 +1240,13 @@ async def push_patient_to_next_slot(
     new_slot_name = slots[next_slot_index].get("slot_name", f"Slot {next_slot_id}")
     new_time_range = slots[next_slot_index].get("time_range", [])
     new_time_str = f"{int(new_time_range[0])}:00 - {int(new_time_range[1])}:00" if len(new_time_range) >= 2 else f"Slot {next_slot_id}"
+    new_slot_delay = await _slot_delay_label(db, clinic_id, next_slot_id)
 
     appointment.slot_id = next_slot_id
     appointment.appointment_token = new_token_label
     appointment.status = "booked"
     appointment.notification_stage = "pending"
+    appointment.doctor_delay = new_slot_delay
 
     # Increment push_count
     current_push_count = getattr(appointment, 'push_count', 0)
@@ -1358,6 +1340,20 @@ async def announce_delay(
                 "status": appointment.status or "waiting",
             })
 
+        walkin_filters = [
+            QRAppointment.clinic_id == clinic_id,
+            QRAppointment.date == today,
+            QRAppointment.status.notin_(["completed", "not_served", "auto_finished", "cancelled"]),
+        ]
+        if target_slot_id is not None:
+            walkin_filters.append(QRAppointment.slot_id == target_slot_id)
+
+        walkin_result = await db.execute(
+            select(QRAppointment).where(and_(*walkin_filters)).order_by(QRAppointment.queue_position, QRAppointment.id)
+        )
+        for walkin in walkin_result.scalars().all():
+            walkin.doctor_delay = clean_delay
+
         if target_slot_id is not None:
             slot_result = await db.execute(
                 select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
@@ -1365,11 +1361,33 @@ async def announce_delay(
             slot_record = slot_result.scalar_one_or_none()
             if slot_record:
                 slots = _load_slots(slot_record.slots)
+                slot_delays = _load_slot_delays(getattr(slot_record, "slot_delays", []), slots)
                 slot_index = int(target_slot_id) - 1
                 if 0 <= slot_index < len(slots):
-                    slots[slot_index]["delay_minutes"] = _delay_minutes(clean_delay)
+                    slot_states = _load_slot_status(slot_record.slot)
+                    selected_slot = slots[slot_index]
+                    if not _is_slot_available(selected_slot, slot_states, slot_index):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Delay can only be added to an available slot. This slot is closed."
+                        )
+                    time_range = selected_slot.get("time_range", [0, 0])
+                    slot_end = float(time_range[1] if len(time_range) > 1 else 0)
+                    now = _clinic_now()
+                    current_time_decimal = now.hour + now.minute / 60.0
+                    if slot_end <= 24 and current_time_decimal >= slot_end:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Delay can only be added to an available slot. This slot is expired."
+                        )
+                    delay_minutes = _delay_minutes(clean_delay)
+                    slots[slot_index]["delay_minutes"] = delay_minutes
                     slots[slot_index]["status_override"] = "delayed"
+                    while len(slot_delays) <= slot_index:
+                        slot_delays.append(0)
+                    slot_delays[slot_index] = delay_minutes
                     slot_record.slots = slots
+                    slot_record.slot_delays = slot_delays
 
         await db.commit()
 
@@ -1447,6 +1465,7 @@ async def get_completed_appointments(
             "served_at": apt.served_at,
             "finished_at": apt.finished_at,
             "wait_time_minutes": apt.wait_time_minutes,
+            "service_duration_seconds": getattr(apt, "service_duration_seconds", None),
             "status": apt.status,
             "outcome": apt.outcome
         })
@@ -1822,6 +1841,7 @@ async def join_queue(
         qr_count = len(result.scalars().all())
 
     total_appointments = online_count + qr_count
+    slot_delay = await _slot_delay_label(db, payload.clinic_id, slot_id)
 
     # Create the QR walk-in appointment row in separate table
     walkin = QRAppointment(
@@ -1834,6 +1854,7 @@ async def join_queue(
         status="booked",
         slot_id=slot_id,
         session_id=slot_id,
+        doctor_delay=slot_delay,
         queue_position=total_appointments + 1
     )
     db.add(walkin)
@@ -2022,6 +2043,7 @@ async def _lookup_by_phone_impl(phone, db):
             source=row.get("source") or source,
             slot_id=row.get("slot_id"),
             queue_position=row.get("queue_position"),
+            doctor_delay=row.get("doctor_delay"),
         )
 
     online_result = await db.execute(
@@ -2086,6 +2108,13 @@ async def _lookup_by_phone_impl(phone, db):
             logger.exception("YourDetails slot lookup failed clinic_id=%s slot_id=%s", clinic_id, slot_id)
         return None
 
+    async def get_slot_delay(clinic_id, slot_id):
+        try:
+            return await _slot_delay_label(db, clinic_id, slot_id)
+        except Exception:
+            logger.exception("YourDetails delay lookup failed clinic_id=%s slot_id=%s", clinic_id, slot_id)
+            return None
+
     # Helper function to get clinic info
     async def get_clinic_info(clinic_id):
         try:
@@ -2135,6 +2164,7 @@ async def _lookup_by_phone_impl(phone, db):
         source = item["source"]
         clinic_info = await get_clinic_info(apt.clinic_id)
         slot_name = await get_slot_name(apt.clinic_id, apt.slot_id)
+        doctor_delay = getattr(apt, "doctor_delay", None) or await get_slot_delay(apt.clinic_id, apt.slot_id)
         metrics = await get_live_queue_metrics(
             db,
             apt.clinic_id,
@@ -2166,6 +2196,7 @@ async def _lookup_by_phone_impl(phone, db):
             "patients_ahead": metrics["patients_ahead"],
             "estimated_wait_minutes": metrics["estimated_wait_minutes"],
             "now_serving_token": metrics["now_serving_token"],
+            "doctor_delay": doctor_delay,
             "status": apt.status,
             "source": source
         })
@@ -2197,24 +2228,77 @@ async def get_time_slots(
 
     if not record:
         # Return empty slots array if no record exists
-        return {"clinic_id": clinic_id, "slots": [], "slot": [], "last_slot_change_date": None}
+        return {"clinic_id": clinic_id, "slots": [], "slot": [], "slot_delays": [], "last_slot_change_date": None}
 
-    import json
-    slots = record.slots
-    if isinstance(slots, str):
-        slots = json.loads(slots)
+    slots, slot_delays = await _clear_stale_slot_delays(record, db)
 
     # Handle slot array
     slot_array = record.slot or []
     if isinstance(slot_array, str):
         slot_array = json.loads(slot_array) if slot_array else []
 
-
     return {
         "clinic_id": clinic_id,
         "slots": slots or [],
         "slot": slot_array or [],
+        "slot_delays": slot_delays,
         "last_slot_change_date": record.last_slot_change_date.isoformat() if record.last_slot_change_date else None
+    }
+
+@router.get("/clinic/slot-queue-counts")
+async def get_slot_queue_counts(
+    clinic_id: str = Query(..., description="Clinic ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Count active patients in each clinic slot for today.
+
+    Includes online appointments and QR/walk-in appointments. Served,
+    completed, cancelled, skipped, and not-served rows are not counted.
+    """
+    today = _clinic_today_str()
+    active_statuses = ["booked", "pending", "serving"]
+
+    slot_result = await db.execute(
+        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
+    )
+    slot_record = slot_result.scalar_one_or_none()
+    slots = _load_slots(slot_record.slots) if slot_record else []
+    slot_counts = {index + 1: 0 for index in range(len(slots))}
+
+    online_result = await db.execute(
+        select(Appointment.slot_id, func.count(Appointment.id))
+        .where(
+            Appointment.clinic_id == clinic_id,
+            Appointment.date == today,
+            Appointment.slot_id.isnot(None),
+            Appointment.status.in_(active_statuses),
+        )
+        .group_by(Appointment.slot_id)
+    )
+    for slot_id, count in online_result.all():
+        if slot_id is not None:
+            slot_counts[int(slot_id)] = slot_counts.get(int(slot_id), 0) + int(count or 0)
+
+    walkin_result = await db.execute(
+        select(QRAppointment.slot_id, func.count(QRAppointment.id))
+        .where(
+            QRAppointment.clinic_id == clinic_id,
+            QRAppointment.date == today,
+            QRAppointment.slot_id.isnot(None),
+            QRAppointment.status.in_(active_statuses),
+        )
+        .group_by(QRAppointment.slot_id)
+    )
+    for slot_id, count in walkin_result.all():
+        if slot_id is not None:
+            slot_counts[int(slot_id)] = slot_counts.get(int(slot_id), 0) + int(count or 0)
+
+    return {
+        "clinic_id": clinic_id,
+        "date": today,
+        "slot_counts": slot_counts,
+        "total": sum(slot_counts.values()),
     }
 
 @router.post("/clinic/time-slots")
@@ -2246,7 +2330,8 @@ async def add_time_slot(
     new_slot = {
         "slot_name": slot_name,
         "time_range": time_range,
-        "is_open": True
+        "is_open": True,
+        "delay_minutes": 0
     }
 
     import json
@@ -2256,6 +2341,7 @@ async def add_time_slot(
             clinic_id=clinic_id,
             slots=[new_slot],
             slot=["close"],  # Initialize slot array with default "close"
+            slot_delays=[0],
             last_slot_change_date=datetime.now(timezone.utc)  # Set initial change date
         )
         db.add(record)
@@ -2281,6 +2367,10 @@ async def add_time_slot(
         slot_array.append("close")  # New slot defaults to "close"
         record.slot = slot_array
 
+        slot_delays = _load_slot_delays(getattr(record, "slot_delays", []), current_slots[:-1])
+        slot_delays.append(0)
+        record.slot_delays = slot_delays
+
         # Update last_slot_change_date when slots are modified
         record.last_slot_change_date = datetime.now(timezone.utc)
 
@@ -2292,6 +2382,7 @@ async def add_time_slot(
         "clinic_id": clinic_id,
         "slots": record.slots,
         "slot": record.slot,
+        "slot_delays": record.slot_delays,
         "last_slot_change_date": record.last_slot_change_date.isoformat() if record.last_slot_change_date else None
     }
 
@@ -2376,6 +2467,15 @@ async def update_time_slot(
         else:
             slots[slot_index]["is_open"] = bool(new_value)
 
+    if "delay_minutes" in request:
+        delay_minutes = _delay_minutes(request["delay_minutes"])
+        slots[slot_index]["delay_minutes"] = delay_minutes
+        slot_delays = _load_slot_delays(getattr(record, "slot_delays", []), slots)
+        while len(slot_delays) <= slot_index:
+            slot_delays.append(0)
+        slot_delays[slot_index] = delay_minutes
+        record.slot_delays = slot_delays
+
     # Update slot array at specific index if provided (open or close)
     if "slot" in request:
         # Ensure slot array exists and has correct length
@@ -2406,6 +2506,7 @@ async def update_time_slot(
         "clinic_id": clinic_id,
         "slots": record.slots,
         "slot": record.slot,
+        "slot_delays": record.slot_delays,
         "last_slot_change_date": record.last_slot_change_date.isoformat() if record.last_slot_change_date else None,
         "daily_toggle_counts": record.daily_toggle_counts,
         "last_toggle_date": record.last_toggle_date.isoformat() if record.last_toggle_date else None
@@ -2437,8 +2538,12 @@ async def delete_time_slot(
     if isinstance(slots, str):
         slots = json.loads(slots)
     slots = list(slots)
+    slot_delays = _load_slot_delays(getattr(record, "slot_delays", []), slots)
     slots.pop(slot_index)
+    if slot_index < len(slot_delays):
+        slot_delays.pop(slot_index)
     record.slots = slots
+    record.slot_delays = slot_delays
 
     # Update last_slot_change_date when slots are modified
     record.last_slot_change_date = datetime.now(timezone.utc)
@@ -2449,6 +2554,7 @@ async def delete_time_slot(
         "message": "Time slot deleted successfully",
         "clinic_id": clinic_id,
         "slots": record.slots,
+        "slot_delays": record.slot_delays,
         "last_slot_change_date": record.last_slot_change_date.isoformat() if record.last_slot_change_date else None
     }
 
@@ -2581,45 +2687,6 @@ async def auto_finish_unserved_patients(
     }
 
 
-
-
-@router.get("/clinic/slot-queue-counts")
-async def get_slot_queue_counts(
-    clinic_id: str = Query(..., description="Clinic ID"),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Get patient counts per time slot for today.
-    Returns how many patients are currently waiting in each slot.
-
-    """
-
-    from datetime import datetime
-
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    result = await db.execute(
-        select(
-            Appointment.slot_id,
-            func.count(Appointment.id).label('count')
-        ).where(
-            Appointment.clinic_id == clinic_id,
-            Appointment.date == today,
-            Appointment.status.in_(["booked", "pending", "serving"])
-        ).group_by(Appointment.slot_id)
-    )
-
-    slot_counts = {}
-
-    for row in result.all():
-        if row.slot_id is not None:
-            slot_counts[row.slot_id] = row.count
-
-    return {
-        "date": today,
-        "clinic_id": clinic_id,
-        "slot_counts": slot_counts
-    }
 
 
 @router.get("/doctor/today-slots/{clinic_id}")

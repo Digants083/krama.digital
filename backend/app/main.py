@@ -14,7 +14,6 @@ from app.database.schema_checks import ensure_required_schema
 install_starlette_router_compat()
 
 from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports, patient_history, sessions
-from app.services.email_service import send_queue_alert
 from app.services.appointment_maintenance import check_appointment_dates, cleanup_old_appointments
 import json
 
@@ -129,7 +128,7 @@ async def scheduled_auto_finish_unserved():
     Moves patients to completed_appointments with outcome='not_served'
     when their slot end time has passed and they were neither served nor skipped.
     """
-    await asyncio.sleep(10)  # Wait for server to fully start (after pre-slot task)
+    await asyncio.sleep(10)  # Wait for server to fully start.
 
     while True:
         try:
@@ -221,30 +220,18 @@ async def scheduled_auto_finish_unserved():
                             await db.delete(appointment)
                             await db.commit()
 
-                            # Auto-add to reports table for diagnostic/scanning centers
+                            # Auto-add to reports table for every clinic.
                             try:
-                                from app.database.models import Clinic
-                                clinic_result = await db.execute(
-                                    select(Clinic).where(Clinic.clinic_id == clinic_id)
+                                from app.routers.patient_reports import auto_add_patient_to_reports
+                                result = await auto_add_patient_to_reports(
+                                    patient_id=getattr(appointment, 'patient_id', f"auto-{appointment.id}"),
+                                    clinic_id=clinic_id,
+                                    patient_name=appointment.patient_name,
+                                    patient_email=getattr(appointment, 'patient_email', ""),
+                                    patient_phone=appointment.patient_phone,
+                                    db=db
                                 )
-                                clinic = clinic_result.scalar_one_or_none()
-
-                                if clinic:
-                                    categories = clinic.categories or []
-                                    valid_categories = ["diagnostic_center", "scanning_center", "diagnostic", "scanning", "lab", "x-ray", "mri", "ct_scan"]
-                                    is_diagnostic = any(cat in valid_categories for cat in categories)
-
-                                    if is_diagnostic:
-                                        from app.routers.patient_reports import auto_add_patient_to_reports
-                                        result = await auto_add_patient_to_reports(
-                                            patient_id=getattr(appointment, 'patient_id', f"auto-{appointment.id}"),
-                                            clinic_id=clinic_id,
-                                            patient_name=appointment.patient_name,
-                                            patient_email=getattr(appointment, 'patient_email', ""),
-                                            patient_phone=appointment.patient_phone,
-                                            db=db
-                                        )
-                                        logger.info(f"Auto-add to reports result for auto-finished patient: {result}")
+                                logger.info(f"Auto-add to reports result for auto-finished patient: {result}")
                             except Exception as e:
                                 logger.error(f"Failed to auto-add auto-finished patient to reports: {e}", exc_info=True)
 
@@ -291,154 +278,6 @@ async def scheduled_midnight_cleanup():
         except Exception as e:
             logger.error(f"Error in scheduled midnight cleanup: {e}")
             await asyncio.sleep(60)
-
-
-async def scheduled_pre_slot_notifications():
-    """
-    Background task that runs every 60 seconds.
-    Sends email to positions 1 & 2 at multiple check points:
-    - 15 min before slot (1st attempt)
-    - 12.5 min before slot (retry if not sent)
-    - 10 min before slot (retry if not sent)
-    - 5 min before slot (retry if not sent)
-    - After slot starts (final retry if not sent)
-    """
-    await asyncio.sleep(5)
-
-    while True:
-        try:
-            async with AsyncSessionLocal() as db:
-                from app.services.email_service import send_queue_alert
-                from sqlalchemy import and_
-
-                now = datetime.now()
-                today = now.strftime("%Y-%m-%d")
-                current_time_decimal = now.hour + now.minute / 60.0
-
-                # Define check windows (in minutes before slot)
-                # Each entry: (window_name, min_minutes_before, max_minutes_before)
-                check_windows = [
-                    ("15min", 14.5, 15.5),    # 15 min before slot
-                    ("12min", 11.5, 13.0),    # 12.5 min before slot (retry window)
-                    ("10min", 9.0, 11.0),     # 10 min before slot (retry window)
-                    ("5min", 4.0, 6.0),       # 5 min before slot (retry window)
-                    ("after_start", -5.0, 1.0),  # After slot starts (final check, -5 to +1 min)
-                ]
-
-                clinic_result = await db.execute(
-                    select(Appointment.clinic_id).where(
-                        Appointment.date == today,
-                        Appointment.status.in_(["booked", "pending"])
-                    ).distinct()
-                )
-                clinic_ids = [r[0] for r in clinic_result.all()]
-
-                notifications_sent = 0
-
-                for clinic_id in clinic_ids:
-                    clinic_result = await db.execute(
-                        select(Clinic).where(Clinic.clinic_id == clinic_id)
-                    )
-                    clinic = clinic_result.scalar_one_or_none()
-                    if not clinic:
-                        continue
-
-                    slot_result = await db.execute(
-                        select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
-                    )
-                    slot_record = slot_result.scalar_one_or_none()
-                    if not slot_record:
-                        continue
-
-                    slots = slot_record.slots
-                    if isinstance(slots, str):
-                        slots = json.loads(slots)
-
-                    apt_result = await db.execute(
-                        select(Appointment).where(
-                            Appointment.clinic_id == clinic_id,
-                            Appointment.date == today,
-                            Appointment.status.in_(["booked", "pending"])
-                        ).order_by(Appointment.id)
-                    )
-                    appointments = apt_result.scalars().all()
-
-                    if len(appointments) == 0:
-                        continue
-
-                    # Check positions 1 & 2 (indices 0 and 1)
-                    for i, queued_patient in enumerate(appointments[:2]):
-                        slot_id = queued_patient.slot_id
-                        if slot_id is None:
-                            continue
-
-                        slot_index = int(slot_id) - 1
-                        if slot_index < 0 or slot_index >= len(slots):
-                            continue
-
-                        slot = slots[slot_index]
-                        if not slot.get("is_open"):
-                            continue
-
-                        slot_start = slot.get("time_range", [0, 0])[0]
-                        minutes_before_slot = (slot_start - current_time_decimal) * 60
-
-                        # Check each window
-                        for window_name, min_before, max_before in check_windows:
-                            # Skip if we're not in this window
-                            if not (min_before <= minutes_before_slot <= max_before):
-                                continue
-
-                            # Skip if already successfully notified
-                            if queued_patient.last_email_sent_at is not None:
-                                continue
-
-                            # We need to send/try to send email
-                            patient_email = (queued_patient.patient_email or "").strip()
-                            if not patient_email:
-                                continue
-
-                            # Determine alert type based on timing
-                            if minutes_before_slot > 0:
-                                alert_type = "pre_slot_start"
-                            else:
-                                # Slot has started - use a different message
-                                alert_type = "reach_turn"
-
-                            email_sent = send_queue_alert(
-                                patient_email,
-                                queued_patient.patient_name,
-                                clinic.clinic_name,
-                                alert_type,
-                                token_number=queued_patient.appointment_token,
-                                doctor_name=queued_patient.doctor_name or (clinic.doctor_name if clinic else ""),
-                                clinic_location=clinic.address if clinic else "",
-                                latitude=clinic.latitude if clinic else None,
-                                longitude=clinic.longitude if clinic else None,
-                            )
-
-                            if email_sent:
-                                # Only mark as sent if actually sent successfully
-                                queued_patient.notification_stage = "pre_slot_start"
-                                queued_patient.last_email_sent_at = datetime.now()
-                                await db.commit()
-                                notifications_sent += 1
-                                logger.info(
-                                    f"[{window_name}] Pre-slot notification sent to {patient_email} for clinic {clinic_id}"
-                                )
-                            else:
-                                # Email failed - we'll retry at next check window
-                                logger.warning(
-                                    f"[{window_name}] Email FAILED to send to {patient_email} for clinic {clinic_id} - will retry"
-                                )
-
-                if notifications_sent > 0:
-                    logger.info(f"Scheduled task: Sent {notifications_sent} pre-slot notifications")
-
-        except Exception as e:
-            logger.error(f"Error in scheduled pre-slot notifications: {e}")
-
-        await asyncio.sleep(60)
 
 
 @asynccontextmanager
@@ -491,6 +330,10 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE appointments "
             "ADD COLUMN IF NOT EXISTS doctor_delay VARCHAR"
         )
+        await safe_exec(
+            "ALTER TABLE appointments "
+            "ADD COLUMN IF NOT EXISTS serving_started_at TIMESTAMP"
+        )
 
         await safe_exec(
             "ALTER TABLE qr_appointments "
@@ -509,6 +352,10 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE qr_appointments "
             "ADD COLUMN IF NOT EXISTS doctor_delay VARCHAR"
         )
+        await safe_exec(
+            "ALTER TABLE qr_appointments "
+            "ADD COLUMN IF NOT EXISTS serving_started_at TIMESTAMP"
+        )
 
         await safe_exec(
             "ALTER TABLE completed_appointments "
@@ -526,6 +373,10 @@ async def lifespan(app: FastAPI):
         await safe_exec(
             "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS wait_time_minutes INTEGER"
+        )
+        await safe_exec(
+            "ALTER TABLE completed_appointments "
+            "ADD COLUMN IF NOT EXISTS service_duration_seconds INTEGER"
         )
         await safe_exec(
             "ALTER TABLE completed_appointments "
@@ -552,6 +403,8 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS pincode VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS latitude VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS longitude VARCHAR")
+        await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS admin_pinned_latitude VARCHAR")
+        await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS admin_pinned_longitude VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS specialization VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS experience VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS qualifications VARCHAR")
@@ -559,6 +412,18 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS booking_cutoff_minutes INTEGER DEFAULT 15")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS manual_stop_date VARCHAR")
+        await safe_exec("""
+            UPDATE clinics
+            SET admin_pinned_latitude = latitude,
+                admin_pinned_longitude = longitude,
+                latitude = NULL,
+                longitude = NULL
+            WHERE COALESCE(has_pinned_location, FALSE) = FALSE
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+              AND admin_pinned_latitude IS NULL
+              AND admin_pinned_longitude IS NULL
+        """)
         await safe_exec("ALTER TABLE patients ADD COLUMN IF NOT EXISTS blood_group VARCHAR")
         await safe_exec("ALTER TABLE otp_verifications ADD COLUMN IF NOT EXISTS user_blood_group VARCHAR")
 
@@ -586,6 +451,7 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS daily_toggle_counts JSON DEFAULT '[]'")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS slots JSON DEFAULT '[]'")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS slot VARCHAR[] DEFAULT '{}'")
+        await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS slot_delays JSON DEFAULT '[]'")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS last_slot_change_date TIMESTAMP")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS last_toggle_date TIMESTAMP")
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
@@ -714,10 +580,9 @@ async def lifespan(app: FastAPI):
         await ensure_required_schema(conn)
 
     # Start background scheduled tasks
-    pre_slot_task = asyncio.create_task(scheduled_pre_slot_notifications())
     midnight_cleanup_task = asyncio.create_task(scheduled_midnight_cleanup())
     auto_stop_task = asyncio.create_task(scheduled_auto_stop_clinics())
-    logger.info("Started scheduled background tasks (pre-slot + midnight cleanup + auto-stop)")
+    logger.info("Started scheduled background tasks (midnight cleanup + auto-stop)")
 
     # Run appointment maintenance on startup/restart
     try:
@@ -729,13 +594,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup on shutdown
-    pre_slot_task.cancel()
     midnight_cleanup_task.cancel()
     auto_stop_task.cancel()
-    try:
-        await pre_slot_task
-    except asyncio.CancelledError:
-        pass
     try:
         await midnight_cleanup_task
     except asyncio.CancelledError:

@@ -29,7 +29,7 @@ class ClinicSignup(BaseModel):
     qualifications: Optional[str] = ""  # Qualifications (MBBS, MD, etc.)
 
 class ClinicLogin(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class PatientSignup(BaseModel):
@@ -40,12 +40,13 @@ class PatientSignup(BaseModel):
     blood_group: Optional[str] = None
 
 class PatientLogin(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class AuthResponse(BaseModel):
     message: str
     user_type: Optional[str] = None
+    email: Optional[str] = None
     clinic_id: Optional[str] = None
     patient_data: Optional[dict] = None
     first_login: Optional[bool] = None

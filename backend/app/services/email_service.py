@@ -92,92 +92,6 @@ class EmailService:
 
         return self._send_email(to_email, subject, text_content, html_content)
 
-    def send_queue_alert_email(
-        self,
-        to_email: str,
-        patient_name: str,
-        clinic_name: str,
-        alert_type: str,
-        token_number: Optional[str] = None,
-        doctor_name: Optional[str] = None,
-        clinic_location: Optional[str] = None,
-        latitude: Optional[str] = None,
-        longitude: Optional[str] = None,
-    ) -> bool:
-        """Send queue progress alerts for patients nearing their turn."""
-        safe_name = patient_name or "Patient"
-        safe_clinic = clinic_name or "the clinic"
-        safe_token = token_number or "TBD"
-        safe_doctor = doctor_name or "Assigned Doctor"
-        # Generate Google Maps link if coordinates are available
-        if latitude and longitude:
-            google_maps_url = f"https://maps.google.com/?q={latitude},{longitude}"
-            safe_location = f'<a href="{google_maps_url}" style="color: #00555A; text-decoration: none; font-weight: bold;">Click for directions to {safe_clinic}</a>'
-        else:
-            safe_location = clinic_location or "Location will be shared at clinic desk"
-
-        if alert_type == "reach_turn":
-            subject = f"It's your turn soon at {safe_clinic} - please reach clinic"
-            heading = "Please reach the clinic ASAP"
-            detail = "It is your time to be ready. Please reach the clinic now so your consultation can start without delay."
-        elif alert_type == "reach_auto":
-            subject = f"You're booked at {safe_clinic} - Please reach automatically"
-            heading = "Please reach the clinic automatically"
-            detail = "You're second in queue. Please start heading to the clinic now as you will be called soon after the first patient."
-        elif alert_type == "pre_slot_start":
-            subject = f"Your appointment at {safe_clinic} starts in 15 minutes"
-            heading = "Please reach the clinic ASAP"
-            detail = "Your slot starts in 15 minutes. Please reach the clinic now to be ready for your turn."
-        else:
-            subject = f"Please reach {safe_clinic} now"
-            heading = "Please reach the clinic now"
-            detail = "Your turn is approaching. Please reach the clinic now."
-
-        text_content = f"""
-        Hello {safe_name},
-
-        {detail}
-
-        Token Number: {safe_token}
-        Clinic: {safe_clinic}
-        Doctor: {safe_doctor}
-        Clinic Location: {safe_location}
-
-        Thank you,
-        Krama Clinic
-        """.strip()
-
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .card {{ background: #f7fbfb; border: 1px solid #d8ecec; border-radius: 10px; padding: 24px; }}
-                .title {{ color: #00555A; margin-bottom: 12px; }}
-                .footer {{ font-size: 12px; color: #777; margin-top: 20px; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="card">
-                    <h2 class="title">{heading}</h2>
-                    <p>Hello {safe_name},</p>
-                    <p>{detail}</p>
-                    <p><strong>Token Number:</strong> {safe_token}</p>
-                    <p><strong>Clinic:</strong> {safe_clinic}</p>
-                    <p><strong>Doctor:</strong> {safe_doctor}</p>
-                    <p><strong>Clinic Location:</strong> {safe_location}</p>
-                </div>
-                <div class="footer">Krama Clinic</div>
-            </div>
-        </body>
-        </html>
-        """.strip()
-
-        return self._send_email(to_email, subject, text_content, html_content)
-
     def _send_email(self, to_email: str, subject: str, text_content: str, html_content: str) -> bool:
         """
         Internal method to send email
@@ -238,31 +152,6 @@ email_service = EmailService()
 def send_otp(to_email: str, otp_code: str) -> bool:
     """Convenience function to send OTP email"""
     return email_service.send_otp_email(to_email, otp_code)
-
-
-def send_queue_alert(
-    to_email: str,
-    patient_name: str,
-    clinic_name: str,
-    alert_type: str,
-    token_number: Optional[str] = None,
-    doctor_name: Optional[str] = None,
-    clinic_location: Optional[str] = None,
-    latitude: Optional[str] = None,
-    longitude: Optional[str] = None,
-) -> bool:
-    """Convenience function to send queue alert email"""
-    return email_service.send_queue_alert_email(
-        to_email,
-        patient_name,
-        clinic_name,
-        alert_type,
-        token_number,
-        doctor_name,
-        clinic_location,
-        latitude,
-        longitude,
-    )
 
 
 def send_delay_summary_email(

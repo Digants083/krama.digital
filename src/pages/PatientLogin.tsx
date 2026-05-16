@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import AuthCard from "@/components/auth/AuthCard";
 
 import { Activity, Mail, Lock, ArrowRight } from "lucide-react";
@@ -11,7 +12,7 @@ import { Activity, Mail, Lock, ArrowRight } from "lucide-react";
 const PatientLogin = () => {
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState("");
+  const [loginIdentifier, setLoginIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,8 +20,8 @@ const PatientLogin = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!email.trim()) {
-      setError("Please enter your email.");
+    if (!loginIdentifier.trim()) {
+      setError("Please enter your email or patient ID.");
       return;
     }
 
@@ -39,7 +40,7 @@ const PatientLogin = () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email: email,
+          email: loginIdentifier,
           password: password,
         }),
       });
@@ -54,8 +55,8 @@ const PatientLogin = () => {
       const userData = {
         id: data.user_id,
         type: data.user_type,
-        email: email,
-        name: data.patient_data?.name || email.split('@')[0],
+        email: data.patient_data?.email || data.email || loginIdentifier,
+        name: data.patient_data?.name || loginIdentifier.split('@')[0],
         patient_id: data.patient_data?.patient_id || null
       };
       localStorage.setItem("user", JSON.stringify(userData));
@@ -104,14 +105,14 @@ const PatientLogin = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">Email / Patient ID</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="PA-AB12CD or you@example.com"
+                    value={loginIdentifier}
+                    onChange={(e) => setLoginIdentifier(e.target.value)}
                     className="pl-9"
                   />
                 </div>
@@ -130,9 +131,8 @@ const PatientLogin = () => {
 
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
+                  <PasswordInput
                     id="password"
-                    type="password"
                     placeholder="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}

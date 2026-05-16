@@ -28,7 +28,7 @@ const ClinicTermsModal = ({ open, onOpenChange, onAccept }: ClinicTermsModalProp
       <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold text-center">
-            Clinic Registration – Terms & Overview
+            Clinic Registration - Terms & Overview
           </DialogTitle>
         </DialogHeader>
         
@@ -38,15 +38,15 @@ const ClinicTermsModal = ({ open, onOpenChange, onAccept }: ClinicTermsModalProp
             <h3 className="text-lg font-semibold text-foreground">How It Works</h3>
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>Manage appointments and walk-in queues digitally</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>Support multiple doctors with real-time queue tracking</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>Use a simple dashboard to control daily operations</span>
               </li>
             </ul>
@@ -57,11 +57,11 @@ const ClinicTermsModal = ({ open, onOpenChange, onAccept }: ClinicTermsModalProp
             <h3 className="text-lg font-semibold text-foreground">Pricing</h3>
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>10% fee applies only to online bookings via the platform</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>No charges for walk-ins or manual entries</span>
               </li>
             </ul>
@@ -79,15 +79,15 @@ const ClinicTermsModal = ({ open, onOpenChange, onAccept }: ClinicTermsModalProp
             <h3 className="text-lg font-semibold text-foreground">Key Points</h3>
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>No setup or subscription fees</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>Full control over appointments and queues</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">•</span>
+                <span className="text-primary mt-0.5">-</span>
                 <span>Transparent reporting in your dashboard</span>
               </li>
             </ul>

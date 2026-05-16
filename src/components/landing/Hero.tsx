@@ -7,7 +7,7 @@ import RoleToggle from "./RoleToggle";
 const content = {
   patient: {
     headline: <>Skip Waiting Rooms. <span className="text-primary">Book Clinics Near You.</span></>,
-    subtext: "Find nearby clinics, take a token, and arrive just in time — no app install needed.",
+    subtext: "Find nearby clinics, take a token, and arrive just in time - no app install needed.",
     primaryBtn: "Find Clinics Near Me",
     secondaryBtn: "Search by Location",
   },
@@ -49,7 +49,7 @@ const Hero = ({ role, onRoleChange }: HeroProps) => {
             </div>
           </div>
 
-          {/* Right — Mock product card */}
+          {/* Right - Mock product card */}
           <div className="flex justify-center animate-fade-in [animation-delay:150ms]">
             {role === "patient" ? (
               <Card className="w-full max-w-sm border border-border shadow-xl">
@@ -68,7 +68,7 @@ const Hero = ({ role, onRoleChange }: HeroProps) => {
                     <div key={cl.name} className="flex items-center justify-between rounded-lg bg-secondary p-3">
                       <div>
                         <p className="text-sm font-semibold">{cl.name}</p>
-                        <p className="text-xs text-muted-foreground">{cl.spec} · {cl.dist}</p>
+                        <p className="text-xs text-muted-foreground">{cl.spec} - {cl.dist}</p>
                       </div>
                       <CalendarCheck className="h-4 w-4 text-primary" />
                     </div>

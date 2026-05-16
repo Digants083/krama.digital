@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
-import { CalendarDays, Clock, Hash, MapPin, Stethoscope, Timer, Users, type LucideIcon } from "lucide-react";
+import { CalendarDays, MapPin, Stethoscope, type LucideIcon } from "lucide-react";
 
 interface ConfirmationState {
   clinic: string;
@@ -11,6 +11,8 @@ interface ConfirmationState {
   time: string;
   sessionName?: string;
   sessionTime?: string;
+  originalSessionTime?: string;
+  delay?: string;
   sessionId?: number;
   address: string;
   token: string;
@@ -46,6 +48,7 @@ interface QueuePosition {
   total_in_queue: number;
   now_serving_token?: string;
   doctor_delay?: string | null;
+  delayed_start_time?: string | null;
   session_id?: number;
   slot_id?: number;
 }
@@ -132,12 +135,11 @@ const AppointmentConfirmation = () => {
   const doctorName = state?.doctor || appointmentDetails?.doctor_name || "Available Doctor";
   const dateText = state?.date || appointmentDetails?.date || "";
   const timeText = state?.time || appointmentDetails?.time || "";
-  const sessionName = state?.sessionName || appointmentDetails?.session_name || (appointmentDetails?.session_id ? `Session ${appointmentDetails.session_id}` : "Session");
-  const sessionTime = state?.sessionTime || appointmentDetails?.session_time || timeText;
+  const displayTimeText = timeText.replace(/^(time|session)\s*\d+\s*/i, "").trim();
   const patientsAhead = queuePosition?.patients_ahead ?? 0;
   const estimatedWait = queuePosition?.estimated_wait_minutes ?? 0;
   const nowServing = queuePosition?.now_serving_token || token;
-  const delayNotice = queuePosition?.doctor_delay || null;
+  const delayNotice = state?.delay || queuePosition?.doctor_delay || null;
 
   useEffect(() => {
     if (!token || !clinicName || !doctorName || !dateText || !timeText) return;
@@ -202,9 +204,17 @@ const AppointmentConfirmation = () => {
             </div>
           </div>
 
-          <div className="mt-4 rounded-[24px] bg-white/10 p-5">
-            <p className="text-sm text-white/70">Patients ahead</p>
-            <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
+          <div className={`mt-4 grid gap-4 ${delayNotice ? "grid-cols-2" : "grid-cols-1"}`}>
+            <div className="rounded-[24px] bg-white/10 p-5">
+              <p className="text-sm text-white/70">Patients ahead</p>
+              <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
+            </div>
+            {delayNotice && (
+              <div className="rounded-[24px] bg-white/10 p-5">
+                <p className="text-sm text-white/70">Delay</p>
+                <p className="mt-3 text-3xl font-bold">{delayNotice}</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -212,8 +222,7 @@ const AppointmentConfirmation = () => {
           <div className="space-y-4">
             <DetailRow icon={MapPin} label="Clinic" value={clinicName} subvalue={clinicAddress} />
             <DetailRow icon={Stethoscope} label="Doctor" value={doctorName} />
-            <DetailRow icon={Clock} label="Session" value={sessionName} subvalue={sessionTime} />
-            <DetailRow icon={CalendarDays} label="Appointment" value={`${dateText} at ${timeText}`} />
+            <DetailRow icon={CalendarDays} label="Appointment" value={dateText} subvalue={displayTimeText} />
             <div className="grid grid-cols-2 gap-4 rounded-[20px] bg-secondary/60 p-4">
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Token</p>

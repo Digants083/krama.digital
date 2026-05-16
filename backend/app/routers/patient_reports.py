@@ -1,5 +1,5 @@
 """
-Patient Reports router for diagnostic and scanning centers.
+Patient Reports router for clinics.
 Provides endpoints for managing patient reports and sending PDF reports via email.
 """
 import os
