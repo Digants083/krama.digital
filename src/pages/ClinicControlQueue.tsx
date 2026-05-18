@@ -446,7 +446,7 @@ const ClinicControlQueue = () => {
         setMessage({
           text: data.action === "auto_finished"
             ? `Patient was in last slot - marked as not served`
-            : `Patient ${token} pushed to next slot`,
+            : `Patient ${token} pushed to next slot as ${data.new_token || "new token"} at position ${data.position || data.new_position || "end"}`,
           type: "success"
         });
         // Refresh the queue

@@ -1237,10 +1237,12 @@ async def push_patient_to_next_slot(
     # Get the next slot number (1-based)
     next_slot_id = next_slot_index + 1
 
-    # Find the highest token number in the next slot
-    today = datetime.now().strftime("%Y-%m-%d")
+    # Find the highest token number and last live position in the next slot.
+    today = _clinic_today_str()
 
     max_token = -1
+    max_queue_position = 0
+    live_next_slot_statuses = ["booked", "pending", "serving", "skipped"]
 
     # Check online appointments in next slot
     result = await db.execute(
@@ -1258,6 +1260,8 @@ async def push_patient_to_next_slot(
                     max_token = token_num
             except:
                 pass
+        if apt.status in live_next_slot_statuses and apt.queue_position:
+            max_queue_position = max(max_queue_position, int(apt.queue_position))
 
     # Check QR appointments in next slot
     result = await db.execute(
@@ -1275,6 +1279,8 @@ async def push_patient_to_next_slot(
                     max_token = token_num
             except:
                 pass
+        if apt.status in live_next_slot_statuses and apt.queue_position:
+            max_queue_position = max(max_queue_position, int(apt.queue_position))
 
     # Check completed appointments in next slot (for token continuity)
     result = await db.execute(
@@ -1296,6 +1302,7 @@ async def push_patient_to_next_slot(
     # New token is highest + 1 (goes to end of queue)
     next_token_number = max_token + 1
     new_token_label = f"T-{next_token_number}"
+    new_queue_position = max_queue_position + 1
 
     # Update the appointment with new slot and token
     old_slot_name = slots[current_slot_index].get("slot_name", f"Slot {current_slot_id}")
@@ -1309,6 +1316,7 @@ async def push_patient_to_next_slot(
     appointment.status = "booked"
     appointment.notification_stage = "pending"
     appointment.doctor_delay = new_slot_delay
+    appointment.queue_position = new_queue_position
 
     # Increment push_count
     current_push_count = getattr(appointment, 'push_count', 0)
@@ -1334,6 +1342,16 @@ async def push_patient_to_next_slot(
             logger.warning(f"Failed to send push email to {patient_email}")
 
     await db.commit()
+    await db.refresh(appointment)
+    metrics = await get_live_queue_metrics(
+        db,
+        clinic_id,
+        today,
+        "online",
+        appointment.id,
+        appointment.appointment_token,
+        appointment.slot_id,
+    )
     await publish_queue_event(clinic_id, "queue_updated", {"old_slot_id": current_slot_id, "new_slot_id": next_slot_id})
 
     return {
@@ -1342,7 +1360,17 @@ async def push_patient_to_next_slot(
         "old_slot_id": current_slot_id,
         "new_slot_id": next_slot_id,
         "new_token": new_token_label,
-        "new_position": "end of queue for next slot",
+        "new_position": metrics["queue_position"],
+        "position": metrics["position_label"],
+        "patients_ahead": metrics["patients_ahead"],
+        "queue_position": metrics["queue_position"],
+        "total_in_queue": metrics["total_in_queue"],
+        "earliest_eta": metrics["earliest_eta"],
+        "predicted_eta": metrics["predicted_eta"],
+        "latest_eta": metrics["latest_eta"],
+        "consultation_window": metrics["consultation_window"],
+        "estimated_window_text": metrics["estimated_window_text"],
+        "estimated_wait_minutes": metrics["estimated_wait_minutes"],
         "email_sent": patient_email is not None
     }
 
