@@ -396,11 +396,12 @@ async def get_session_queue(
         (_token_number(item.get("token")) for item in queue if item.get("status") == "serving"),
         None,
     )
+    prefer_queue_position = any(item.get("status") == "skipped" for item in queue)
     queue.sort(key=lambda item: (
         0 if item.get("status") == "serving" else 1,
         0 if serving_token_number is None or _token_number(item.get("token")) >= serving_token_number else 1,
-        _token_number(item.get("token")),
-        item.get("queue_position") or 10**9,
+        (item.get("queue_position") or 10**9) if prefer_queue_position else _token_number(item.get("token")),
+        _token_number(item.get("token")) if prefer_queue_position else (item.get("queue_position") or 10**9),
         item.get("id") or 0,
         0 if item["source"] == "online" else 1,
     ))

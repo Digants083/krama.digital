@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
-ACTIVE_STATUSES = ("booked", "pending", "serving")
+ACTIVE_STATUSES = ("booked", "pending", "serving", "skipped")
 DEFAULT_MIN_CONSULTATION_MINUTES = 8
 DEFAULT_MAX_CONSULTATION_MINUTES = 12
 DEFAULT_HISTORY_LIMIT = 12
@@ -48,17 +48,19 @@ def _status_rank(status):
     return 0 if status == "serving" else 1
 
 
-def _live_queue_sort_key(item, serving_token_number=None):
+def _live_queue_sort_key(item, serving_token_number=None, prefer_queue_position=False):
     token_number = _token_number(item["token"])
     if serving_token_number is None:
         token_bucket = 0
     else:
         token_bucket = 0 if token_number >= serving_token_number else 1
+    primary_order = _to_int(item["queue_position"], 10 ** 9) if prefer_queue_position else token_number
+    secondary_order = token_number if prefer_queue_position else _to_int(item["queue_position"], 10 ** 9)
     return (
         _status_rank(item["status"]),
         token_bucket,
-        token_number,
-        _to_int(item["queue_position"], 10 ** 9),
+        primary_order,
+        secondary_order,
         _sort_datetime(item["created_at"]),
         _to_int(item["id"], 10 ** 9),
         0 if item["source"] == "online" else 1,
@@ -492,7 +494,8 @@ async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id
         (_token_number(item["token"]) for item in queue_items if item["status"] == "serving"),
         None,
     )
-    queue_items.sort(key=lambda item: _live_queue_sort_key(item, serving_token_number))
+    prefer_queue_position = any(item["status"] == "skipped" for item in queue_items)
+    queue_items.sort(key=lambda item: _live_queue_sort_key(item, serving_token_number, prefer_queue_position))
 
     current_id_text = str(current_id) if current_id is not None else ""
     current_token_text = str(current_token or "")

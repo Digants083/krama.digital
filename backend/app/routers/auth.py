@@ -4869,15 +4869,17 @@ async def get_today_appointments(
         (_token_number(item.get("token")) for item in appointment_list if item.get("status") == "serving"),
         None,
     )
+    prefer_queue_position = any(item.get("status") == "skipped" for item in appointment_list)
 
     # Keep online + walk-in rows in live queue order. If a patient is serving,
-    # the visible queue starts there, then continues by token number.
+    # the visible queue starts there. Normal queues use token order; skipped
+    # queues honor queue_position because skip intentionally moves a patient back.
     appointment_list.sort(
         key=lambda x: (
             0 if x.get("status") == "serving" else 1,
             0 if serving_token_number is None or _token_number(x.get("token")) >= serving_token_number else 1,
-            _token_number(x.get("token")),
-            x.get("queue_position") if x.get("queue_position") is not None else 10**9,
+            x.get("queue_position") if prefer_queue_position and x.get("queue_position") is not None else _token_number(x.get("token")),
+            _token_number(x.get("token")) if prefer_queue_position else x.get("queue_position") if x.get("queue_position") is not None else 10**9,
             _sort_datetime(x.get("created_at")),
             0 if x.get("source") != "walkin" else 1,
             x.get("id") or 0,

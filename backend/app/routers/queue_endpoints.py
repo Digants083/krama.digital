@@ -890,12 +890,12 @@ async def skip_patient(
     online_filters = [
         Appointment.clinic_id == clinic_id,
         Appointment.date == today,
-        Appointment.status != "serving",
+        Appointment.status.in_(["booked", "pending", "skipped"]),
     ]
     walkin_filters = [
         QRAppointment.clinic_id == clinic_id,
         QRAppointment.date == today,
-        QRAppointment.status != "serving",
+        QRAppointment.status.in_(["booked", "pending", "skipped"]),
     ]
 
     if slot_id is not None:
@@ -2398,7 +2398,7 @@ async def get_slot_queue_counts(
     completed, cancelled, skipped, and not-served rows are not counted.
     """
     today = _clinic_today_str()
-    active_statuses = ["booked", "pending", "serving"]
+    active_statuses = ["booked", "pending", "serving", "skipped"]
 
     slot_result = await db.execute(
         select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
