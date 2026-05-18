@@ -473,8 +473,8 @@ async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id
 
     queue_items.sort(key=lambda item: (
         _status_rank(item["status"]),
-        _to_int(item["queue_position"], 10 ** 9),
         _token_number(item["token"]),
+        _to_int(item["queue_position"], 10 ** 9),
         _sort_datetime(item["created_at"]),
         _to_int(item["id"], 10 ** 9),
         0 if item["source"] == "online" else 1,

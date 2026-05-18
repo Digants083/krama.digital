@@ -1954,7 +1954,7 @@ async def join_queue(
     return {
         "token_number": next_token_number,
         "token_label": token_label,
-        "position": position,
+        "position": metrics["queue_position"],
         "patient_name": payload.patient_name,
         "clinic_id": payload.clinic_id,
         "source": "walkin",

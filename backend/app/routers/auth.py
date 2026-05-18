@@ -4865,12 +4865,13 @@ async def get_today_appointments(
 
 
 
-    # Keep online + walk-in rows in the visible token order.
+    # Keep online + walk-in rows in the visible token order. Saved queue_position
+    # can drift after mixed online/walk-in activity, so token order is primary.
     appointment_list.sort(
         key=lambda x: (
             0 if x.get("status") == "serving" else 1,
-            x.get("queue_position") if x.get("queue_position") is not None else 10**9,
             _token_number(x.get("token")),
+            x.get("queue_position") if x.get("queue_position") is not None else 10**9,
             _sort_datetime(x.get("created_at")),
             0 if x.get("source") != "walkin" else 1,
             x.get("id") or 0,
@@ -6013,7 +6014,7 @@ async def create_token(
 
     # Calculate next token number (append to end of queue).
 
-    max_token_number = 0
+    max_token_number = -1
 
     for appointment in existing_appointments:
 
@@ -6115,9 +6116,9 @@ async def create_token(
 
         "token_number": next_token_number,
 
-        "position": queue_position,
+        "position": metrics["queue_position"],
 
-        "patientsAhead": queue_position - 1,
+        "patientsAhead": metrics["patients_ahead"],
 
         "earliest_eta": metrics["earliest_eta"],
 

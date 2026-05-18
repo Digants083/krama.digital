@@ -29,6 +29,11 @@ def _today() -> str:
     return _clinic_now().strftime("%Y-%m-%d")
 
 
+def _token_number(token) -> int:
+    digits = "".join(ch for ch in str(token or "") if ch.isdigit())
+    return int(digits) if digits else 10**9
+
+
 def _load_json_list(value):
     if isinstance(value, str):
         return json.loads(value) if value else []
@@ -387,7 +392,12 @@ async def get_session_queue(
                 "slot_id": session_id,
             })
 
-    queue.sort(key=lambda item: (item.get("queue_position") or 10**9, item.get("id") or 0, 0 if item["source"] == "online" else 1))
+    queue.sort(key=lambda item: (
+        _token_number(item.get("token")),
+        item.get("queue_position") or 10**9,
+        item.get("id") or 0,
+        0 if item["source"] == "online" else 1,
+    ))
     return {"clinic_id": clinic_id, "session_id": session_id, "date": today, "queue": queue, "total": len(queue)}
 
 
