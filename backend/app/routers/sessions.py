@@ -392,7 +392,13 @@ async def get_session_queue(
                 "slot_id": session_id,
             })
 
+    serving_token_number = next(
+        (_token_number(item.get("token")) for item in queue if item.get("status") == "serving"),
+        None,
+    )
     queue.sort(key=lambda item: (
+        0 if item.get("status") == "serving" else 1,
+        0 if serving_token_number is None or _token_number(item.get("token")) >= serving_token_number else 1,
         _token_number(item.get("token")),
         item.get("queue_position") or 10**9,
         item.get("id") or 0,

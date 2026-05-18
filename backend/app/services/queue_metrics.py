@@ -48,6 +48,23 @@ def _status_rank(status):
     return 0 if status == "serving" else 1
 
 
+def _live_queue_sort_key(item, serving_token_number=None):
+    token_number = _token_number(item["token"])
+    if serving_token_number is None:
+        token_bucket = 0
+    else:
+        token_bucket = 0 if token_number >= serving_token_number else 1
+    return (
+        _status_rank(item["status"]),
+        token_bucket,
+        token_number,
+        _to_int(item["queue_position"], 10 ** 9),
+        _sort_datetime(item["created_at"]),
+        _to_int(item["id"], 10 ** 9),
+        0 if item["source"] == "online" else 1,
+    )
+
+
 def _load_json_list(value):
     if isinstance(value, str):
         return json.loads(value) if value else []
@@ -471,14 +488,11 @@ async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id
     queue_items.extend(await _fetch_queue_rows(db, "appointments", clinic_id, date, "online", slot_id))
     queue_items.extend(await _fetch_queue_rows(db, "qr_appointments", clinic_id, date, "walkin", slot_id))
 
-    queue_items.sort(key=lambda item: (
-        _status_rank(item["status"]),
-        _token_number(item["token"]),
-        _to_int(item["queue_position"], 10 ** 9),
-        _sort_datetime(item["created_at"]),
-        _to_int(item["id"], 10 ** 9),
-        0 if item["source"] == "online" else 1,
-    ))
+    serving_token_number = next(
+        (_token_number(item["token"]) for item in queue_items if item["status"] == "serving"),
+        None,
+    )
+    queue_items.sort(key=lambda item: _live_queue_sort_key(item, serving_token_number))
 
     current_id_text = str(current_id) if current_id is not None else ""
     current_token_text = str(current_token or "")
