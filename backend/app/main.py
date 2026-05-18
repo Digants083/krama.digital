@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, select
 from sqlalchemy.exc import DBAPIError
 from app.compat import install_starlette_router_compat
+from app.config import admin_seeds
 from app.database.db import engine, AsyncSessionLocal
 from app.database.models import Base, Appointment, Clinic, ClinicTimeSlot
 from app.database.schema_checks import ensure_required_schema
@@ -15,6 +16,8 @@ install_starlette_router_compat()
 
 from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports, patient_history, sessions
 from app.services.appointment_maintenance import check_appointment_dates, cleanup_old_appointments
+from app.services.delay_jobs import scheduled_delay_jobs
+from app.services import realtime
 import json
 
 # Setup logging for scheduled tasks
@@ -410,6 +413,8 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS qualifications VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS has_pinned_location BOOLEAN DEFAULT FALSE")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS booking_cutoff_minutes INTEGER DEFAULT 15")
+        await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS consultation_min_minutes INTEGER DEFAULT 8")
+        await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS consultation_max_minutes INTEGER DEFAULT 12")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS manual_stop_date VARCHAR")
         await safe_exec("""
@@ -446,6 +451,32 @@ async def lifespan(app: FastAPI):
         """)
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_clinic_id ON doctor_sessions(clinic_id)")
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_slot_id ON doctor_sessions(slot_id)")
+        await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_started_at TIMESTAMP")
+        await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_ends_at TIMESTAMP")
+        await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_original_start_time VARCHAR")
+        await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_updated_start_time VARCHAR")
+        await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_version INTEGER DEFAULT 0")
+
+        await safe_exec("""
+            CREATE TABLE IF NOT EXISTS notification_jobs (
+                id SERIAL PRIMARY KEY,
+                job_type VARCHAR NOT NULL,
+                clinic_id VARCHAR NOT NULL,
+                session_id INTEGER,
+                recipient_email VARCHAR,
+                patient_name VARCHAR,
+                token_number VARCHAR,
+                scheduled_for TIMESTAMP NOT NULL,
+                status VARCHAR DEFAULT 'pending',
+                dedupe_key VARCHAR UNIQUE NOT NULL,
+                payload JSON DEFAULT '{}',
+                sent_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_notification_jobs_due ON notification_jobs(status, scheduled_for)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_notification_jobs_clinic_session ON notification_jobs(clinic_id, session_id)")
 
 
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS daily_toggle_counts JSON DEFAULT '[]'")
@@ -567,14 +598,21 @@ async def lifespan(app: FastAPI):
 
         if admin_count == 0:
             # Insert admin accounts using raw SQL
-            await conn.execute(
-                text("""
-                    INSERT INTO admins (username, email, confirmation_email)
-                    VALUES
-                    ('admin1', 'diganths083@gmail.com', 'digitalkrama@gmail.com'),
-                    ('admin2', 'yashavanthb28@gmail.com', 'digitalkrama@gmail.com')
-                """)
-            )
+            for admin in admin_seeds():
+                if not admin.email or not admin.confirmation_email:
+                    logger.warning("Skipping %s seed: admin email env vars are not fully configured", admin.username)
+                    continue
+                await conn.execute(
+                    text(
+                        "INSERT INTO admins (username, email, confirmation_email) "
+                        "VALUES (:username, :email, :confirmation_email)"
+                    ),
+                    {
+                        "username": admin.username,
+                        "email": admin.email,
+                        "confirmation_email": admin.confirmation_email,
+                    },
+                )
             logger.info("Created admin accounts: admin1 and admin2")
 
         await ensure_required_schema(conn)
@@ -582,7 +620,8 @@ async def lifespan(app: FastAPI):
     # Start background scheduled tasks
     midnight_cleanup_task = asyncio.create_task(scheduled_midnight_cleanup())
     auto_stop_task = asyncio.create_task(scheduled_auto_stop_clinics())
-    logger.info("Started scheduled background tasks (midnight cleanup + auto-stop)")
+    delay_jobs_task = asyncio.create_task(scheduled_delay_jobs())
+    logger.info("Started scheduled background tasks (midnight cleanup + auto-stop + delay jobs)")
 
     # Run appointment maintenance on startup/restart
     try:
@@ -596,6 +635,7 @@ async def lifespan(app: FastAPI):
     # Cleanup on shutdown
     midnight_cleanup_task.cancel()
     auto_stop_task.cancel()
+    delay_jobs_task.cancel()
     try:
         await midnight_cleanup_task
     except asyncio.CancelledError:
@@ -604,9 +644,13 @@ async def lifespan(app: FastAPI):
         await auto_stop_task
     except asyncio.CancelledError:
         pass
+    try:
+        await delay_jobs_task
+    except asyncio.CancelledError:
+        pass
     logger.info("Scheduled tasks cancelled")
 
-app = FastAPI(title="Clinic Authentication API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Krama API", version="1.0.0", lifespan=lifespan)
 
 # CORS middleware - allow all origins for development
 app.add_middleware(
@@ -625,10 +669,11 @@ app.include_router(feedback.router, prefix="/api")
 app.include_router(patient_reports.router, prefix="/api")
 app.include_router(patient_history.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
+app.include_router(realtime.router, prefix="/api")
 
 @app.get("/")
 async def root():
-    return {"message": "Clinic Authentication API is running"}
+    return {"message": "Krama API is running"}
 
 @app.get("/health")
 async def health_check():

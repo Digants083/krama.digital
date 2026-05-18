@@ -35,6 +35,8 @@ class Clinic(Base):
     start = Column(Integer, nullable=True)
     end = Column(Integer, nullable=True)
     booking_cutoff_minutes = Column(Integer, default=15)
+    consultation_min_minutes = Column(Integer, default=8)
+    consultation_max_minutes = Column(Integer, default=12)
     is_active = Column(Boolean, default=False)
     manual_stop_date = Column(String, nullable=True)
     has_pinned_location = Column(Boolean, default=False)
@@ -125,9 +127,34 @@ class DoctorSession(Base):
     end_time = Column(String, nullable=False)
     status = Column(String, default="available")
     delay_minutes = Column(Integer, default=0)
+    delay_started_at = Column(DateTime(timezone=True), nullable=True)
+    delay_ends_at = Column(DateTime(timezone=True), nullable=True)
+    delay_original_start_time = Column(String, nullable=True)
+    delay_updated_start_time = Column(String, nullable=True)
+    delay_version = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     slot_id = Column(Integer, nullable=True)
     session_date = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class NotificationJob(Base):
+    """Durable notification/reminder jobs that survive server restarts."""
+    __tablename__ = "notification_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_type = Column(String, nullable=False, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    session_id = Column(Integer, nullable=True, index=True)
+    recipient_email = Column(String, nullable=True, index=True)
+    patient_name = Column(String, nullable=True)
+    token_number = Column(String, nullable=True)
+    scheduled_for = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String, default="pending", index=True)
+    dedupe_key = Column(String, unique=True, nullable=False, index=True)
+    payload = Column(JSON, default=dict)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

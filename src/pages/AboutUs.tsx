@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { SUPPORT_EMAIL } from "@/config/app";
 import {
   ArrowRight,
   Building2,
@@ -158,8 +159,8 @@ const AboutUs = () => {
                 <Mail className="mt-0.5 h-5 w-5 text-primary" />
                 <div>
                   <p className="font-semibold text-foreground">Email</p>
-                  <a href="mailto:reddit098609@gmail.com" className="text-primary transition hover:text-primary/80">
-                    reddit098609@gmail.com
+                  <a href={`mailto:${SUPPORT_EMAIL}`} className="text-primary transition hover:text-primary/80">
+                    {SUPPORT_EMAIL}
                   </a>
                 </div>
               </div>

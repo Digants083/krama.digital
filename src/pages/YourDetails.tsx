@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock, Building2, UserCheck, Search } from "lucide-react";
 import { apiUrl } from "@/lib/api";
+import { formatCountdown, secondsUntil } from "@/lib/timeFormat";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 interface AppointmentDetails {
   token_label: string;
@@ -14,8 +16,20 @@ interface AppointmentDetails {
   position: string;
   patients_ahead: number;
   estimated_wait_minutes: number;
+  earliest_eta?: string | null;
+  latest_eta?: string | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  active_delay_minutes?: number | null;
+  queue_position?: number | null;
+  session_status?: string | null;
   now_serving_token?: string;
   doctor_delay?: string | null;
+  clinic_id?: string;
+  delay_minutes?: number;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
   status: string;
   source: string;
 }
@@ -25,12 +39,17 @@ interface LookupResponse {
   appointments: AppointmentDetails[];
 }
 
+const phoneRegex = /^[6-9]\d{9}$/;
+
 const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) => {
   const patientsAhead = appointment.patients_ahead ?? 0;
   const estimatedWait = appointment.estimated_wait_minutes ?? 0;
+  const consultationWindow = appointment.consultation_window || appointment.estimated_window_text || "";
+  const activeDelayMinutes = appointment.active_delay_minutes || appointment.delay_minutes || 0;
   const nowServing = appointment.now_serving_token || appointment.token_label;
   const positionText = appointment.position ? appointment.position.replace("/", " / ") : "1 / 1";
   const appointmentTime = appointment.time.replace(/^(time|session)\s*\d+\s*/i, "").trim();
+  const delayRemaining = secondsUntil(appointment.delay_ends_at);
 
   return (
     <div className="rounded-3xl border border-primary/10 bg-white p-5 shadow-[0_18px_60px_-38px_rgba(19,55,50,0.55)]">
@@ -49,15 +68,23 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
           </div>
         </div>
 
-        <div className={`mt-4 grid gap-4 ${appointment.doctor_delay ? "grid-cols-2" : "grid-cols-1"}`}>
+        <div className="mt-4 rounded-[24px] bg-white/10 p-5">
+          <p className="text-sm text-primary-foreground/70">Estimated Consultation Window</p>
+          <p className="mt-3 text-2xl font-bold leading-tight">{consultationWindow || "Calculating..."}</p>
+        </div>
+
+        <div className={`mt-4 grid gap-4 ${appointment.doctor_delay || activeDelayMinutes > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
           <div className="rounded-[24px] bg-white/10 p-5">
             <p className="text-sm text-primary-foreground/70">Patients ahead</p>
             <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
           </div>
-          {appointment.doctor_delay && (
+          {(appointment.doctor_delay || activeDelayMinutes > 0) && (
             <div className="rounded-[24px] bg-white/10 p-5">
               <p className="text-sm text-primary-foreground/70">Delay</p>
-              <p className="mt-3 text-3xl font-bold">{appointment.doctor_delay}</p>
+              <p className="mt-3 text-3xl font-bold">{appointment.doctor_delay || `${activeDelayMinutes} min`}</p>
+              {delayRemaining > 0 && (
+                <p className="mt-2 text-sm font-semibold text-primary-foreground/80">Opening in {formatCountdown(delayRemaining)}</p>
+              )}
             </div>
           )}
         </div>
@@ -66,7 +93,14 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
       <div className="mt-5 space-y-4">
         <DetailRow icon={Building2} label="Clinic" value={appointment.clinic_name} subvalue={appointment.clinic_address} />
         <DetailRow icon={UserCheck} label="Doctor" value={appointment.doctor_name || "Available Doctor"} />
-        <DetailRow icon={Clock} label="Appointment" value={appointment.date} subvalue={appointmentTime} />
+        <DetailRow
+          icon={Clock}
+          label="Appointment"
+          value={appointment.date}
+          subvalue={appointment.delay_original_start_time && appointment.delay_updated_start_time
+            ? `${appointment.delay_original_start_time} -> ${appointment.delay_updated_start_time}`
+            : appointmentTime}
+        />
         <div className="grid grid-cols-2 gap-4 rounded-[20px] border border-primary/10 bg-primary/5 p-4">
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Token</p>
@@ -76,6 +110,11 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Position</p>
             <p className="mt-1 text-lg font-bold text-foreground">{positionText}</p>
           </div>
+        </div>
+        <div className="rounded-[20px] border border-primary/10 bg-primary/5 p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
+          <p className="mt-1 text-lg font-bold text-foreground">{consultationWindow || "Calculating..."}</p>
+          <p className="mt-1 text-sm text-muted-foreground">Status: {appointment.session_status || appointment.status}</p>
         </div>
       </div>
     </div>
@@ -108,20 +147,21 @@ const YourDetails = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [appointments, setAppointments] = useState<AppointmentDetails[] | null>(null);
+  const lastDelayNotificationRef = useRef<string>("");
+  const realtimeClinicId = appointments?.[0]?.clinic_id || null;
 
-  const phoneRegex = /^[6-9]\d{9}$/;
-
-  const handleLookup = async () => {
-    if (!phoneRegex.test(phone.trim())) {
+  const handleLookup = useCallback(async (showLoading = true) => {
+    const lookupPhone = phone.trim();
+    if (!phoneRegex.test(lookupPhone)) {
       setError("Please enter a valid 10-digit mobile number");
       return;
     }
 
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError("");
 
     try {
-      const lookupUrl = apiUrl(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone.trim())}`);
+      const lookupUrl = apiUrl(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(lookupPhone)}`);
       console.info("[YourDetails] lookup request", {
         url: lookupUrl,
         phoneLast4: phone.trim().slice(-4),
@@ -154,6 +194,21 @@ const YourDetails = () => {
       }
 
       const data: LookupResponse = responseBody;
+      const delayKey = (data.appointments || [])
+        .map((apt) => `${apt.token_label}:${apt.delay_ends_at || ""}`)
+        .join("|");
+      if (
+        delayKey &&
+        delayKey !== lastDelayNotificationRef.current &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted" &&
+        data.appointments?.some((apt) => apt.doctor_delay)
+      ) {
+        new Notification("Your appointment has been delayed", {
+          body: "Open your token for the updated time and countdown.",
+        });
+      }
+      lastDelayNotificationRef.current = delayKey;
       console.info("[YourDetails] lookup success", {
         url: lookupUrl,
         count: data.count,
@@ -172,9 +227,19 @@ const YourDetails = () => {
       setError(errorMessage);
       setAppointments(null);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
-  };
+  }, [phone]);
+
+  useEffect(() => {
+    if (!appointments || appointments.length === 0 || !phoneRegex.test(phone)) return;
+    const timer = window.setInterval(() => {
+      void handleLookup(false);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [appointments, handleLookup, phone]);
+
+  useQueueRealtime(realtimeClinicId, () => void handleLookup(false));
 
   const handleReset = () => {
     setPhone("");
@@ -256,7 +321,7 @@ const YourDetails = () => {
         )}
 
         <button
-          onClick={handleLookup}
+          onClick={() => handleLookup()}
           disabled={!phoneRegex.test(phone) || loading}
           className="mt-6 w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-[0_14px_28px_-18px_rgba(31,92,84,0.9)] transition-all duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
         >

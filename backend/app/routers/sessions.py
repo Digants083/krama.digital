@@ -12,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.db import get_db
 from app.database.models import Appointment, Clinic, ClinicTimeSlot, CompletedAppointment, DoctorSession, Patient, QRAppointment
 from app.services.email_service import send_delay_alert, send_patient_delay_email
+from app.services.delay_jobs import cancel_pending_reminders, parse_dt, schedule_delay_reminders
+from app.services.queue_metrics import get_live_queue_metrics
+from app.services.realtime import publish_queue_event
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
@@ -53,6 +56,25 @@ def _time_range_label(time_range: list) -> str:
     if not isinstance(time_range, list) or len(time_range) < 2:
         return ""
     return f"{_slot_time_label(float(time_range[0]))} - {_slot_time_label(float(time_range[1]))}"
+
+
+def _delay_time_payload(slot: dict, now: Optional[datetime] = None) -> dict:
+    now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    delay_ends_at = parse_dt(slot.get("delay_ends_at"))
+    delay_started_at = parse_dt(slot.get("delay_started_at"))
+    minutes = int(slot.get("delay_minutes") or 0)
+    is_active = bool(minutes > 0 and delay_ends_at and delay_ends_at > now_utc)
+    remaining = max(0, int((delay_ends_at - now_utc).total_seconds())) if is_active and delay_ends_at else 0
+    return {
+        "delay_minutes": minutes if is_active else 0,
+        "delay_started_at": delay_started_at.isoformat() if is_active and delay_started_at else None,
+        "delay_ends_at": delay_ends_at.isoformat() if is_active and delay_ends_at else None,
+        "delay_remaining_seconds": remaining,
+        "delay_original_start_time": slot.get("delay_original_start_time") if is_active else None,
+        "delay_updated_start_time": slot.get("delay_updated_start_time") if is_active else None,
+        "delay_version": int(slot.get("delay_version") or 0),
+        "is_delay_active": is_active,
+    }
 
 
 def _slot_is_open(slot: dict, slot_state: Optional[str]) -> bool:
@@ -147,18 +169,44 @@ async def _get_slots_and_states(clinic_id: str, db: AsyncSession):
     )
     changed = False
 
+    now_utc = datetime.now(timezone.utc)
     for index, delay_minutes in enumerate(slot_delays):
         if index < len(slots):
             time_range = slots[index].get("time_range", [0, 0])
             slot_end = float(time_range[1] if len(time_range) > 1 else 0)
-            if delay_minutes > 0 and (should_clear_all or current_decimal >= slot_end):
+            delay_ends_at = parse_dt(slots[index].get("delay_ends_at"))
+            should_clear_delay = bool(
+                delay_minutes > 0
+                and (
+                    should_clear_all
+                    or (delay_ends_at and delay_ends_at <= now_utc)
+                    or (not delay_ends_at and current_decimal >= slot_end)
+                )
+            )
+            if should_clear_delay:
                 slot_delays[index] = 0
                 slots[index]["delay_minutes"] = 0
+                for key in ("delay_started_at", "delay_ends_at", "delay_original_start_time", "delay_updated_start_time"):
+                    slots[index].pop(key, None)
                 if slots[index].get("status_override") == "delayed":
                     slots[index].pop("status_override", None)
                 changed = True
             else:
                 slots[index]["delay_minutes"] = delay_minutes
+                if delay_minutes > 0:
+                    time_range = slots[index].get("time_range", [current_decimal])
+                    slot_start = float(time_range[0] if len(time_range) > 0 else current_decimal)
+                    if not delay_ends_at:
+                        slots[index]["delay_started_at"] = now_utc.isoformat()
+                        slots[index]["delay_ends_at"] = (now_utc + timedelta(minutes=delay_minutes)).isoformat()
+                        delay_ends_at = parse_dt(slots[index]["delay_ends_at"])
+                        changed = True
+                    if not slots[index].get("delay_original_start_time"):
+                        slots[index]["delay_original_start_time"] = _slot_time_label(slot_start)
+                        changed = True
+                    if not slots[index].get("delay_updated_start_time"):
+                        slots[index]["delay_updated_start_time"] = _slot_time_label(slot_start + delay_minutes / 60.0)
+                        changed = True
 
     if changed:
         record.slots = slots
@@ -219,7 +267,8 @@ async def _session_payload(clinic_id: str, slot_id: int, slot: dict, slot_state:
     now = _clinic_now()
     status_text = _compute_session_status(slot, slot_state, current_decimal if current_decimal is not None else now.hour + now.minute / 60.0)
     counts = await _active_counts(clinic_id, slot_id, db)
-    delay_minutes = int(slot.get("delay_minutes") or _parse_delay_minutes(counts["active_delay"]))
+    delay_state = _delay_time_payload(slot)
+    delay_minutes = int(delay_state["delay_minutes"] or _parse_delay_minutes(counts["active_delay"]))
     if delay_minutes and status_text not in {"Closed", "Expired"}:
         status_text = "Delayed"
 
@@ -235,6 +284,7 @@ async def _session_payload(clinic_id: str, slot_id: int, slot: dict, slot_state:
         "time_label": _time_range_label(time_range),
         "status": status_text,
         "status_key": status_text.lower(),
+        **delay_state,
         "delay_minutes": delay_minutes,
         "is_active": status_text in {"Ongoing", "Delayed"},
         "is_open": _slot_is_open(slot, slot_state),
@@ -402,7 +452,25 @@ async def create_session(payload: SessionCreateRequest, db: AsyncSession = Depen
 
 async def _apply_delay_to_session(clinic_id: str, session_id: int, minutes: int, db: AsyncSession):
     label = _normalize_delay_label(minutes) if minutes > 0 else None
-    updates = {"delay_minutes": minutes, "status_override": "delayed" if minutes > 0 else None}
+    now = _clinic_now()
+    delay_started_at = datetime.now(timezone.utc)
+    delay_ends_at = delay_started_at + timedelta(minutes=minutes)
+    record, slots, slot_states, slot_delays = await _get_slots_and_states(clinic_id, db)
+    slot_index = session_id - 1
+    slot = slots[slot_index]
+    time_range = slot.get("time_range", [now.hour + now.minute / 60.0])
+    original_time = _slot_time_label(float(time_range[0] if time_range else now.hour + now.minute / 60.0))
+    updated_time = _slot_time_label(float(time_range[0] if time_range else now.hour + now.minute / 60.0) + minutes / 60.0)
+    delay_version = int(slot.get("delay_version") or 0) + 1
+    updates = {
+        "delay_minutes": minutes,
+        "status_override": "delayed" if minutes > 0 else None,
+        "delay_started_at": delay_started_at.isoformat(),
+        "delay_ends_at": delay_ends_at.isoformat(),
+        "delay_original_start_time": original_time,
+        "delay_updated_start_time": updated_time,
+        "delay_version": delay_version,
+    }
     await _update_session_slot(clinic_id, session_id, db, updates, "open")
 
     session_result = await db.execute(
@@ -418,6 +486,11 @@ async def _apply_delay_to_session(clinic_id: str, session_id: int, minutes: int,
     if doctor_session:
         doctor_session.delay_minutes = minutes
         doctor_session.status = "delayed" if minutes > 0 else "available"
+        doctor_session.delay_started_at = delay_started_at
+        doctor_session.delay_ends_at = delay_ends_at
+        doctor_session.delay_original_start_time = original_time
+        doctor_session.delay_updated_start_time = updated_time
+        doctor_session.delay_version = delay_version
 
     today = _today()
     result = await db.execute(
@@ -444,7 +517,13 @@ async def _apply_delay_to_session(clinic_id: str, session_id: int, minutes: int,
     for apt in walkins:
         apt.doctor_delay = label
     await db.commit()
-    return appointments + walkins, label
+    return appointments + walkins, label, {
+        "delay_started_at": delay_started_at,
+        "delay_ends_at": delay_ends_at,
+        "delay_original_start_time": original_time,
+        "delay_updated_start_time": updated_time,
+        "delay_version": delay_version,
+    }
 
 
 @router.post("/{session_id}/delay")
@@ -467,7 +546,7 @@ async def delay_session(session_id: int, request: dict, db: AsyncSession = Depen
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Delay can only be added to an available slot. This slot is {session_status}."
         )
-    appointments, label = await _apply_delay_to_session(clinic_id, session_id, minutes, db)
+    appointments, label, delay_meta = await _apply_delay_to_session(clinic_id, session_id, minutes, db)
 
     clinic_result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
     clinic = clinic_result.scalar_one_or_none()
@@ -485,7 +564,10 @@ async def delay_session(session_id: int, request: dict, db: AsyncSession = Depen
             blood_group = (getattr(patient, "blood_group", None) or "N/A") if patient else "N/A"
 
         queue_summary.append({
+            "id": getattr(apt, "id", index),
+            "source": "walkin" if not getattr(apt, "patient_email", None) else "online",
             "patient_name": apt.patient_name or "Patient",
+            "patient_email": getattr(apt, "patient_email", ""),
             "token": apt.appointment_token or "TBD",
             "blood_group": blood_group,
             "queue_position": apt.queue_position or index,
@@ -495,6 +577,15 @@ async def delay_session(session_id: int, request: dict, db: AsyncSession = Depen
         patient_email = (getattr(apt, "patient_email", "") or "").strip()
         if not patient_email:
             continue
+        eta_metrics = await get_live_queue_metrics(
+            db,
+            clinic_id,
+            today,
+            "walkin" if not getattr(apt, "patient_email", None) else "online",
+            apt.id,
+            apt.appointment_token,
+            getattr(apt, "slot_id", None),
+        )
         if send_patient_delay_email(
             patient_email,
             apt.patient_name,
@@ -502,8 +593,30 @@ async def delay_session(session_id: int, request: dict, db: AsyncSession = Depen
             label or f"{minutes} min",
             session_name,
             apt.appointment_token,
+            delay_meta["delay_original_start_time"],
+            delay_meta["delay_updated_start_time"],
+            eta_metrics["consultation_window"],
         ):
             patient_notified_count += 1
+
+    reminder_count = await schedule_delay_reminders(
+        db,
+        clinic_id,
+        session_id,
+        delay_meta["delay_version"],
+        delay_meta["delay_ends_at"],
+        queue_summary,
+        {
+            "clinic_name": clinic_name,
+            "session_name": session_name,
+            "delay": label or f"{minutes} min",
+            "old_time": delay_meta["delay_original_start_time"],
+            "updated_time": delay_meta["delay_updated_start_time"],
+            "delay_started_at": delay_meta["delay_started_at"].isoformat(),
+            "delay_ends_at": delay_meta["delay_ends_at"].isoformat(),
+        },
+    )
+    await db.commit()
 
     clinic_email = (getattr(clinic, "email", None) or "").strip() if clinic else ""
     clinic_email_sent = False
@@ -516,6 +629,8 @@ async def delay_session(session_id: int, request: dict, db: AsyncSession = Depen
             doctor_name=getattr(clinic, "doctor_name", None),
         )
 
+    await publish_queue_event(clinic_id, "delay_updated", {"session_id": session_id, "delay_minutes": minutes})
+
     return {
         "success": True,
         "message": "Delay announced successfully" if clinic_email_sent else "Delay saved; clinic email was not sent",
@@ -524,11 +639,17 @@ async def delay_session(session_id: int, request: dict, db: AsyncSession = Depen
         "slot_id": session_id,
         "delay_minutes": minutes,
         "delay": label,
+        "delay_started_at": delay_meta["delay_started_at"].isoformat(),
+        "delay_ends_at": delay_meta["delay_ends_at"].isoformat(),
+        "delay_original_start_time": delay_meta["delay_original_start_time"],
+        "delay_updated_start_time": delay_meta["delay_updated_start_time"],
+        "delay_version": delay_meta["delay_version"],
         "updated_count": len(appointments),
         "clinic_email": clinic_email,
         "email_sent": clinic_email_sent,
         "clinic_notified_count": 1 if clinic_email_sent else 0,
         "patient_notified_count": patient_notified_count,
+        "reminder_scheduled_count": reminder_count,
         "notified_count": (1 if clinic_email_sent else 0) + patient_notified_count,
         "queue": queue_summary,
     }
@@ -539,6 +660,7 @@ async def pause_session(session_id: int, request: dict, db: AsyncSession = Depen
     if not clinic_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="clinic_id is required")
     await _update_session_slot(clinic_id, session_id, db, {"status_override": "paused"}, "open")
+    await publish_queue_event(clinic_id, "session_paused", {"session_id": session_id})
     return {"success": True, "clinic_id": clinic_id, "session_id": session_id, "status": "Delayed"}
 
 
@@ -547,7 +669,14 @@ async def resume_session(session_id: int, request: dict, db: AsyncSession = Depe
     clinic_id = request.get("clinic_id")
     if not clinic_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="clinic_id is required")
-    await _update_session_slot(clinic_id, session_id, db, {"status_override": "ongoing", "delay_minutes": 0}, "open")
+    await _update_session_slot(clinic_id, session_id, db, {
+        "status_override": "ongoing",
+        "delay_minutes": 0,
+        "delay_started_at": None,
+        "delay_ends_at": None,
+        "delay_original_start_time": None,
+        "delay_updated_start_time": None,
+    }, "open")
     session_result = await db.execute(
         select(DoctorSession).where(
             and_(
@@ -560,12 +689,19 @@ async def resume_session(session_id: int, request: dict, db: AsyncSession = Depe
     doctor_session = session_result.scalar_one_or_none()
     if doctor_session:
         doctor_session.delay_minutes = 0
+        doctor_session.delay_started_at = None
+        doctor_session.delay_ends_at = None
+        doctor_session.delay_original_start_time = None
+        doctor_session.delay_updated_start_time = None
         doctor_session.status = "ongoing"
     today = _today()
-    result = await db.execute(select(Appointment).where(Appointment.clinic_id == clinic_id, Appointment.date == today, Appointment.slot_id == session_id))
-    for apt in result.scalars().all():
-        apt.doctor_delay = None
+    for model in (Appointment, QRAppointment):
+        result = await db.execute(select(model).where(model.clinic_id == clinic_id, model.date == today, model.slot_id == session_id))
+        for apt in result.scalars().all():
+            apt.doctor_delay = None
+    await cancel_pending_reminders(db, clinic_id, session_id)
     await db.commit()
+    await publish_queue_event(clinic_id, "delay_cancelled", {"session_id": session_id})
     return {"success": True, "clinic_id": clinic_id, "session_id": session_id, "status": "Ongoing"}
 
 
@@ -575,6 +711,7 @@ async def start_session(session_id: int, request: dict, db: AsyncSession = Depen
     if not clinic_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="clinic_id is required")
     await _update_session_slot(clinic_id, session_id, db, {"is_open": True, "status_override": "ongoing"}, "open")
+    await publish_queue_event(clinic_id, "session_started", {"session_id": session_id})
     return {"success": True, "clinic_id": clinic_id, "session_id": session_id, "status": "Ongoing"}
 
 
@@ -584,4 +721,5 @@ async def close_session(session_id: int, request: dict, db: AsyncSession = Depen
     if not clinic_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="clinic_id is required")
     await _update_session_slot(clinic_id, session_id, db, {"is_open": False, "status_override": "closed"}, "close")
+    await publish_queue_event(clinic_id, "session_closed", {"session_id": session_id})
     return {"success": True, "clinic_id": clinic_id, "session_id": session_id, "status": "Closed"}

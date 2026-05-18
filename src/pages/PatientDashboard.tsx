@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePatient } from "@/context/PatientContext";
 import {
@@ -7,6 +7,7 @@ import {
   Star,
   User,
 } from "lucide-react";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 type Appointment = {
   id: number;
@@ -20,6 +21,13 @@ type Appointment = {
   session_name?: string;
   session_time?: string;
   address?: string;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  estimated_wait_minutes?: number | null;
+  earliest_eta?: string | null;
+  latest_eta?: string | null;
+  active_delay_minutes?: number | null;
+  session_status?: string | null;
 };
 
 const PatientDashboard = () => {
@@ -27,6 +35,26 @@ const PatientDashboard = () => {
   const { profile } = usePatient();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [patientEmail, setPatientEmail] = useState("");
+  const realtimeClinicId = appointments[0]?.clinic_id || null;
+
+  const fetchAppointments = useCallback(async (patientEmail: string) => {
+    try {
+      const response = await fetch(`/api/auth/patient/appointments?email=${encodeURIComponent(patientEmail)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setAppointments(data.appointments || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch appointments:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useQueueRealtime(realtimeClinicId, () => {
+    if (patientEmail) void fetchAppointments(patientEmail);
+  });
 
   useEffect(() => {
     const userStr = localStorage.getItem("user");
@@ -34,9 +62,11 @@ const PatientDashboard = () => {
       try {
         const user = JSON.parse(userStr);
         if (user.email) {
+          setPatientEmail(user.email);
           fetchAppointments(user.email);
         } else if (typeof userStr === 'string' && userStr.includes('@')) {
           // Handle case where user is stored as plain email string
+          setPatientEmail(userStr);
           fetchAppointments(userStr);
         } else {
           setLoading(false);
@@ -51,21 +81,13 @@ const PatientDashboard = () => {
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [fetchAppointments]);
 
-  const fetchAppointments = async (patientEmail: string) => {
-    try {
-      const response = await fetch(`/api/auth/patient/appointments?email=${encodeURIComponent(patientEmail)}`);
-      if (response.ok) {
-        const data = await response.json();
-        setAppointments(data.appointments || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch appointments:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!patientEmail) return;
+    const timer = window.setInterval(() => void fetchAppointments(patientEmail), 30000);
+    return () => window.clearInterval(timer);
+  }, [fetchAppointments, patientEmail]);
 
   const handleAppointmentClick = (apt: Appointment) => {
     navigate("/confirmation", {
@@ -79,6 +101,11 @@ const PatientDashboard = () => {
         sessionTime: apt.session_time,
         sessionId: apt.session_id,
         address: apt.address || "",
+        consultation_window: apt.consultation_window,
+        estimated_window_text: apt.estimated_window_text,
+        estimated_wait_minutes: apt.estimated_wait_minutes,
+        earliest_eta: apt.earliest_eta,
+        latest_eta: apt.latest_eta,
       },
     });
   };
@@ -135,12 +162,27 @@ const PatientDashboard = () => {
                   sessionTime: appointments[0].session_time,
                   sessionId: appointments[0].session_id,
                   address: appointments[0].address || "",
+                  consultation_window: appointments[0].consultation_window,
+                  estimated_window_text: appointments[0].estimated_window_text,
+                  estimated_wait_minutes: appointments[0].estimated_wait_minutes,
+                  earliest_eta: appointments[0].earliest_eta,
+                  latest_eta: appointments[0].latest_eta,
                 }}
                 className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
               >
                 <Hash className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
                 <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Appointment</p>
                 <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">{appointments[0].appointment_token}</p>
+                {(appointments[0].consultation_window || appointments[0].estimated_window_text) && (
+                  <p className="mt-1 text-[11px] font-semibold leading-tight text-white/80">
+                    {appointments[0].consultation_window || appointments[0].estimated_window_text}
+                  </p>
+                )}
+                {appointments[0].active_delay_minutes ? (
+                  <p className="mt-1 text-[11px] font-semibold leading-tight text-[#ffd999]">
+                    Delay {appointments[0].active_delay_minutes} min
+                  </p>
+                ) : null}
               </Link>
             ) : (
               <Link

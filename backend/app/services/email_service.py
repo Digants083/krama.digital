@@ -860,6 +860,9 @@ def send_patient_delay_email(
     delay: str,
     session_name: Optional[str] = None,
     token_number: Optional[str] = None,
+    old_time: Optional[str] = None,
+    updated_time: Optional[str] = None,
+    estimated_consultation_time: Optional[str] = None,
 ) -> bool:
     """Send a session-specific delay notice to one patient."""
     try:
@@ -873,12 +876,19 @@ def send_patient_delay_email(
         safe_delay = delay or "a short while"
         safe_session = session_name or "your session"
         safe_token = token_number or "your token"
-        subject = f"Session Delay Update - {safe_delay}"
+        safe_old_time = old_time or "Previous time"
+        safe_updated_time = updated_time or "Updated time"
+        safe_eta = estimated_consultation_time or safe_updated_time
+        subject = "Your appointment has been delayed"
 
         text_content = f"""
 Hello {safe_patient},
 
-Your appointment session at {safe_clinic} is delayed by {safe_delay}.
+Your appointment session at {safe_clinic} has been delayed.
+Previous time: {safe_old_time}
+Updated time: {safe_updated_time}
+Delay duration: {safe_delay}
+Updated estimated consultation time: {safe_eta}
 Session: {safe_session}
 Token: {safe_token}
 
@@ -891,8 +901,16 @@ Regards,
         <html><body style="font-family: Arial, sans-serif; color: #1f2937;">
           <h2>Session Delay Update</h2>
           <p>Hello {escape(str(safe_patient))},</p>
-          <p>Your appointment session at <strong>{escape(str(safe_clinic))}</strong> is delayed by <strong>{escape(str(safe_delay))}</strong>.</p>
-          <p><strong>Session:</strong> {escape(str(safe_session))}<br/><strong>Token:</strong> {escape(str(safe_token))}</p>
+          <p>Your appointment session at <strong>{escape(str(safe_clinic))}</strong> has been delayed.</p>
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;margin:14px 0;">
+            <p><strong>Clinic:</strong> {escape(str(safe_clinic))}</p>
+            <p><strong>Doctor/session:</strong> {escape(str(safe_session))}</p>
+            <p><strong>Previous time:</strong> <span style="text-decoration:line-through;color:#9a3412;">{escape(str(safe_old_time))}</span></p>
+            <p><strong>Updated time:</strong> {escape(str(safe_updated_time))}</p>
+            <p><strong>Delay duration:</strong> {escape(str(safe_delay))}</p>
+            <p><strong>Estimated consultation time:</strong> {escape(str(safe_eta))}</p>
+            <p><strong>Token:</strong> {escape(str(safe_token))}</p>
+          </div>
           <p>Please follow your live ticket for updated queue movement.</p>
         </body></html>
         """
@@ -915,6 +933,42 @@ Regards,
     except Exception as exc:
         logger.error("Failed to send patient delay email to %s: %s", to_email, exc)
         return False
+
+
+def send_delay_reminder_email(
+    to_email: str,
+    patient_name: str,
+    clinic_name: str,
+    session_name: str,
+    updated_time: str,
+    token_number: str,
+) -> bool:
+    """Send the 15-minute pre-session reminder for an active delayed session."""
+    subject = "Reminder: your delayed appointment starts soon"
+    safe_patient = patient_name or "Patient"
+    safe_clinic = clinic_name or "Clinic"
+    safe_session = session_name or "your session"
+    safe_time = updated_time or "soon"
+    safe_token = token_number or "your token"
+    text_content = f"""
+Hello {safe_patient},
+
+Reminder: your delayed appointment at {safe_clinic} is scheduled for {safe_time}.
+Session: {safe_session}
+Token: {safe_token}
+
+Please be ready for your turn.
+"""
+    html_content = f"""
+    <html><body style="font-family: Arial, sans-serif; color: #1f2937;">
+      <h2>Appointment Reminder</h2>
+      <p>Hello {escape(str(safe_patient))},</p>
+      <p>Your delayed appointment at <strong>{escape(str(safe_clinic))}</strong> is scheduled for <strong>{escape(str(safe_time))}</strong>.</p>
+      <p><strong>Session:</strong> {escape(str(safe_session))}<br/><strong>Token:</strong> {escape(str(safe_token))}</p>
+      <p>Please be ready for your turn.</p>
+    </body></html>
+    """
+    return email_service._send_email(to_email, subject, text_content.strip(), html_content.strip())
 
 def send_delay_alert(
     to_email: str,

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
 
+from app.config import admin_usernames
 from app.database.db import get_db
 from app.database.models import (
     PendingClinicRegistration, Clinic, Admin, ClinicImage
@@ -26,6 +27,10 @@ from app.services.email_service import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_SESSION_HOURS = 24
 admin_sessions: dict[str, dict[str, Union[str, datetime]]] = {}
+
+
+def valid_admin_usernames() -> set[str]:
+    return admin_usernames() or {"admin1", "admin2"}
 
 
 def generate_clinic_id():
@@ -121,17 +126,15 @@ async def send_admin_otp(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Send OTP to admin's email and confirmation email.
-    For admin1: sends to reddit098609@gmail.com and reddit098609@gmail.com
-    For admin2: sends to yashavanthb28@gmail.com and digitalkrama@gmail.com
+    Send OTP to the admin email and confirmation email configured in environment variables.
     """
     username = request.username
 
     # Check if username is valid
-    if username not in ["admin1", "admin2"]:
+    if username not in valid_admin_usernames():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid username. Use admin1 or admin2"
+            detail=f"Invalid username. Use one of: {', '.join(sorted(valid_admin_usernames()))}"
         )
 
     # Get admin from database

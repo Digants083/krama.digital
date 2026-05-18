@@ -10,6 +10,9 @@ export type ActiveAppointment = {
   status: "waiting" | "with_doctor" | "completed";
   estimatedWaitMins?: number;
   patientsAhead?: number;
+  consultationWindow?: string | null;
+  earliestEta?: string | null;
+  latestEta?: string | null;
 };
 
 export type VisitEntry = {
@@ -53,7 +56,9 @@ function loadJson<T>(key: string, fallback: T): T {
 function saveJson(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch (_) {}
+  } catch {
+    // Ignore storage failures in private browsing or restricted environments.
+  }
 }
 
 type PatientContextType = {

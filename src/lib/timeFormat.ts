@@ -50,3 +50,21 @@ export const formatDelayLabel = (delayMinutes?: number | null) => {
   if (minutes > 60 && minutes % 60 === 0) return `${minutes / 60} hours`;
   return `${minutes} min`;
 };
+
+export const formatCountdown = (seconds?: number | null) => {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+};
+
+export const secondsUntil = (isoDate?: string | null) => {
+  if (!isoDate) return 0;
+  const target = new Date(isoDate).getTime();
+  if (Number.isNaN(target)) return 0;
+  return Math.max(0, Math.floor((target - Date.now()) / 1000));
+};

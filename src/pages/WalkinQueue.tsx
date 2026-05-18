@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 // Types
 interface ClinicInfo {
@@ -26,6 +27,11 @@ const WalkinQueue = () => {
     token_label: string;
     position: number;
     patient_name: string;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
+    estimated_wait_minutes?: number | null;
+    active_delay_minutes?: number | null;
+    session_status?: string | null;
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -50,6 +56,30 @@ const WalkinQueue = () => {
       })
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
+
+  const refreshTokenResult = useCallback(async () => {
+    if (!tokenResult || !phone) return;
+    try {
+      const response = await fetch(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const updated = (data.appointments || []).find((apt: any) => apt.token_label === tokenResult.token_label);
+      if (!updated) return;
+      setTokenResult((prev) => prev ? {
+        ...prev,
+        position: Number(String(updated.position || "").split("/")[0]) || prev.position,
+        consultation_window: updated.consultation_window,
+        estimated_window_text: updated.estimated_window_text,
+        estimated_wait_minutes: updated.estimated_wait_minutes,
+        active_delay_minutes: updated.active_delay_minutes,
+        session_status: updated.session_status,
+      } : prev);
+    } catch (error) {
+      console.error("Failed to refresh token timing:", error);
+    }
+  }, [phone, tokenResult]);
+
+  useQueueRealtime(step === "success" ? clinicInfo?.id : null, () => void refreshTokenResult());
 
   // Validation
   const phoneRegex = /^[6-9]\d{9}$/;
@@ -85,6 +115,11 @@ const WalkinQueue = () => {
         token_label: data.token_label,
         position: data.position,
         patient_name: data.patient_name,
+        consultation_window: data.consultation_window,
+        estimated_window_text: data.estimated_window_text,
+        estimated_wait_minutes: data.estimated_wait_minutes,
+        active_delay_minutes: data.active_delay_minutes,
+        session_status: data.session_status,
       });
       setStep("success");
     } catch (err: unknown) {
@@ -156,6 +191,17 @@ const WalkinQueue = () => {
           <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-[#0F172A] mb-6">
             <span className="text-gray-500">Patients ahead of you: </span>
             <span className="font-semibold">{Math.max(0, tokenResult.position - 1)}</span>
+          </div>
+
+          <div className="mb-6 rounded-xl border border-[#00555A]/10 bg-[#00555A]/5 px-4 py-4 text-left">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Estimated Consultation Window</p>
+            <p className="mt-1 text-lg font-bold text-[#0F172A]">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
+            {tokenResult.estimated_wait_minutes != null && (
+              <p className="mt-1 text-xs text-gray-500">Estimated wait {tokenResult.estimated_wait_minutes} min</p>
+            )}
+            {tokenResult.active_delay_minutes ? (
+              <p className="mt-1 text-xs font-semibold text-orange-700">Doctor delay active: {tokenResult.active_delay_minutes} min</p>
+            ) : null}
           </div>
 
           <p className="text-xs text-gray-400 mb-4">

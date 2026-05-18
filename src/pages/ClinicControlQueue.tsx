@@ -3,13 +3,17 @@ import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight } from "lucide-react";
-import { formatDelayedStartTime, formatDelayLabel, formatTimeRange } from "@/lib/timeFormat";
+import { formatCountdown, formatDelayedStartTime, formatDelayLabel, formatTimeRange, secondsUntil } from "@/lib/timeFormat";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 interface TimeSlot {
   slot_name: string;
   time_range: number[];
   is_open: boolean;
   delay_minutes?: number;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
 }
 
 const SERVE_UNLOCK_LEAD_MINUTES = 5;
@@ -52,12 +56,18 @@ const ClinicControlQueue = () => {
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [pushingToken, setPushingToken] = useState<string | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   useEffect(() => {
     if (!message) return;
     const timer = setTimeout(() => setMessage(null), 5000);
     return () => clearTimeout(timer);
   }, [message]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const clinicStr = localStorage.getItem("clinic_id");
@@ -139,6 +149,13 @@ const ClinicControlQueue = () => {
 
     return () => clearInterval(interval);
   }, [clinicId, isClinicActive]);
+
+  useQueueRealtime(clinicId, () => {
+    fetchTimeSlots();
+    if (clinicId) {
+      fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
+    }
+  });
 
   const fetchTimeSlots = async () => {
     setLoadingSlots(true);
@@ -584,6 +601,7 @@ const ClinicControlQueue = () => {
                     const isSlotClosed = slotStatus[originalIndex] === "close";
                     const isExpired = isSlotExpired(slot);
                     const delayLabel = formatDelayLabel(slot.delay_minutes);
+                    const delayRemaining = secondsUntil(slot.delay_ends_at);
                     return (
                       <button
                         type="button"
@@ -604,12 +622,19 @@ const ClinicControlQueue = () => {
                           <div>
                             <h3 className="font-semibold text-slate-800">{slot.slot_name.replace('Time ', 'Session ')}</h3>
                             <p className="text-sm text-slate-500 font-medium">
-                              {formatTimeRange(slot.time_range)}
+                              {delayLabel && slot.delay_original_start_time && slot.delay_updated_start_time ? (
+                                <>
+                                  <span className="line-through decoration-red-500/70 decoration-2 text-orange-700">{slot.delay_original_start_time}</span>
+                                  <span className="px-1 text-orange-700">-&gt;</span>
+                                  <span className="text-orange-700">{slot.delay_updated_start_time}</span>
+                                </>
+                              ) : formatTimeRange(slot.time_range)}
                             </p>
                             {delayLabel && !isExpired && (
-                              <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700">
+                              <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700 transition-all duration-300" data-tick={nowTick}>
                                 <p>Delay: {delayLabel}</p>
-                                <p>New time: {formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</p>
+                                <p>New time: {slot.delay_updated_start_time || formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</p>
+                                {delayRemaining > 0 && <p>Opening in {formatCountdown(delayRemaining)}</p>}
                               </div>
                             )}
                           </div>
@@ -802,6 +827,11 @@ const ClinicControlQueue = () => {
                                 <p className="truncate text-[11px] text-slate-400">{p.patient_email}</p>
                               )}
                             </>
+                          )}
+                          {(p.consultation_window || p.estimated_window_text) && (
+                            <p className="truncate text-[11px] font-semibold text-[#00555A]">
+                              Window {p.consultation_window || p.estimated_window_text}
+                            </p>
                           )}
                         </div>
                       </div>

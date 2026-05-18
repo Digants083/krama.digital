@@ -4,7 +4,8 @@ import { ArrowLeft, ArrowRightCircle, Clock, Megaphone, RefreshCw, Users } from 
 import { Button } from "@/components/ui/button";
 import { useQueue } from "@/context/QueueContext";
 import { apiUrl } from "@/lib/api";
-import { formatDelayedStartTime, formatDelayLabel } from "@/lib/timeFormat";
+import { formatCountdown, formatDelayedStartTime, formatDelayLabel } from "@/lib/timeFormat";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 function formatElapsed(seconds: number) {
   const mins = Math.floor(seconds / 60);
@@ -60,6 +61,12 @@ interface DoctorSessionSlot {
   waiting_count: number;
   completed_count: number;
   delay_minutes: number;
+  delay_started_at?: string | null;
+  delay_ends_at?: string | null;
+  delay_remaining_seconds?: number;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
+  is_delay_active?: boolean;
   is_active: boolean;
 }
 
@@ -78,6 +85,8 @@ interface QueueDisplayState {
     blood_group?: string;
     doctor_delay?: string | null;
     estimated_wait_minutes?: number | null;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
     source: "online" | "desk" | "walkin" | "skipped";
     clinic_id: string;
     appointment_id?: number;
@@ -95,6 +104,8 @@ interface QueueDisplayState {
     blood_group?: string;
     doctor_delay?: string | null;
     estimated_wait_minutes?: number | null;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
     appointmentId?: number;
     clinicId?: string;
     source?: "online" | "desk" | "walkin" | "skipped";
@@ -192,6 +203,8 @@ function SessionStatusBadge({ status }: { status: string }) {
 
 const SessionCard = memo(function SessionCard({ session, selected, onSelect }: { session: DoctorSessionSlot; selected: boolean; onSelect: (sessionId: number) => void }) {
   const delayLabel = formatDelayLabel(session.delay_minutes);
+  const originalStartTime = session.delay_original_start_time || (delayLabel ? formatDelayedStartTime(session.time_range, 0) : "");
+  const updatedStartTime = session.delay_updated_start_time || (delayLabel ? formatDelayedStartTime(session.time_range, session.delay_minutes) : "");
   return (
     <button
       type="button"
@@ -201,13 +214,15 @@ const SessionCard = memo(function SessionCard({ session, selected, onSelect }: {
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-xs font-bold text-[#202825] sm:text-sm">{session.session_name.replace("Time ", "Session ")}</p>
-          <p className="mt-0.5 truncate text-[11px] font-semibold text-[#58645f]">{session.time_label}</p>
-          {delayLabel && (
-            <div className="mt-1.5 rounded-lg bg-orange-50 px-2 py-1.5 text-[11px] font-semibold leading-tight text-orange-700">
-              <p>Delay: {delayLabel}</p>
-              <p>New time: {formatDelayedStartTime(session.time_range, session.delay_minutes)}</p>
-            </div>
-          )}
+          <p className="mt-0.5 truncate text-[11px] font-semibold text-[#58645f]">
+            {delayLabel && originalStartTime && updatedStartTime ? (
+              <>
+                <span className="text-orange-700 line-through decoration-red-500/70 decoration-2">{originalStartTime}</span>
+                <span className="px-1 text-orange-700">-&gt;</span>
+                <span className="text-orange-700">{updatedStartTime}</span>
+              </>
+            ) : session.time_label}
+          </p>
         </div>
         <SessionStatusBadge status={session.status} />
       </div>
@@ -266,6 +281,7 @@ export default function KramaDoctorDashboard() {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<DoctorSessionSlot[]>([]);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
@@ -275,6 +291,7 @@ export default function KramaDoctorDashboard() {
   const queueRequestRef = useRef(0);
   const queueCacheRef = useRef<Record<number, QueueDisplayState>>({});
   const sessionsAbortRef = useRef<AbortController | null>(null);
+  const delayClockRef = useRef<{ key: string; targetMs: number } | null>(null);
 
   useEffect(() => {
     const storedClinicId = localStorage.getItem("clinic_id") || "";
@@ -314,8 +331,32 @@ export default function KramaDoctorDashboard() {
     }
   }, [clinicId, fetchTodaySessions]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const activeSessionId = selectedSessionId ?? viewingSlotId ?? sessions.find((session) => session.is_active)?.session_id ?? sessions[0]?.session_id ?? null;
   const activeSession = sessions.find((session) => session.session_id === activeSessionId) || null;
+  const activeDelayKey = activeSession && activeSession.delay_minutes > 0
+    ? `${activeSession.session_id}:${activeSession.delay_version ?? 0}:${activeSession.delay_minutes}`
+    : "";
+  let activeDelayRemaining = 0;
+  if (activeSession && activeSession.delay_minutes > 0 && activeDelayKey) {
+    const incomingTarget = activeSession.delay_ends_at ? new Date(activeSession.delay_ends_at).getTime() : Number.NaN;
+    const fallbackTarget = nowTick + activeSession.delay_minutes * 60 * 1000;
+    const nextTarget = Number.isFinite(incomingTarget) ? incomingTarget : fallbackTarget;
+    if (!delayClockRef.current || delayClockRef.current.key !== activeDelayKey) {
+      delayClockRef.current = { key: activeDelayKey, targetMs: nextTarget };
+    } else if (Number.isFinite(nextTarget) && nextTarget < delayClockRef.current.targetMs) {
+      delayClockRef.current.targetMs = nextTarget;
+    }
+    activeDelayRemaining = Math.max(0, Math.floor((delayClockRef.current.targetMs - nowTick) / 1000));
+  } else {
+    delayClockRef.current = null;
+  }
+  const activeOriginalStartTime = activeSession?.delay_original_start_time || (activeSession?.delay_minutes ? formatDelayedStartTime(activeSession.time_range, 0) : "");
+  const activeUpdatedStartTime = activeSession?.delay_updated_start_time || (activeSession?.delay_minutes ? formatDelayedStartTime(activeSession.time_range, activeSession.delay_minutes) : "");
 
   const loadSessionQueue = useCallback(async (sessionId: number, showOverlay = true) => {
     if (!clinicId) return;
@@ -323,24 +364,38 @@ export default function KramaDoctorDashboard() {
     const requestId = ++queueRequestRef.current;
     if (showOverlay) setIsSessionSwitching(true);
 
-    const snapshot = await fetchQueueForClinic(clinicId, sessionId);
-    if (requestId !== queueRequestRef.current) return;
+    try {
+      const snapshot = await fetchQueueForClinic(clinicId, sessionId);
+      if (requestId !== queueRequestRef.current) return;
 
-    if (snapshot) {
-      const nextDisplayState: QueueDisplayState = {
-        queue: snapshot.queue,
-        currentServing: snapshot.currentServing,
-        completedCount: snapshot.completedCount,
-        skippedCount: snapshot.skippedCount,
-        totalToday: snapshot.totalToday,
-        viewingSlotId: snapshot.viewingSlotId,
-      };
-      queueCacheRef.current = { ...queueCacheRef.current, [sessionId]: nextDisplayState };
-      setDisplayQueueState(nextDisplayState);
+      if (snapshot) {
+        const nextDisplayState: QueueDisplayState = {
+          queue: snapshot.queue,
+          currentServing: snapshot.currentServing,
+          completedCount: snapshot.completedCount,
+          skippedCount: snapshot.skippedCount,
+          totalToday: snapshot.totalToday,
+          viewingSlotId: snapshot.viewingSlotId,
+        };
+        queueCacheRef.current = { ...queueCacheRef.current, [sessionId]: nextDisplayState };
+        setDisplayQueueState(nextDisplayState);
+      }
+    } catch (error) {
+      if (requestId === queueRequestRef.current) {
+        setMessage({ text: "Could not switch session. Showing the last queue view.", type: "error" });
+      }
+    } finally {
+      if (showOverlay && requestId === queueRequestRef.current) {
+        setIsSessionSwitching(false);
+      }
     }
-
-    if (showOverlay) setIsSessionSwitching(false);
   }, [clinicId, fetchQueueForClinic]);
+
+  useEffect(() => {
+    if (!isSessionSwitching) return;
+    const failsafe = window.setTimeout(() => setIsSessionSwitching(false), 3500);
+    return () => window.clearTimeout(failsafe);
+  }, [isSessionSwitching]);
 
   useEffect(() => {
     if (!clinicId || activeSessionId == null) return;
@@ -379,6 +434,22 @@ export default function KramaDoctorDashboard() {
 
     return () => window.clearInterval(interval);
   }, [clinicId, activeSessionId, fetchTodaySessions, loadSessionQueue]);
+
+  useQueueRealtime(clinicId, useCallback(() => {
+    if (!clinicId) return;
+    fetchTodaySessions(clinicId, true, false);
+    if (activeSessionId != null) {
+      loadSessionQueue(activeSessionId, false);
+    }
+  }, [activeSessionId, clinicId, fetchTodaySessions, loadSessionQueue]));
+
+  useEffect(() => {
+    if (!clinicId || !activeSession || activeSession.delay_minutes <= 0 || activeDelayRemaining > 0) return;
+    fetchTodaySessions(clinicId, true, false);
+    if (activeSessionId != null) {
+      loadSessionQueue(activeSessionId, false);
+    }
+  }, [activeDelayRemaining, activeSession, activeSessionId, clinicId, fetchTodaySessions, loadSessionQueue]);
 
   const displayQueue = displayQueueState?.queue ?? queue;
   const displayCurrentServing = displayQueueState?.currentServing ?? currentServing;
@@ -427,6 +498,8 @@ export default function KramaDoctorDashboard() {
         blood_group: displayCurrentServing.blood_group || "N/A",
         doctor_delay: displayCurrentServing.doctor_delay,
         estimated_wait_minutes: displayCurrentServing.estimated_wait_minutes,
+        consultation_window: displayCurrentServing.consultation_window,
+        estimated_window_text: displayCurrentServing.estimated_window_text,
         source: displayCurrentServing.source,
         status: "Serving",
       }
@@ -440,6 +513,8 @@ export default function KramaDoctorDashboard() {
           blood_group: selectedQueuePatient.blood_group || "N/A",
           doctor_delay: selectedQueuePatient.doctor_delay,
           estimated_wait_minutes: selectedQueuePatient.estimated_wait_minutes,
+          consultation_window: selectedQueuePatient.consultation_window,
+          estimated_window_text: selectedQueuePatient.estimated_window_text,
           source: selectedQueuePatient.source,
           status: "Waiting",
         }
@@ -504,7 +579,7 @@ export default function KramaDoctorDashboard() {
   const refreshQueue = useCallback(() => {
     if (clinicId) {
       fetchTodaySessions(clinicId, true, false);
-      if (activeSessionId != null) loadSessionQueue(activeSessionId, true);
+      if (activeSessionId != null) loadSessionQueue(activeSessionId, false);
     }
   }, [activeSessionId, clinicId, fetchTodaySessions, loadSessionQueue]);
 
@@ -596,22 +671,61 @@ export default function KramaDoctorDashboard() {
         throw new Error(error.detail || "Failed to announce delay");
       }
       const data = await response.json().catch(() => ({}));
-      const notified = data.notified_count || data.clinic_notified_count || 0;
+      const patientNotified = Number(data.patient_notified_count || 0);
       const savedDelayMinutes = Number(data.delay_minutes) || 0;
       if (activeSessionId != null && savedDelayMinutes > 0) {
         setSessions((current) => current.map((session) => (
           session.session_id === activeSessionId
-            ? { ...session, delay_minutes: savedDelayMinutes, status: "Delayed" }
+            ? {
+                ...session,
+                delay_minutes: savedDelayMinutes,
+                status: "Delayed",
+                delay_started_at: data.delay_started_at || session.delay_started_at,
+                delay_ends_at: data.delay_ends_at || session.delay_ends_at,
+                delay_original_start_time: data.delay_original_start_time || session.delay_original_start_time || formatDelayedStartTime(session.time_range, 0),
+                delay_updated_start_time: data.delay_updated_start_time || session.delay_updated_start_time || formatDelayedStartTime(session.time_range, savedDelayMinutes),
+                is_delay_active: true,
+              }
             : session
         )));
       }
-      setDelayNotice(notified > 0 ? `${data.delay || selectedDelay} delay active. ${notified} notification${notified === 1 ? "" : "s"} sent.` : `${data.delay || selectedDelay} delay saved. Notifications were not sent; check SMTP setup.`);
-      setMessage({ text: notified > 0 ? "Delay notification sent." : "Delay saved, but notification email was not sent.", type: notified > 0 ? "success" : "error" });
+      setDelayNotice(patientNotified > 0 ? `${data.delay || selectedDelay} delay active. Notifications sent to all waiting patients.` : `${data.delay || selectedDelay} delay active. No waiting patients needed notifications.`);
+      setMessage({ text: patientNotified > 0 ? "Notifications sent to all waiting patients." : "Delay saved. No waiting patients were in this queue.", type: "success" });
       setIsDelayOpen(false);
       refreshQueue();
     } catch (error) {
       setMessage({ text: error instanceof Error ? error.message : "Failed to announce delay", type: "error" });
     } finally {
+      setIsSendingDelay(false);
+    }
+  };
+
+  const cancelDelay = async () => {
+    if (!clinicId || activeSessionId == null) return;
+    try {
+      setIsSendingDelay(true);
+      setIsSessionSwitching(false);
+      setDelayNotice(null);
+      setIsDelayOpen(false);
+      setSessions((current) => current.map((session) => (
+        session.session_id === activeSessionId
+          ? { ...session, delay_minutes: 0, status: "Ongoing", delay_ends_at: null, delay_started_at: null, delay_original_start_time: null, delay_updated_start_time: null, is_delay_active: false }
+          : session
+      )));
+      const response = await fetch(apiUrl(`/api/sessions/${activeSessionId}/resume`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clinic_id: clinicId }),
+      });
+      if (!response.ok) throw new Error("Failed to cancel delay");
+      setMessage({ text: "Delay cancelled and queue restored.", type: "success" });
+      await fetchTodaySessions(clinicId, true, false);
+      refreshQueue();
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "Failed to cancel delay", type: "error" });
+      fetchTodaySessions(clinicId, true, false);
+    } finally {
+      setIsSessionSwitching(false);
       setIsSendingDelay(false);
     }
   };
@@ -651,7 +765,13 @@ export default function KramaDoctorDashboard() {
               >
                 <Megaphone className="mr-1.5 h-4 w-4 shrink-0 sm:mr-2" />
                 <span className="truncate sm:hidden">{activeDelay ? activeDelay : "Delay"}</span>
-                <span className="hidden sm:inline">{activeDelay ? `Delay active - ${activeDelay}` : "Announce Delay"}</span>
+                <span className="hidden sm:inline">
+                  {activeDelay
+                    ? activeDelayRemaining > 0
+                      ? `Delay lifts in ${formatCountdown(activeDelayRemaining)}`
+                      : "Delay active"
+                    : "Announce Delay"}
+                </span>
               </Button>
               {isDelayOpen && (
                 <div className="fixed inset-x-4 top-[92px] z-40 rounded-2xl border border-[#f59e0b] bg-[#fffbeb] p-4 shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+12px)] sm:w-[min(90vw,520px)] sm:p-5">
@@ -662,9 +782,27 @@ export default function KramaDoctorDashboard() {
                       {activeDelay && <p className="mt-1 text-xs text-[#92400e]">Live delay: {activeDelay}</p>}
                     </div>
                     <button type="button" onClick={() => setIsDelayOpen(false)} className="rounded-full border border-[#f59e0b]/70 px-3 py-1 text-xs font-semibold text-[#92400e] hover:bg-white">
-                      Cancel
+                      Close
                     </button>
                   </div>
+                  {activeDelay && (
+                    <div className="mb-4 rounded-xl border border-orange-200 bg-white/75 px-4 py-3 text-sm font-semibold text-[#92400e] transition-all duration-300">
+                      {activeOriginalStartTime && activeUpdatedStartTime && (
+                        <>
+                          <p>Original Time: <span className="line-through decoration-red-500/70 decoration-2">{activeOriginalStartTime}</span></p>
+                          <p>New Time: <span className="text-[#c2410c]">{activeUpdatedStartTime}</span></p>
+                        </>
+                      )}
+                      {activeDelayRemaining > 0 ? (
+                        <div className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-[#b91c1c]">
+                          <p className="text-xs uppercase tracking-wide text-[#c2410c]">Delay stopwatch</p>
+                          <p className="text-lg font-black">Delay lifts in {formatCountdown(activeDelayRemaining)}</p>
+                        </div>
+                      ) : (
+                        <p className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-[#b91c1c]">Delay timer is syncing from the backend.</p>
+                      )}
+                    </div>
+                  )}
                   <div className="mb-4 flex flex-wrap gap-2">
                     {delayOptions.map((option) => (
                       <button
@@ -678,8 +816,13 @@ export default function KramaDoctorDashboard() {
                     ))}
                   </div>
                   <Button onClick={announceDelay} disabled={isSendingDelay || !canAnnounceDelay} className="bg-green-600 hover:bg-green-700 text-white disabled:cursor-not-allowed disabled:bg-[#9ca3af]">
-                    {isSendingDelay ? "Sending clinic email..." : "Send delay email to clinic"}
+                    {isSendingDelay ? "Sending notifications..." : "Notify waiting patients"}
                   </Button>
+                  {activeDelay && (
+                    <Button onClick={cancelDelay} disabled={isSendingDelay} variant="outline" className="ml-2 border-red-300 text-red-700 hover:bg-red-50">
+                      Cancel delay
+                    </Button>
+                  )}
                   {delayNotice && <p className="mt-3 text-sm font-medium text-[#92400e]">{delayNotice}</p>}
                 </div>
               )}
@@ -776,6 +919,10 @@ export default function KramaDoctorDashboard() {
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Wait</p>
                           <p className="mt-1 text-sm font-bold text-[#202825]">{activePatient.estimated_wait_minutes != null ? `${activePatient.estimated_wait_minutes} min` : "N/A"}</p>
                         </div>
+                        <div className="col-span-2 rounded-xl bg-white/70 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Estimated consultation window</p>
+                          <p className="mt-1 text-sm font-bold text-[#202825]">{activePatient.consultation_window || activePatient.estimated_window_text || "N/A"}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -832,7 +979,11 @@ export default function KramaDoctorDashboard() {
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-[#202825]">{patient.name}</p>
                       <p className="truncate text-xs text-[#77756f]">{patient.phone || "No phone"} - Blood: {patient.blood_group || "N/A"}</p>
-                      {patient.estimated_wait_minutes != null && <p className="truncate text-xs text-[#77756f]">Est. wait {patient.estimated_wait_minutes} min</p>}
+                      {patient.consultation_window || patient.estimated_window_text ? (
+                        <p className="truncate text-xs font-semibold text-[#1a5c4a]">Window {patient.consultation_window || patient.estimated_window_text}</p>
+                      ) : patient.estimated_wait_minutes != null ? (
+                        <p className="truncate text-xs text-[#77756f]">Est. wait {patient.estimated_wait_minutes} min</p>
+                      ) : null}
                     </div>
                     <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
                       <SourceBadge source={patient.source} />

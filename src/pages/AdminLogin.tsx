@@ -5,6 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Shield, Mail, ArrowRight, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { ADMIN_CONFIRMATION_EMAIL_LABELS, ADMIN_EMAIL_LABELS } from "@/config/app";
+
+type LocationState = {
+  from?: {
+    pathname?: string;
+  };
+};
 
 const AdminLogin = () => {
   const navigate = useNavigate();
@@ -18,7 +25,9 @@ const AdminLogin = () => {
   const [sendingOtp, setSendingOtp] = useState(false);
 
   // Where to redirect after login (default to dashboard)
-  const from = (location.state as any)?.from?.pathname || "/admin/dashboard";
+  const from = (location.state as LocationState | null)?.from?.pathname || "/admin/dashboard";
+  const primaryEmailLabel = ADMIN_EMAIL_LABELS[username] || "configured admin inbox";
+  const confirmationEmailLabel = ADMIN_CONFIRMATION_EMAIL_LABELS[username] || "configured confirmation inbox";
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,17 +137,17 @@ const AdminLogin = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-background via-aqua/30 to-secondary flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
             <Shield className="w-8 h-8 text-primary" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900">Admin Login</h1>
-          <p className="text-slate-600 mt-2">Secure authentication with double OTP verification</p>
+          <h1 className="text-3xl font-bold text-foreground">Admin Login</h1>
+          <p className="text-muted-foreground mt-2">Secure authentication with double OTP verification</p>
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-8">
+        <div className="rounded-xl border border-primary/10 bg-white/90 p-8 shadow-[0_22px_70px_-38px_hsl(var(--primary))] backdrop-blur">
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
               {error}
@@ -157,7 +166,7 @@ const AdminLogin = () => {
                   onChange={(e) => setUsername(e.target.value)}
                   required
                 />
-                <p className="text-xs text-slate-500">Available usernames: admin1, admin2</p>
+                <p className="text-xs text-muted-foreground">Available usernames: admin1, admin2</p>
               </div>
 
               <Button type="submit" className="w-full" disabled={sendingOtp}>
@@ -180,9 +189,7 @@ const AdminLogin = () => {
                   className="text-center text-lg tracking-widest"
                   required
                 />
-                <p className="text-xs text-slate-500">
-                  {username === "admin1" ? "Sent to: diganths083@gmail.com" : "Sent to: yashavanthb28@gmail.com"}
-                </p>
+                <p className="text-xs text-muted-foreground">Sent to: {primaryEmailLabel}</p>
               </div>
 
               <div className="space-y-2">
@@ -198,7 +205,7 @@ const AdminLogin = () => {
                   className="text-center text-lg tracking-widest"
                   required
                 />
-                <p className="text-xs text-slate-500">Sent to: reddit098609@gmail.com</p>
+                <p className="text-xs text-muted-foreground">Sent to: {confirmationEmailLabel}</p>
               </div>
 
               <Button type="submit" className="w-full" disabled={loading}>

@@ -88,7 +88,18 @@ const BookAppointment = () => {
     return true;
   };
 
-  const navigateToConfirmation = (booking: { token: string; appointment_id?: number }) => {
+  const navigateToConfirmation = (booking: {
+    token: string;
+    appointment_id?: number;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
+    estimated_wait_minutes?: number | null;
+    earliest_eta?: string | null;
+    latest_eta?: string | null;
+    active_delay_minutes?: number | null;
+    queue_position?: number | null;
+    session_status?: string | null;
+  }) => {
     const delayLabel = formatDelayLabel(selectedTimeSlot?.delay_minutes);
     navigate("/confirmation", {
       state: {
@@ -104,6 +115,14 @@ const BookAppointment = () => {
         address: clinic.address,
         token: booking.token,
         appointmentId: booking.appointment_id,
+        consultation_window: booking.consultation_window,
+        estimated_window_text: booking.estimated_window_text,
+        estimated_wait_minutes: booking.estimated_wait_minutes,
+        earliest_eta: booking.earliest_eta,
+        latest_eta: booking.latest_eta,
+        active_delay_minutes: booking.active_delay_minutes,
+        queue_position: booking.queue_position,
+        session_status: booking.session_status,
       },
     });
   };
@@ -151,7 +170,18 @@ const BookAppointment = () => {
 
       if (response.ok) {
         const booking = await response.json();
-        navigateToConfirmation({ token: booking.token || booking.appointment_token || "T-1", appointment_id: booking.appointment_id });
+        navigateToConfirmation({
+          token: booking.token || booking.appointment_token || "T-1",
+          appointment_id: booking.appointment_id,
+          consultation_window: booking.consultation_window,
+          estimated_window_text: booking.estimated_window_text,
+          estimated_wait_minutes: booking.estimated_wait_minutes,
+          earliest_eta: booking.earliest_eta,
+          latest_eta: booking.latest_eta,
+          active_delay_minutes: booking.active_delay_minutes,
+          queue_position: booking.queue_position,
+          session_status: booking.session_status,
+        });
       } else {
         const errorData = await response.json().catch(() => ({}));
         console.error("Booking failed:", errorData);

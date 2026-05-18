@@ -2,7 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X, CheckCircle2, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatDelayedStartTime, formatDelayedTimeRange, formatDelayLabel, formatTimeRange } from "@/lib/timeFormat";
+import { formatCountdown, formatDelayedStartTime, formatDelayedTimeRange, formatDelayLabel, formatTimeRange, secondsUntil } from "@/lib/timeFormat";
 import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 
 interface Review {
@@ -39,6 +39,9 @@ interface ClinicSlot {
   is_expired?: boolean;
   display_status?: string;
   delay_minutes?: number;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
 }
 
 interface DisplayClinicSlot extends Omit<ClinicSlot, "is_open" | "is_expired" | "display_status"> {
@@ -70,6 +73,7 @@ const ClinicDetails = () => {
   const [selectedDate, setSelectedDate] = useState("");
   const [booking, setBooking] = useState(false);
   const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [timeSlots, setTimeSlots] = useState<DisplayClinicSlot[]>([]);
   const [userReactions, setUserReactions] = useState<{[key: number]: string}>({});
   const [patientId, setPatientId] = useState<string>("");
@@ -101,6 +105,11 @@ const ClinicDetails = () => {
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const fetchClinicData = async () => {
@@ -409,6 +418,14 @@ const ClinicDetails = () => {
             time: selectedTime,
             address: clinic.address,
             token: data.token,
+            consultation_window: data.consultation_window,
+            estimated_window_text: data.estimated_window_text,
+            estimated_wait_minutes: data.estimated_wait_minutes,
+            earliest_eta: data.earliest_eta,
+            latest_eta: data.latest_eta,
+            active_delay_minutes: data.active_delay_minutes,
+            queue_position: data.queue_position,
+            session_status: data.session_status,
             patient_name: requestData.patient_name,
             patient_phone: requestData.patient_phone,
             patient_email: requestData.patient_email
@@ -664,6 +681,7 @@ const ClinicDetails = () => {
                   const isSelected = selectedSlotId === slotId;
                   const isUnavailable = slot.is_expired || !slot.is_open;
                   const delayLabel = formatDelayLabel(slot.delay_minutes);
+                  const delayRemaining = secondsUntil(slot.delay_ends_at);
 
                   return (
                     <button
@@ -698,14 +716,21 @@ const ClinicDetails = () => {
                                 ? "text-white/85"
                                 : "text-muted-foreground"
                           }`}>
-                            {formatTimeRange(slot.time_range)}
+                            {delayLabel && slot.delay_original_start_time && slot.delay_updated_start_time ? (
+                              <>
+                                <span className="line-through decoration-red-500/70 decoration-2">{slot.delay_original_start_time}</span>
+                                {" -> "}
+                                {slot.delay_updated_start_time}
+                              </>
+                            ) : formatTimeRange(slot.time_range)}
                           </p>
                           {delayLabel && !slot.is_expired && (
                             <div className={`mt-2 rounded-lg px-3 py-2 text-xs font-semibold ${
                               isSelected ? "bg-white/15 text-white" : "bg-orange-50 text-orange-700"
-                            }`}>
+                            }`} data-tick={nowTick}>
                               <p>Delay: {delayLabel}</p>
-                              <p>New time: {formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</p>
+                              <p>New time: {slot.delay_updated_start_time || formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</p>
+                              {delayRemaining > 0 && <p>Opening in {formatCountdown(delayRemaining)}</p>}
                             </div>
                           )}
                         </div>

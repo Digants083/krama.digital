@@ -12,7 +12,7 @@ const validatePassword = (password: string) => ({
   uppercase: /[A-Z]/.test(password),
   lowercase: /[a-z]/.test(password),
   number: /[0-9]/.test(password),
-  special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
+  special: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password),
 });
 
 const Requirement = ({ met, label }: { met: boolean; label: string }) => (
