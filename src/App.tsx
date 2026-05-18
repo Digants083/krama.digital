@@ -5,6 +5,7 @@ import NoHeaderLayout from "./layouts/NoHeaderLayout";
 import { QueueProvider } from "./context/QueueContext";
 import { PatientProvider } from "./context/PatientContext";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
+import SeoManager from "./components/SeoManager";
 
 import Index from "./pages/Index";
 import PatientDashboard from "./pages/PatientDashboard";
@@ -39,19 +40,35 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminFeedbackPage from "./pages/AdminFeedbackPage";
 import FeedbackPage from "./pages/FeedbackPage";
 import AboutUs from "./pages/AboutUs";
+import FAQ from "./pages/FAQ";
 import YourDetails from "./pages/YourDetails";
 import NotFound from "./pages/NotFound";
+import SeoLandingPage from "./pages/SeoLandingPage";
 
 function App() {
   return (
     <QueueProvider>
       <PatientProvider>
         <BrowserRouter>
+          <SeoManager />
           <Routes>
             {/* Public Routes with Header */}
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
             <Route path="/about" element={<MainLayout><AboutUs /></MainLayout>} />
+            <Route path="/faq" element={<MainLayout><FAQ /></MainLayout>} />
             <Route path="/feedback" element={<MainLayout><FeedbackPage /></MainLayout>} />
+            <Route path="/find-clinics-near-me" element={<MainLayout><SeoLandingPage page="findClinics" /></MainLayout>} />
+            <Route path="/queue-management" element={<MainLayout><SeoLandingPage page="queueManagement" /></MainLayout>} />
+            <Route path="/control-queue" element={<MainLayout><SeoLandingPage page="controlQueue" /></MainLayout>} />
+            <Route path="/digital-token-system" element={<MainLayout><SeoLandingPage page="digitalToken" /></MainLayout>} />
+            <Route path="/manage-queue-in-clinic" element={<MainLayout><SeoLandingPage page="manageClinicQueue" /></MainLayout>} />
+            <Route path="/reduce-patient-waiting-time" element={<MainLayout><SeoLandingPage page="reduceWaitingTime" /></MainLayout>} />
+            <Route path="/hospital-queue-management" element={<MainLayout><SeoLandingPage page="hospitalQueue" /></MainLayout>} />
+            <Route path="/opd-queue-management" element={<MainLayout><SeoLandingPage page="opdQueue" /></MainLayout>} />
+            <Route path="/clinic-waiting-room-management" element={<MainLayout><SeoLandingPage page="waitingRoom" /></MainLayout>} />
+            <Route path="/qr-code-queue-system" element={<MainLayout><SeoLandingPage page="qrQueue" /></MainLayout>} />
+            <Route path="/doctor-appointment-system" element={<MainLayout><SeoLandingPage page="doctorAppointment" /></MainLayout>} />
+            <Route path="/walk-in-patient-management" element={<MainLayout><SeoLandingPage page="walkInPatient" /></MainLayout>} />
             <Route path="/your-token" element={<MainLayout><YourDetails /></MainLayout>} />
             <Route path="/your-details" element={<Navigate to="/your-token" replace />} />
 
