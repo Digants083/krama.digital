@@ -47,6 +47,74 @@ const steps = [
   { icon: Bell, title: "Arrive on time", desc: "Come in when your turn is close." },
 ];
 
+const solutionGroups = [
+  {
+    title: "Clinic operations",
+    terms: [
+      "clinic management software",
+      "clinic management system",
+      "clinic administration software",
+      "clinic automation software",
+      "smart clinic software",
+      "software for clinics",
+      "software for small clinics",
+      "clinic workflow automation",
+    ],
+  },
+  {
+    title: "Appointments and patients",
+    terms: [
+      "doctor appointment software",
+      "appointment booking system",
+      "online doctor appointment system",
+      "doctor scheduling software",
+      "clinic appointment management",
+      "patient management software",
+      "patient registration software",
+      "doctor patient management system",
+    ],
+  },
+  {
+    title: "Queues and OPD",
+    terms: [
+      "queue management system for clinics",
+      "patient queue management software",
+      "clinic token system",
+      "hospital queue management system",
+      "OPD management software",
+      "outpatient management system",
+      "reception management software for clinics",
+      "doctor dashboard software",
+    ],
+  },
+  {
+    title: "Healthcare software",
+    terms: [
+      "healthcare management software",
+      "digital healthcare platform",
+      "medical practice management software",
+      "medical office software",
+      "clinic software India",
+      "clinic software Bangalore",
+      "best clinic software in India",
+      "cloud based clinic management software",
+    ],
+  },
+  {
+    title: "Admin and records",
+    terms: [
+      "medical records management system",
+      "electronic medical records software",
+      "EMR software",
+      "EHR software",
+      "digital prescription software",
+      "prescription management system",
+      "medical billing software",
+      "clinic CRM software",
+    ],
+  },
+];
+
 const Index = () => {
   return (
     <div className="min-h-screen overflow-hidden bg-[linear-gradient(180deg,hsl(var(--secondary))_0%,hsl(var(--background))_28%,hsl(var(--background))_100%)]">
@@ -214,14 +282,72 @@ const Index = () => {
         </div>
       </section>
 
-      <section className="section-container px-4 py-14 md:px-8 md:py-18">
-        <div className="grid gap-6 rounded-2xl border border-primary/15 bg-[linear-gradient(135deg,hsl(var(--card))_0%,hsl(var(--secondary))_100%)] p-6 shadow-[0_24px_70px_-44px_rgba(18,80,70,0.62)] md:grid-cols-[0.9fr_1.1fr] md:p-8">
-          <div>
+      <section className="section-container px-4 py-16 md:px-8 md:py-20">
+        <div className="rounded-[36px] bg-foreground px-8 py-12 text-center text-white shadow-[0_28px_80px_-40px_rgba(10,30,26,0.9)] md:px-12">
+          <p className="text-sm uppercase tracking-[0.3em] text-white/55">Ready to use Krama?</p>
+          <h2 className="mx-auto mt-4 max-w-2xl font-display text-3xl font-bold leading-tight md:text-4xl">
+            Keep your same workflow and give the product a cleaner first impression.
+          </h2>
+
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Link to="/patient/login">
+              <Button size="lg" variant="secondary">
+                Patient Login
+              </Button>
+            </Link>
+            <Link to="/clinic/login">
+              <Button
+                size="lg"
+                variant="outline"
+                className="border-white/25 bg-white/5 text-white hover:bg-white/10"
+              >
+                Clinic Login
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white/60 py-16 md:py-20">
+        <div className="section-container px-4 md:px-8">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-primary">Clinic software platform</p>
+            <h2 className="mt-4 font-display text-3xl font-bold leading-tight text-foreground md:text-4xl">
+              Built for appointment booking, patient queues, and everyday clinic management.
+            </h2>
+            <p className="mt-4 text-sm leading-7 text-muted-foreground md:text-base">
+              Krama focuses on the daily jobs clinics search for most: clinic management software, doctor appointment
+              scheduling, patient registration, OPD queue management, digital token systems, and live reception workflows
+              for clinics in India. It is strongest for appointment and queue operations, and can sit alongside EMR, EHR,
+              billing, inventory, or prescription tools as clinics expand their digital setup.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
+            {solutionGroups.map((group) => (
+              <article key={group.title} className="rounded-[24px] border border-border/70 bg-background/80 p-5 shadow-sm">
+                <h3 className="font-semibold text-foreground">{group.title}</h3>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {group.terms.map((term) => (
+                    <span key={term} className="rounded-full bg-primary/8 px-3 py-1 text-xs font-medium text-primary">
+                      {term}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section-container px-4 pb-16 md:px-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-6 text-center">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Get started</p>
             <h2 className="mt-3 font-display text-3xl font-bold leading-tight text-foreground">
               Choose the side of Krama you need today.
             </h2>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
               Clinics can register their setup. Patients can create an account and start booking appointments.
             </p>
           </div>

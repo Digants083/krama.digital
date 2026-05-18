@@ -164,17 +164,26 @@ async def send_admin_otp(
 
     await db.commit()
 
+    primary_email_sent = False
+    confirmation_email_sent = False
+
     # Send OTP to admin's email
     try:
-        send_admin_otp_email(admin.email, otp_code, username)
+        primary_email_sent = send_admin_otp_email(admin.email, otp_code, username)
     except Exception as e:
         print(f"Failed to send OTP to {admin.email}: {str(e)}")
 
     # Send confirmation OTP to confirmation email
     try:
-        send_admin_otp_email(admin.confirmation_email, confirmation_otp_code, f"{username} (confirmation)")
+        confirmation_email_sent = send_admin_otp_email(admin.confirmation_email, confirmation_otp_code, f"{username} (confirmation)")
     except Exception as e:
         print(f"Failed to send confirmation OTP to {admin.confirmation_email}: {str(e)}")
+
+    if not primary_email_sent or not confirmation_email_sent:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send one or more OTP emails. Please check SMTP settings and try again."
+        )
 
     return {
         "success": True,

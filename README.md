@@ -29,7 +29,7 @@ A modern healthcare queue management system that helps clinics manage patient fl
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/tejasdn24/Krama.git
+
    cd Krama
    ```
 
