@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MapPin, Clock, Building2, UserCheck, Users, Timer } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
+import { formatIsoClock } from "@/lib/timeFormat";
 
 interface QueuePosition {
   patients_ahead: number;
   estimated_wait_minutes: number;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
@@ -98,6 +100,7 @@ const TrackQueue = () => {
   const patientsAhead = queuePosition?.patients_ahead ?? 0;
   const estimatedWait = queuePosition?.estimated_wait_minutes ?? 0;
   const consultationWindow = queuePosition?.consultation_window || queuePosition?.estimated_window_text || "";
+  const predictedConsultationTime = formatIsoClock(queuePosition?.predicted_eta);
   const activeDelayMinutes = queuePosition?.active_delay_minutes || 0;
   const yourPosition = queuePosition?.your_position ?? 1;
   const totalInQueue = queuePosition?.total_in_queue ?? 1;
@@ -139,6 +142,9 @@ const TrackQueue = () => {
           <div className="rounded-xl border border-[#00555A]/10 bg-[#00555A]/5 p-4">
             <p className="text-xs uppercase tracking-wide text-gray-500">Estimated Consultation Window</p>
             <p className="mt-1 text-lg font-bold text-[#0F172A]">{consultationWindow || "Calculating..."}</p>
+            {predictedConsultationTime && (
+              <p className="mt-1 text-xs font-semibold text-[#00555A]">Predicted Consultation Time: {predictedConsultationTime}</p>
+            )}
             <p className="mt-1 text-xs font-semibold text-gray-500">Status: {queuePosition?.session_status || "active"}</p>
           </div>
 

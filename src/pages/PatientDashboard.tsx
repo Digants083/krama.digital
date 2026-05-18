@@ -25,6 +25,7 @@ type Appointment = {
   estimated_window_text?: string | null;
   estimated_wait_minutes?: number | null;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
   active_delay_minutes?: number | null;
   session_status?: string | null;
@@ -105,6 +106,7 @@ const PatientDashboard = () => {
         estimated_window_text: apt.estimated_window_text,
         estimated_wait_minutes: apt.estimated_wait_minutes,
         earliest_eta: apt.earliest_eta,
+        predicted_eta: apt.predicted_eta,
         latest_eta: apt.latest_eta,
       },
     });
@@ -166,6 +168,7 @@ const PatientDashboard = () => {
                   estimated_window_text: appointments[0].estimated_window_text,
                   estimated_wait_minutes: appointments[0].estimated_wait_minutes,
                   earliest_eta: appointments[0].earliest_eta,
+                  predicted_eta: appointments[0].predicted_eta,
                   latest_eta: appointments[0].latest_eta,
                 }}
                 className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"

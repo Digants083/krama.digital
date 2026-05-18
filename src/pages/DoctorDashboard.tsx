@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRightCircle, Clock, Megaphone, RefreshCw, Users } from 
 import { Button } from "@/components/ui/button";
 import { useQueue } from "@/context/QueueContext";
 import { apiUrl } from "@/lib/api";
-import { formatCountdown, formatDelayedStartTime, formatDelayLabel } from "@/lib/timeFormat";
+import { formatCountdown, formatDelayedStartTime, formatDelayLabel, formatIsoClock } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 function formatElapsed(seconds: number) {
@@ -85,6 +85,8 @@ interface QueueDisplayState {
     blood_group?: string;
     doctor_delay?: string | null;
     estimated_wait_minutes?: number | null;
+    predicted_eta?: string | null;
+    rolling_average_minutes?: number | null;
     consultation_window?: string | null;
     estimated_window_text?: string | null;
     source: "online" | "desk" | "walkin" | "skipped";
@@ -104,6 +106,8 @@ interface QueueDisplayState {
     blood_group?: string;
     doctor_delay?: string | null;
     estimated_wait_minutes?: number | null;
+    predicted_eta?: string | null;
+    rolling_average_minutes?: number | null;
     consultation_window?: string | null;
     estimated_window_text?: string | null;
     appointmentId?: number;
@@ -498,6 +502,8 @@ export default function KramaDoctorDashboard() {
         blood_group: displayCurrentServing.blood_group || "N/A",
         doctor_delay: displayCurrentServing.doctor_delay,
         estimated_wait_minutes: displayCurrentServing.estimated_wait_minutes,
+        predicted_eta: displayCurrentServing.predicted_eta,
+        rolling_average_minutes: displayCurrentServing.rolling_average_minutes,
         consultation_window: displayCurrentServing.consultation_window,
         estimated_window_text: displayCurrentServing.estimated_window_text,
         source: displayCurrentServing.source,
@@ -513,6 +519,8 @@ export default function KramaDoctorDashboard() {
           blood_group: selectedQueuePatient.blood_group || "N/A",
           doctor_delay: selectedQueuePatient.doctor_delay,
           estimated_wait_minutes: selectedQueuePatient.estimated_wait_minutes,
+          predicted_eta: selectedQueuePatient.predicted_eta,
+          rolling_average_minutes: selectedQueuePatient.rolling_average_minutes,
           consultation_window: selectedQueuePatient.consultation_window,
           estimated_window_text: selectedQueuePatient.estimated_window_text,
           source: selectedQueuePatient.source,
@@ -922,6 +930,9 @@ export default function KramaDoctorDashboard() {
                         <div className="col-span-2 rounded-xl bg-white/70 p-3">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Estimated consultation window</p>
                           <p className="mt-1 text-sm font-bold text-[#202825]">{activePatient.consultation_window || activePatient.estimated_window_text || "N/A"}</p>
+                          {activePatient.predicted_eta && (
+                            <p className="mt-1 text-xs font-semibold text-[#1a5c4a]">Predicted Consultation Time: {formatIsoClock(activePatient.predicted_eta)}</p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -984,6 +995,9 @@ export default function KramaDoctorDashboard() {
                       ) : patient.estimated_wait_minutes != null ? (
                         <p className="truncate text-xs text-[#77756f]">Est. wait {patient.estimated_wait_minutes} min</p>
                       ) : null}
+                      {patient.predicted_eta && (
+                        <p className="truncate text-xs text-[#77756f]">Predicted {formatIsoClock(patient.predicted_eta)}</p>
+                      )}
                     </div>
                     <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
                       <SourceBadge source={patient.source} />

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock, Building2, UserCheck, Search } from "lucide-react";
 import { apiUrl } from "@/lib/api";
-import { formatCountdown, secondsUntil } from "@/lib/timeFormat";
+import { formatCountdown, formatIsoClock, secondsUntil } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 interface AppointmentDetails {
@@ -17,6 +17,7 @@ interface AppointmentDetails {
   patients_ahead: number;
   estimated_wait_minutes: number;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
@@ -45,6 +46,7 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
   const patientsAhead = appointment.patients_ahead ?? 0;
   const estimatedWait = appointment.estimated_wait_minutes ?? 0;
   const consultationWindow = appointment.consultation_window || appointment.estimated_window_text || "";
+  const predictedConsultationTime = formatIsoClock(appointment.predicted_eta);
   const activeDelayMinutes = appointment.active_delay_minutes || appointment.delay_minutes || 0;
   const nowServing = appointment.now_serving_token || appointment.token_label;
   const positionText = appointment.position ? appointment.position.replace("/", " / ") : "1 / 1";
@@ -71,6 +73,9 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
         <div className="mt-4 rounded-[24px] bg-white/10 p-5">
           <p className="text-sm text-primary-foreground/70">Estimated Consultation Window</p>
           <p className="mt-3 text-2xl font-bold leading-tight">{consultationWindow || "Calculating..."}</p>
+          {predictedConsultationTime && (
+            <p className="mt-2 text-sm font-semibold text-primary-foreground/80">Predicted Consultation Time: {predictedConsultationTime}</p>
+          )}
         </div>
 
         <div className={`mt-4 grid gap-4 ${appointment.doctor_delay || activeDelayMinutes > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
@@ -114,6 +119,9 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
         <div className="rounded-[20px] border border-primary/10 bg-primary/5 p-4">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
           <p className="mt-1 text-lg font-bold text-foreground">{consultationWindow || "Calculating..."}</p>
+          {predictedConsultationTime && (
+            <p className="mt-1 text-sm font-semibold text-primary">Predicted Consultation Time: {predictedConsultationTime}</p>
+          )}
           <p className="mt-1 text-sm text-muted-foreground">Status: {appointment.session_status || appointment.status}</p>
         </div>
       </div>

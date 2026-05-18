@@ -211,8 +211,12 @@ async def scheduled_auto_finish_unserved():
                                 date=appointment.date,
                                 time=getattr(appointment, 'time', "auto-finished"),
                                 slot_id=appointment.slot_id,
+                                session_id=getattr(appointment, 'session_id', None) or getattr(appointment, 'slot_id', None),
+                                doctor_id=getattr(appointment, 'doctor_id', None),
+                                serving_started_at=getattr(appointment, 'serving_started_at', None),
                                 served_at=served_at,
                                 finished_at=finished_at,
+                                completed_at=finished_at,
                                 status="auto_finished",
                                 wait_time_minutes=wait_time,
                                 outcome="not_served",
@@ -364,10 +368,19 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS slot_id INTEGER"
         )
+        await safe_exec("ALTER TABLE completed_appointments ADD COLUMN IF NOT EXISTS doctor_id VARCHAR")
         await safe_exec("ALTER TABLE completed_appointments ADD COLUMN IF NOT EXISTS session_id INTEGER")
         await safe_exec(
             "ALTER TABLE completed_appointments "
+            "ADD COLUMN IF NOT EXISTS serving_started_at TIMESTAMP"
+        )
+        await safe_exec(
+            "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS finished_at TIMESTAMP"
+        )
+        await safe_exec(
+            "ALTER TABLE completed_appointments "
+            "ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"
         )
         await safe_exec(
             "ALTER TABLE completed_appointments "
@@ -383,6 +396,10 @@ async def lifespan(app: FastAPI):
         )
         await safe_exec(
             "ALTER TABLE completed_appointments "
+            "ADD COLUMN IF NOT EXISTS consultation_duration_minutes INTEGER"
+        )
+        await safe_exec(
+            "ALTER TABLE completed_appointments "
             "ADD COLUMN IF NOT EXISTS outcome VARCHAR DEFAULT 'served'"
         )
         await safe_exec(
@@ -395,6 +412,17 @@ async def lifespan(app: FastAPI):
         )
         await safe_exec("ALTER TABLE completed_appointments ADD COLUMN IF NOT EXISTS diagnosis VARCHAR")
         await safe_exec("ALTER TABLE completed_appointments ADD COLUMN IF NOT EXISTS notes VARCHAR")
+        await safe_exec("UPDATE completed_appointments SET completed_at = finished_at WHERE completed_at IS NULL AND finished_at IS NOT NULL")
+        await safe_exec("UPDATE completed_appointments SET serving_started_at = served_at WHERE serving_started_at IS NULL AND served_at IS NOT NULL")
+        await safe_exec(
+            """
+            UPDATE completed_appointments
+            SET consultation_duration_minutes = GREATEST(1, CEIL(service_duration_seconds / 60.0)::INTEGER)
+            WHERE consultation_duration_minutes IS NULL
+              AND service_duration_seconds IS NOT NULL
+              AND service_duration_seconds > 0
+            """
+        )
 
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS category VARCHAR")
         await safe_exec("ALTER TABLE clinics ADD COLUMN IF NOT EXISTS categories JSON")
@@ -451,6 +479,8 @@ async def lifespan(app: FastAPI):
         """)
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_clinic_id ON doctor_sessions(clinic_id)")
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_slot_id ON doctor_sessions(slot_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_doctor_id ON doctor_sessions(doctor_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctor_sessions_eta ON doctor_sessions(clinic_id, slot_id, session_date, status)")
         await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_started_at TIMESTAMP")
         await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_ends_at TIMESTAMP")
         await safe_exec("ALTER TABLE doctor_sessions ADD COLUMN IF NOT EXISTS delay_original_start_time VARCHAR")
@@ -477,6 +507,17 @@ async def lifespan(app: FastAPI):
         """)
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_notification_jobs_due ON notification_jobs(status, scheduled_for)")
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_notification_jobs_clinic_session ON notification_jobs(clinic_id, session_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_appointments_queue_eta ON appointments(clinic_id, date, slot_id, status, queue_position)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_appointments_serving_started_at ON appointments(serving_started_at)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_appointments_session_id ON appointments(session_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_qr_appointments_queue_eta ON qr_appointments(clinic_id, date, slot_id, status, queue_position)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_qr_appointments_serving_started_at ON qr_appointments(serving_started_at)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_qr_appointments_session_id ON qr_appointments(session_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_completed_appointments_eta_history ON completed_appointments(clinic_id, date, slot_id, completed_at DESC)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_completed_appointments_serving_started_at ON completed_appointments(serving_started_at)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_completed_appointments_status ON completed_appointments(status)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_completed_appointments_session_id ON completed_appointments(session_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_completed_appointments_doctor_id ON completed_appointments(doctor_id)")
 
 
         await safe_exec("ALTER TABLE clinic_time_slots ADD COLUMN IF NOT EXISTS daily_toggle_counts JSON DEFAULT '[]'")

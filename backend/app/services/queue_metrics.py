@@ -10,6 +10,10 @@ CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 ACTIVE_STATUSES = ("booked", "pending", "serving")
 DEFAULT_MIN_CONSULTATION_MINUTES = 8
 DEFAULT_MAX_CONSULTATION_MINUTES = 12
+DEFAULT_HISTORY_LIMIT = 12
+ROLLING_AVERAGE_SAMPLE_MIN = 2
+ROLLING_AVERAGE_SAMPLE_MAX = 5
+QUEUE_COMPRESSION_MIN = 0.82
 
 
 def _sort_datetime(value):
@@ -103,6 +107,10 @@ def _format_clock(value):
     return local_value.strftime("%I:%M %p").lstrip("0")
 
 
+def _round_minutes(value):
+    return round(float(value), 1)
+
+
 def _empty_metrics(current_token_text, total_in_queue=0):
     now = datetime.now(CLINIC_TIMEZONE)
     return {
@@ -111,7 +119,10 @@ def _empty_metrics(current_token_text, total_in_queue=0):
         "estimated_wait_minutes": 0,
         "latest_estimated_wait_minutes": 0,
         "earliest_eta": now.isoformat(),
+        "predicted_eta": now.isoformat(),
         "latest_eta": now.isoformat(),
+        "rolling_average_minutes": _round_minutes((DEFAULT_MIN_CONSULTATION_MINUTES + DEFAULT_MAX_CONSULTATION_MINUTES) / 2),
+        "weighted_average_minutes": _round_minutes((DEFAULT_MIN_CONSULTATION_MINUTES + DEFAULT_MAX_CONSULTATION_MINUTES) / 2),
         "consultation_window": f"{_format_clock(now)} - {_format_clock(now)}",
         "estimated_window_text": f"{_format_clock(now)} - {_format_clock(now)}",
         "active_delay_minutes": 0,
@@ -126,6 +137,174 @@ def _empty_metrics(current_token_text, total_in_queue=0):
         "consultation_min_minutes": DEFAULT_MIN_CONSULTATION_MINUTES,
         "consultation_max_minutes": DEFAULT_MAX_CONSULTATION_MINUTES,
     }
+
+
+class QueuePredictionEngine:
+    """
+    Centralized adaptive ETA engine.
+
+    Uses real completed consultation durations as the learning signal and keeps
+    frontend clients from owning any queue timing math.
+    """
+
+    def __init__(self, db):
+        self.db = db
+
+    async def predict(self, clinic_id, date, slot_id, queue_items, current_index):
+        min_minutes, max_minutes = await _clinic_consultation_range(self.db, clinic_id)
+        timing_state = await _session_timing_state(self.db, clinic_id, date, slot_id)
+        history_metrics = await self._duration_history_metrics(clinic_id, date, slot_id, min_minutes, max_minutes)
+        rolling_average = history_metrics["rolling_average_minutes"]
+        weighted_average = history_metrics["weighted_average_minutes"]
+        predicted_minutes = self._hybrid_prediction_minutes(
+            rolling_average,
+            weighted_average,
+            min_minutes,
+            max_minutes,
+        )
+
+        wait = self._queue_wait_minutes(queue_items, current_index, min_minutes, predicted_minutes, max_minutes)
+        base_time = timing_state["base_time"]
+        earliest_eta = base_time + timedelta(minutes=wait["earliest"])
+        predicted_eta = base_time + timedelta(minutes=wait["predicted"])
+        latest_eta = base_time + timedelta(minutes=wait["latest"])
+        now = datetime.now(CLINIC_TIMEZONE)
+        window_text = f"{_format_clock(earliest_eta)} - {_format_clock(latest_eta)}"
+
+        return {
+            "estimated_wait_minutes": max(0, math.ceil((predicted_eta - now).total_seconds() / 60)),
+            "latest_estimated_wait_minutes": max(0, math.ceil((latest_eta - now).total_seconds() / 60)),
+            "earliest_eta": earliest_eta.isoformat(),
+            "predicted_eta": predicted_eta.isoformat(),
+            "latest_eta": latest_eta.isoformat(),
+            "rolling_average_minutes": _round_minutes(rolling_average),
+            "weighted_average_minutes": _round_minutes(weighted_average),
+            "consultation_window": window_text,
+            "estimated_window_text": window_text,
+            "consultation_min_minutes": min_minutes,
+            "consultation_max_minutes": max_minutes,
+            **{key: value for key, value in timing_state.items() if key != "base_time"},
+        }
+
+    async def _duration_history_metrics(self, clinic_id, date, slot_id, min_minutes, max_minutes):
+        rows = await self._duration_history(clinic_id, date, slot_id)
+        durations = [seconds / 60 for seconds in rows if seconds and seconds > 0]
+        durations = self._remove_outliers(durations)
+
+        fallback = (min_minutes + max_minutes) / 2
+        if not durations:
+            return {
+                "rolling_average_minutes": fallback,
+                "weighted_average_minutes": fallback,
+            }
+        if len(durations) == 1:
+            blended = (durations[0] * 0.6) + (fallback * 0.4)
+            return {
+                "rolling_average_minutes": blended,
+                "weighted_average_minutes": blended,
+            }
+
+        sample = durations[:ROLLING_AVERAGE_SAMPLE_MAX]
+        return {
+            "rolling_average_minutes": sum(sample) / len(sample),
+            "weighted_average_minutes": self._weighted_average(sample),
+        }
+
+    async def _duration_history(self, clinic_id, date, slot_id):
+        params = {
+            "clinic_id": clinic_id,
+            "date": date,
+            "limit": DEFAULT_HISTORY_LIMIT,
+        }
+        slot_clause = ""
+        if slot_id is not None:
+            slot_clause = " AND slot_id = :slot_id"
+            params["slot_id"] = slot_id
+
+        result = await self.db.execute(
+            text(
+                f"""
+                SELECT duration_seconds
+                FROM (
+                    SELECT
+                        id,
+                        COALESCE(completed_at, finished_at, served_at) AS completed_sort_at,
+                        COALESCE(
+                            NULLIF(consultation_duration_minutes, 0) * 60,
+                            NULLIF(service_duration_seconds, 0),
+                            EXTRACT(EPOCH FROM (COALESCE(completed_at, finished_at) - COALESCE(serving_started_at, served_at)))
+                        ) AS duration_seconds
+                    FROM completed_appointments
+                    WHERE clinic_id = :clinic_id
+                      AND date = :date
+                      {slot_clause}
+                      AND (served IS TRUE OR outcome = 'served' OR status IN ('completed', 'served'))
+                ) history
+                WHERE duration_seconds IS NOT NULL
+                  AND duration_seconds > 0
+                ORDER BY completed_sort_at DESC NULLS LAST, id DESC
+                LIMIT :limit
+                """
+            ),
+            params,
+        )
+        return [row.get("duration_seconds") for row in result.mappings().all()]
+
+    def _remove_outliers(self, durations):
+        sane = [duration for duration in durations if 2 <= duration <= 60]
+        if len(sane) < ROLLING_AVERAGE_SAMPLE_MIN + 1:
+            return sane
+
+        sorted_values = sorted(sane)
+        median = sorted_values[len(sorted_values) // 2]
+        if median <= 0:
+            return sane
+
+        filtered = [
+            duration
+            for duration in sane
+            if duration >= median * 0.35 and duration <= median * 2.5
+        ]
+        return filtered or sane[:ROLLING_AVERAGE_SAMPLE_MAX]
+
+    def _weighted_average(self, durations):
+        sample = durations[:ROLLING_AVERAGE_SAMPLE_MAX]
+        weights = list(range(len(sample), 0, -1))
+        return sum(duration * weight for duration, weight in zip(sample, weights)) / sum(weights)
+
+    def _hybrid_prediction_minutes(self, rolling_average, weighted_average, min_minutes, max_minutes):
+        bounded_weighted = min(max(weighted_average, min_minutes), max_minutes)
+        bounded_rolling = min(max(rolling_average, min_minutes), max_minutes)
+        configured_midpoint = (min_minutes + max_minutes) / 2
+        return (bounded_weighted * 0.65) + (bounded_rolling * 0.2) + (configured_midpoint * 0.15)
+
+    def _queue_wait_minutes(self, queue_items, current_index, min_minutes, predicted_minutes, max_minutes):
+        totals = {"earliest": 0.0, "predicted": 0.0, "latest": 0.0}
+        if current_index is None or current_index <= 0:
+            return totals
+
+        for index, item in enumerate(queue_items[:current_index]):
+            elapsed = self._elapsed_serving_minutes(item)
+            if item.get("status") == "serving":
+                totals["earliest"] += max(0, min_minutes - elapsed)
+                totals["predicted"] += max(1, predicted_minutes - elapsed)
+                totals["latest"] += max(0, max_minutes - elapsed)
+            else:
+                compression = max(QUEUE_COMPRESSION_MIN, 1 - min(index, 6) * 0.03)
+                totals["earliest"] += min_minutes * compression
+                totals["predicted"] += predicted_minutes * compression
+                totals["latest"] += max_minutes * max(compression, 0.9)
+
+        return totals
+
+    def _elapsed_serving_minutes(self, item):
+        started_at = _parse_dt(item.get("serving_started_at"))
+        if not started_at:
+            return 0.0
+        return max(0.0, (datetime.now(CLINIC_TIMEZONE) - started_at).total_seconds() / 60)
+
+
+ETAEngine = QueuePredictionEngine
 
 
 async def _clinic_consultation_range(db, clinic_id):
@@ -249,28 +428,6 @@ async def _session_timing_state(db, clinic_id, date, slot_id):
     }
 
 
-async def _consultation_window(db, clinic_id, date, slot_id, patients_ahead):
-    min_minutes, max_minutes = await _clinic_consultation_range(db, clinic_id)
-    timing_state = await _session_timing_state(db, clinic_id, date, slot_id)
-    base_time = timing_state["base_time"]
-    earliest_eta = base_time + timedelta(minutes=patients_ahead * min_minutes)
-    latest_eta = base_time + timedelta(minutes=patients_ahead * max_minutes)
-    now = datetime.now(CLINIC_TIMEZONE)
-    window_text = f"{_format_clock(earliest_eta)} - {_format_clock(latest_eta)}"
-
-    return {
-        "estimated_wait_minutes": max(0, math.ceil((earliest_eta - now).total_seconds() / 60)),
-        "latest_estimated_wait_minutes": max(0, math.ceil((latest_eta - now).total_seconds() / 60)),
-        "earliest_eta": earliest_eta.isoformat(),
-        "latest_eta": latest_eta.isoformat(),
-        "consultation_window": window_text,
-        "estimated_window_text": window_text,
-        "consultation_min_minutes": min_minutes,
-        "consultation_max_minutes": max_minutes,
-        **{key: value for key, value in timing_state.items() if key != "base_time"},
-    }
-
-
 async def _fetch_queue_rows(db, table_name, clinic_id, date, source, slot_id):
     params = {"clinic_id": clinic_id, "date": date}
     slot_clause = ""
@@ -279,7 +436,7 @@ async def _fetch_queue_rows(db, table_name, clinic_id, date, source, slot_id):
         params["slot_id"] = slot_id
 
     sql = f"""
-        SELECT id, appointment_token, status, created_at, queue_position, slot_id
+        SELECT id, appointment_token, status, created_at, queue_position, slot_id, serving_started_at
         FROM {table_name}
         WHERE clinic_id = :clinic_id
           AND date = :date
@@ -298,6 +455,7 @@ async def _fetch_queue_rows(db, table_name, clinic_id, date, source, slot_id):
             "created_at": row.get("created_at"),
             "queue_position": row.get("queue_position"),
             "slot_id": row.get("slot_id"),
+            "serving_started_at": row.get("serving_started_at"),
         })
     return rows
 
@@ -351,7 +509,7 @@ async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id
     else:
         now_serving_token = current_token_text
 
-    window = await _consultation_window(db, clinic_id, date, slot_id, patients_ahead)
+    window = await QueuePredictionEngine(db).predict(clinic_id, date, slot_id, queue_items, your_index)
 
     return {
         "found": True,

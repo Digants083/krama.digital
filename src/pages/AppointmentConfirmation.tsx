@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
 import { CalendarDays, MapPin, Stethoscope, type LucideIcon } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
+import { formatIsoClock } from "@/lib/timeFormat";
 
 interface ConfirmationState {
   clinic: string;
@@ -21,6 +22,7 @@ interface ConfirmationState {
   patient_email?: string;
   patient_phone?: string;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
@@ -49,6 +51,7 @@ interface AppointmentDetails {
   address?: string;
   created_at: string;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
@@ -69,6 +72,7 @@ interface QueuePosition {
   session_id?: number;
   slot_id?: number;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
@@ -172,6 +176,12 @@ const AppointmentConfirmation = () => {
     appointmentDetails?.consultation_window ||
     appointmentDetails?.estimated_window_text ||
     "";
+  const predictedConsultationTime = formatIsoClock(
+    queuePosition?.predicted_eta ||
+    state?.predicted_eta ||
+    appointmentDetails?.predicted_eta ||
+    null
+  );
   const nowServing = queuePosition?.now_serving_token || token;
   const activeDelayMinutes = queuePosition?.active_delay_minutes ?? state?.active_delay_minutes ?? appointmentDetails?.active_delay_minutes ?? 0;
   const delayNotice = queuePosition?.doctor_delay || state?.delay || (activeDelayMinutes > 0 ? `${activeDelayMinutes} min` : null);
@@ -245,6 +255,9 @@ const AppointmentConfirmation = () => {
           <div className="mt-4 rounded-[24px] bg-white/10 p-5">
             <p className="text-sm text-white/70">Estimated Consultation Window</p>
             <p className="mt-3 text-2xl font-bold leading-tight">{consultationWindow || "Calculating..."}</p>
+            {predictedConsultationTime && (
+              <p className="mt-2 text-sm font-semibold text-white/80">Predicted Consultation Time: {predictedConsultationTime}</p>
+            )}
           </div>
 
           <div className={`mt-4 grid gap-4 ${delayNotice ? "grid-cols-2" : "grid-cols-1"}`}>
@@ -286,6 +299,9 @@ const AppointmentConfirmation = () => {
             <div className="rounded-[20px] bg-primary/5 p-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
               <p className="mt-1 text-lg font-bold text-foreground">{consultationWindow || "Calculating..."}</p>
+              {predictedConsultationTime && (
+                <p className="mt-1 text-sm font-semibold text-primary">Predicted Consultation Time: {predictedConsultationTime}</p>
+              )}
             </div>
           </div>
         </div>

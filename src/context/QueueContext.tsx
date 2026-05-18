@@ -11,7 +11,9 @@ type QueueItem = {
   estimated_wait_minutes?: number | null;
   latest_estimated_wait_minutes?: number | null;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
   active_delay_minutes?: number | null;
@@ -44,7 +46,9 @@ type CurrentServing = {
   estimated_wait_minutes?: number | null;
   latest_estimated_wait_minutes?: number | null;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
   active_delay_minutes?: number | null;
@@ -67,7 +71,9 @@ type QueueAppointment = {
   estimated_wait_minutes?: number | null;
   latest_estimated_wait_minutes?: number | null;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
   active_delay_minutes?: number | null;
@@ -106,7 +112,9 @@ type WalkinResult = {
   position: number;
   estimated_wait_minutes?: number | null;
   earliest_eta?: string | null;
+  predicted_eta?: string | null;
   latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
   consultation_window?: string | null;
   estimated_window_text?: string | null;
   active_delay_minutes?: number | null;
@@ -187,7 +195,9 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         estimated_wait_minutes: apt.estimated_wait_minutes,
         latest_estimated_wait_minutes: apt.latest_estimated_wait_minutes,
         earliest_eta: apt.earliest_eta,
+        predicted_eta: apt.predicted_eta,
         latest_eta: apt.latest_eta,
+        rolling_average_minutes: apt.rolling_average_minutes,
         consultation_window: apt.consultation_window,
         estimated_window_text: apt.estimated_window_text,
         active_delay_minutes: apt.active_delay_minutes,
@@ -213,7 +223,9 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             estimated_wait_minutes: servingAppointment.estimated_wait_minutes,
             latest_estimated_wait_minutes: servingAppointment.latest_estimated_wait_minutes,
             earliest_eta: servingAppointment.earliest_eta,
+            predicted_eta: servingAppointment.predicted_eta,
             latest_eta: servingAppointment.latest_eta,
+            rolling_average_minutes: servingAppointment.rolling_average_minutes,
             consultation_window: servingAppointment.consultation_window,
             estimated_window_text: servingAppointment.estimated_window_text,
             active_delay_minutes: servingAppointment.active_delay_minutes,
@@ -309,7 +321,9 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         phone: payload.phone,
         estimated_wait_minutes: data.estimated_wait_minutes,
         earliest_eta: data.earliest_eta,
+        predicted_eta: data.predicted_eta,
         latest_eta: data.latest_eta,
+        rolling_average_minutes: data.rolling_average_minutes,
         consultation_window: data.consultation_window,
         estimated_window_text: data.estimated_window_text,
         active_delay_minutes: data.active_delay_minutes,
@@ -328,7 +342,9 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         position: data.position,
         estimated_wait_minutes: data.estimated_wait_minutes,
         earliest_eta: data.earliest_eta,
+        predicted_eta: data.predicted_eta,
         latest_eta: data.latest_eta,
+        rolling_average_minutes: data.rolling_average_minutes,
         consultation_window: data.consultation_window,
         estimated_window_text: data.estimated_window_text,
         active_delay_minutes: data.active_delay_minutes,
@@ -370,7 +386,9 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             estimated_wait_minutes: patient.estimated_wait_minutes,
             latest_estimated_wait_minutes: patient.latest_estimated_wait_minutes,
             earliest_eta: patient.earliest_eta,
+            predicted_eta: patient.predicted_eta,
             latest_eta: patient.latest_eta,
+            rolling_average_minutes: patient.rolling_average_minutes,
             consultation_window: patient.consultation_window,
             estimated_window_text: patient.estimated_window_text,
             active_delay_minutes: patient.active_delay_minutes,

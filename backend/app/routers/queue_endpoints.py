@@ -500,9 +500,13 @@ async def set_clinic_active(
                 date=apt.date,
                 time=getattr(apt, 'time', ""),
                 slot_id=getattr(apt, 'slot_id', None),
+                session_id=getattr(apt, 'session_id', None) or getattr(apt, 'slot_id', None),
                 doctor_name=getattr(apt, 'doctor_name', None),
-                created_at=apt.created_at,
-                served_at=datetime.now()
+                doctor_id=getattr(apt, 'doctor_id', None),
+                serving_started_at=getattr(apt, 'serving_started_at', None),
+                served_at=datetime.now(),
+                finished_at=datetime.now(),
+                completed_at=datetime.now()
             )
             db.add(completed)
             # Delete from appointments
@@ -530,8 +534,13 @@ async def set_clinic_active(
                 date=apt.date,
                 time=getattr(apt, 'time', ""),
                 slot_id=getattr(apt, 'slot_id', None),
-                created_at=apt.created_at,
-                served_at=datetime.now()
+                session_id=getattr(apt, 'session_id', None) or getattr(apt, 'slot_id', None),
+                doctor_name=getattr(apt, 'doctor_name', None),
+                doctor_id=getattr(apt, 'doctor_id', None),
+                serving_started_at=getattr(apt, 'serving_started_at', None),
+                served_at=datetime.now(),
+                finished_at=datetime.now(),
+                completed_at=datetime.now()
             )
             db.add(completed)
             await db.delete(apt)
@@ -742,7 +751,8 @@ async def finish_patient(
         served_at = served_at.replace(tzinfo=timezone.utc)
     finished_at = datetime.now(timezone.utc)
     service_duration_seconds = max(0, int((finished_at - served_at).total_seconds()))
-    wait_time = int(service_duration_seconds / 60)
+    consultation_duration_minutes = max(1, (service_duration_seconds + 59) // 60)
+    wait_time = consultation_duration_minutes
 
     # Get push_count from appointment
     push_count = getattr(appointment, 'push_count', 0)
@@ -756,14 +766,19 @@ async def finish_patient(
         patient_email=getattr(appointment, 'patient_email', ""),
         patient_phone=appointment.patient_phone,
         doctor_name=getattr(appointment, 'doctor_name', None),
+        doctor_id=getattr(appointment, 'doctor_id', None),
         date=appointment.date,
         time=getattr(appointment, 'time', "walk-in"),
         slot_id=getattr(appointment, 'slot_id', None),
+        session_id=getattr(appointment, 'session_id', None) or getattr(appointment, 'slot_id', None),
+        serving_started_at=served_at,
         served_at=served_at,
         finished_at=finished_at,
+        completed_at=finished_at,
         status="completed",
         wait_time_minutes=wait_time,
         service_duration_seconds=service_duration_seconds,
+        consultation_duration_minutes=consultation_duration_minutes,
         outcome="served",
         served=True,  # Patient was served (normally or after push)
         push_count=push_count  # Track how many times they were pushed
@@ -802,8 +817,10 @@ async def finish_patient(
             "patient_name": completed.patient_name,
             "served_at": completed.served_at,
             "finished_at": completed.finished_at,
+            "completed_at": completed.completed_at,
             "wait_time_minutes": completed.wait_time_minutes,
-            "service_duration_seconds": completed.service_duration_seconds
+            "service_duration_seconds": completed.service_duration_seconds,
+            "consultation_duration_minutes": completed.consultation_duration_minutes
         }
     }
 
@@ -1043,8 +1060,11 @@ async def push_patient_to_next_slot(
             date=appointment.date,
             time="walk-in",
             slot_id=appointment.slot_id,
+            session_id=getattr(appointment, 'session_id', None) or getattr(appointment, 'slot_id', None),
+            serving_started_at=getattr(appointment, 'serving_started_at', None),
             served_at=served_at,
             finished_at=finished_at,
+            completed_at=finished_at,
             status="auto_finished",
             wait_time_minutes=wait_time,
             outcome="not_served",
@@ -1114,8 +1134,12 @@ async def push_patient_to_next_slot(
             date=appointment.date,
             time=getattr(appointment, 'time', "pushed-not-served"),
             slot_id=appointment.slot_id,
+            session_id=getattr(appointment, 'session_id', None) or getattr(appointment, 'slot_id', None),
+            doctor_id=getattr(appointment, 'doctor_id', None),
+            serving_started_at=getattr(appointment, 'serving_started_at', None),
             served_at=served_at,
             finished_at=finished_at,
+            completed_at=finished_at,
             status="auto_finished",
             wait_time_minutes=wait_time,
             outcome="not_served",
@@ -1177,8 +1201,12 @@ async def push_patient_to_next_slot(
             date=appointment.date,
             time=getattr(appointment, 'time', "pushed-not-served"),
             slot_id=appointment.slot_id,
+            session_id=getattr(appointment, 'session_id', None) or getattr(appointment, 'slot_id', None),
+            doctor_id=getattr(appointment, 'doctor_id', None),
+            serving_started_at=getattr(appointment, 'serving_started_at', None),
             served_at=served_at,
             finished_at=finished_at,
+            completed_at=finished_at,
             status="auto_finished",
             wait_time_minutes=wait_time,
             outcome="not_served",
@@ -1498,9 +1526,12 @@ async def get_completed_appointments(
             "date": apt.date,
             "time": apt.time,
             "served_at": apt.served_at,
+            "serving_started_at": getattr(apt, "serving_started_at", None),
             "finished_at": apt.finished_at,
+            "completed_at": getattr(apt, "completed_at", None) or apt.finished_at,
             "wait_time_minutes": apt.wait_time_minutes,
             "service_duration_seconds": getattr(apt, "service_duration_seconds", None),
+            "consultation_duration_minutes": getattr(apt, "consultation_duration_minutes", None),
             "status": apt.status,
             "outcome": apt.outcome
         })
@@ -1659,10 +1690,13 @@ async def get_patient_dashboard(
                 "time": apt.time,
                 "status": apt.status,
                 "earliest_eta": metrics["earliest_eta"],
+                "predicted_eta": metrics["predicted_eta"],
                 "latest_eta": metrics["latest_eta"],
                 "consultation_window": metrics["consultation_window"],
                 "estimated_window_text": metrics["estimated_window_text"],
                 "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+                "rolling_average_minutes": metrics["rolling_average_minutes"],
+                "weighted_average_minutes": metrics["weighted_average_minutes"],
                 "active_delay_minutes": metrics["active_delay_minutes"],
                 "doctor_delay_minutes": metrics["doctor_delay_minutes"],
                 "queue_adjusted_time": metrics["queue_adjusted_time"],
@@ -1672,10 +1706,13 @@ async def get_patient_dashboard(
             "status": apt.status or "waiting",
             "patients_ahead": metrics["patients_ahead"],
             "earliest_eta": metrics["earliest_eta"],
+            "predicted_eta": metrics["predicted_eta"],
             "latest_eta": metrics["latest_eta"],
             "consultation_window": metrics["consultation_window"],
             "estimated_window_text": metrics["estimated_window_text"],
             "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+            "rolling_average_minutes": metrics["rolling_average_minutes"],
+            "weighted_average_minutes": metrics["weighted_average_minutes"],
             "active_delay_minutes": metrics["active_delay_minutes"],
             "doctor_delay_minutes": metrics["doctor_delay_minutes"],
             "queue_adjusted_time": metrics["queue_adjusted_time"],
@@ -1924,10 +1961,13 @@ async def join_queue(
         "slot_id": slot_id,
         "session_id": slot_id,
         "earliest_eta": metrics["earliest_eta"],
+        "predicted_eta": metrics["predicted_eta"],
         "latest_eta": metrics["latest_eta"],
         "consultation_window": metrics["consultation_window"],
         "estimated_window_text": metrics["estimated_window_text"],
         "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+        "rolling_average_minutes": metrics["rolling_average_minutes"],
+        "weighted_average_minutes": metrics["weighted_average_minutes"],
         "active_delay_minutes": metrics["active_delay_minutes"],
         "doctor_delay_minutes": metrics["doctor_delay_minutes"],
         "queue_adjusted_time": metrics["queue_adjusted_time"],
@@ -2283,9 +2323,12 @@ async def _lookup_by_phone_impl(phone, db):
             "estimated_wait_minutes": metrics["estimated_wait_minutes"],
             "latest_estimated_wait_minutes": metrics["latest_estimated_wait_minutes"],
             "earliest_eta": metrics["earliest_eta"],
+            "predicted_eta": metrics["predicted_eta"],
             "latest_eta": metrics["latest_eta"],
             "consultation_window": metrics["consultation_window"],
             "estimated_window_text": metrics["estimated_window_text"],
+            "rolling_average_minutes": metrics["rolling_average_minutes"],
+            "weighted_average_minutes": metrics["weighted_average_minutes"],
             "active_delay_minutes": metrics["active_delay_minutes"],
             "doctor_delay_minutes": metrics["doctor_delay_minutes"],
             "queue_adjusted_time": metrics["queue_adjusted_time"],
@@ -2474,6 +2517,7 @@ async def add_time_slot(
 
     await db.commit()
     await db.refresh(record)
+    await publish_queue_event(clinic_id, "session_changed", {"slot_id": len(record.slots or [])})
 
     return {
         "message": "Time slot added successfully",
@@ -2598,6 +2642,7 @@ async def update_time_slot(
 
     await db.commit()
     await db.refresh(record)
+    await publish_queue_event(clinic_id, "session_changed", {"slot_id": slot_index + 1})
 
     return {
         "message": "Time slot updated successfully",
@@ -2647,6 +2692,7 @@ async def delete_time_slot(
     record.last_slot_change_date = datetime.now(timezone.utc)
 
     await db.commit()
+    await publish_queue_event(clinic_id, "session_changed", {"slot_id": slot_index + 1})
 
     return {
         "message": "Time slot deleted successfully",
@@ -2753,8 +2799,12 @@ async def auto_finish_unserved_patients(
                     date=appointment.date,
                     time=getattr(appointment, 'time', "auto-finished"),
                     slot_id=appointment.slot_id,
+                    session_id=getattr(appointment, 'session_id', None) or getattr(appointment, 'slot_id', None),
+                    doctor_id=getattr(appointment, 'doctor_id', None),
+                    serving_started_at=getattr(appointment, 'serving_started_at', None),
                     served_at=served_at,
                     finished_at=finished_at,
+                    completed_at=finished_at,
                     status="auto_finished",
                     wait_time_minutes=wait_time,
                     outcome="not_served",

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight } from "lucide-react";
-import { formatCountdown, formatDelayedStartTime, formatDelayLabel, formatTimeRange, secondsUntil } from "@/lib/timeFormat";
+import { formatCountdown, formatDelayedStartTime, formatDelayLabel, formatIsoClock, formatTimeRange, secondsUntil } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 interface TimeSlot {
@@ -831,6 +831,11 @@ const ClinicControlQueue = () => {
                           {(p.consultation_window || p.estimated_window_text) && (
                             <p className="truncate text-[11px] font-semibold text-[#00555A]">
                               Window {p.consultation_window || p.estimated_window_text}
+                            </p>
+                          )}
+                          {p.predicted_eta && (
+                            <p className="truncate text-[11px] text-slate-500">
+                              Predicted {formatIsoClock(p.predicted_eta)}
                             </p>
                           )}
                         </div>

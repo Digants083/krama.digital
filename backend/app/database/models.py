@@ -100,15 +100,19 @@ class CompletedAppointment(Base):
     patient_email = Column(String, nullable=False)
     patient_phone = Column(String, nullable=False)
     doctor_name = Column(String, nullable=True)
+    doctor_id = Column(String, nullable=True)
     date = Column(String, nullable=False)
     time = Column(String, nullable=False)
     slot_id = Column(Integer, nullable=True)
     session_id = Column(Integer, nullable=True)
+    serving_started_at = Column(DateTime(timezone=True), nullable=True)
     served_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, default="served")  # served, completed, skipped
     wait_time_minutes = Column(Integer, nullable=True)  # how long they waited
     service_duration_seconds = Column(Integer, nullable=True)
+    consultation_duration_minutes = Column(Integer, nullable=True)
     outcome = Column(String, default="served")  # served or not_served
     diagnosis = Column(String, nullable=True)
     notes = Column(String, nullable=True)

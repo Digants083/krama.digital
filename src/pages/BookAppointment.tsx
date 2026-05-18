@@ -95,6 +95,7 @@ const BookAppointment = () => {
     estimated_window_text?: string | null;
     estimated_wait_minutes?: number | null;
     earliest_eta?: string | null;
+    predicted_eta?: string | null;
     latest_eta?: string | null;
     active_delay_minutes?: number | null;
     queue_position?: number | null;
@@ -119,6 +120,7 @@ const BookAppointment = () => {
         estimated_window_text: booking.estimated_window_text,
         estimated_wait_minutes: booking.estimated_wait_minutes,
         earliest_eta: booking.earliest_eta,
+        predicted_eta: booking.predicted_eta,
         latest_eta: booking.latest_eta,
         active_delay_minutes: booking.active_delay_minutes,
         queue_position: booking.queue_position,
@@ -177,6 +179,7 @@ const BookAppointment = () => {
           estimated_window_text: booking.estimated_window_text,
           estimated_wait_minutes: booking.estimated_wait_minutes,
           earliest_eta: booking.earliest_eta,
+          predicted_eta: booking.predicted_eta,
           latest_eta: booking.latest_eta,
           active_delay_minutes: booking.active_delay_minutes,
           queue_position: booking.queue_position,

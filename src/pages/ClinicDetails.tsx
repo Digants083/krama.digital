@@ -422,6 +422,7 @@ const ClinicDetails = () => {
             estimated_window_text: data.estimated_window_text,
             estimated_wait_minutes: data.estimated_wait_minutes,
             earliest_eta: data.earliest_eta,
+            predicted_eta: data.predicted_eta,
             latest_eta: data.latest_eta,
             active_delay_minutes: data.active_delay_minutes,
             queue_position: data.queue_position,

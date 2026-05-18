@@ -1,6 +1,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
+import { formatIsoClock } from "@/lib/timeFormat";
 
 // Types
 interface ClinicInfo {
@@ -27,6 +28,7 @@ const WalkinQueue = () => {
     token_label: string;
     position: number;
     patient_name: string;
+    predicted_eta?: string | null;
     consultation_window?: string | null;
     estimated_window_text?: string | null;
     estimated_wait_minutes?: number | null;
@@ -68,6 +70,7 @@ const WalkinQueue = () => {
       setTokenResult((prev) => prev ? {
         ...prev,
         position: Number(String(updated.position || "").split("/")[0]) || prev.position,
+        predicted_eta: updated.predicted_eta,
         consultation_window: updated.consultation_window,
         estimated_window_text: updated.estimated_window_text,
         estimated_wait_minutes: updated.estimated_wait_minutes,
@@ -115,6 +118,7 @@ const WalkinQueue = () => {
         token_label: data.token_label,
         position: data.position,
         patient_name: data.patient_name,
+        predicted_eta: data.predicted_eta,
         consultation_window: data.consultation_window,
         estimated_window_text: data.estimated_window_text,
         estimated_wait_minutes: data.estimated_wait_minutes,
@@ -196,6 +200,9 @@ const WalkinQueue = () => {
           <div className="mb-6 rounded-xl border border-[#00555A]/10 bg-[#00555A]/5 px-4 py-4 text-left">
             <p className="text-xs uppercase tracking-wide text-gray-500">Estimated Consultation Window</p>
             <p className="mt-1 text-lg font-bold text-[#0F172A]">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
+            {tokenResult.predicted_eta && (
+              <p className="mt-1 text-xs font-semibold text-[#00555A]">Predicted Consultation Time: {formatIsoClock(tokenResult.predicted_eta)}</p>
+            )}
             {tokenResult.estimated_wait_minutes != null && (
               <p className="mt-1 text-xs text-gray-500">Estimated wait {tokenResult.estimated_wait_minutes} min</p>
             )}

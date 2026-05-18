@@ -25,6 +25,16 @@ export const formatTimeRange = (timeRange: number[]) => {
   return `${formatHourDecimal(timeRange[0])} - ${formatHourDecimal(timeRange[1])}`;
 };
 
+export const formatIsoClock = (isoDate?: string | null) => {
+  if (!isoDate) return "";
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
 export const delayMinutesToHours = (delayMinutes?: number | null) => {
   const minutes = Number(delayMinutes || 0);
   return Number.isFinite(minutes) && minutes > 0 ? minutes / 60 : 0;

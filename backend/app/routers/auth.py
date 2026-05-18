@@ -4149,6 +4149,8 @@ async def create_appointment(
 
             "earliest_eta": metrics["earliest_eta"],
 
+            "predicted_eta": metrics["predicted_eta"],
+
             "latest_eta": metrics["latest_eta"],
 
             "consultation_window": metrics["consultation_window"],
@@ -4156,6 +4158,10 @@ async def create_appointment(
             "estimated_window_text": metrics["estimated_window_text"],
 
             "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+
+            "rolling_average_minutes": metrics["rolling_average_minutes"],
+
+            "weighted_average_minutes": metrics["weighted_average_minutes"],
 
             "active_delay_minutes": metrics["active_delay_minutes"],
 
@@ -4396,6 +4402,8 @@ async def get_patient_appointments_by_email(
 
                 "earliest_eta": metrics["earliest_eta"] if metrics and metrics["found"] else None,
 
+                "predicted_eta": metrics["predicted_eta"] if metrics and metrics["found"] else None,
+
                 "latest_eta": metrics["latest_eta"] if metrics and metrics["found"] else None,
 
                 "consultation_window": metrics["consultation_window"] if metrics and metrics["found"] else None,
@@ -4403,6 +4411,10 @@ async def get_patient_appointments_by_email(
                 "estimated_window_text": metrics["estimated_window_text"] if metrics and metrics["found"] else None,
 
                 "estimated_wait_minutes": metrics["estimated_wait_minutes"] if metrics and metrics["found"] else None,
+
+                "rolling_average_minutes": metrics["rolling_average_minutes"] if metrics and metrics["found"] else None,
+
+                "weighted_average_minutes": metrics["weighted_average_minutes"] if metrics and metrics["found"] else None,
 
                 "active_delay_minutes": metrics["active_delay_minutes"] if metrics and metrics["found"] else 0,
 
@@ -4884,9 +4896,12 @@ async def get_today_appointments(
         item["estimated_wait_minutes"] = metrics["estimated_wait_minutes"]
         item["latest_estimated_wait_minutes"] = metrics["latest_estimated_wait_minutes"]
         item["earliest_eta"] = metrics["earliest_eta"]
+        item["predicted_eta"] = metrics["predicted_eta"]
         item["latest_eta"] = metrics["latest_eta"]
         item["consultation_window"] = metrics["consultation_window"]
         item["estimated_window_text"] = metrics["estimated_window_text"]
+        item["rolling_average_minutes"] = metrics["rolling_average_minutes"]
+        item["weighted_average_minutes"] = metrics["weighted_average_minutes"]
         item["active_delay_minutes"] = metrics["active_delay_minutes"]
         item["doctor_delay_minutes"] = metrics["doctor_delay_minutes"]
         item["queue_adjusted_time"] = metrics["queue_adjusted_time"]
@@ -5096,9 +5111,15 @@ async def get_queue_position(
 
         "estimated_wait_minutes": metrics["estimated_wait_minutes"],
 
+        "rolling_average_minutes": metrics["rolling_average_minutes"],
+
+        "weighted_average_minutes": metrics["weighted_average_minutes"],
+
         "latest_estimated_wait_minutes": metrics["latest_estimated_wait_minutes"],
 
         "earliest_eta": metrics["earliest_eta"],
+
+        "predicted_eta": metrics["predicted_eta"],
 
         "latest_eta": metrics["latest_eta"],
 
@@ -6100,6 +6121,8 @@ async def create_token(
 
         "earliest_eta": metrics["earliest_eta"],
 
+        "predicted_eta": metrics["predicted_eta"],
+
         "latest_eta": metrics["latest_eta"],
 
         "consultation_window": metrics["consultation_window"],
@@ -6107,6 +6130,10 @@ async def create_token(
         "estimated_window_text": metrics["estimated_window_text"],
 
         "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+
+        "rolling_average_minutes": metrics["rolling_average_minutes"],
+
+        "weighted_average_minutes": metrics["weighted_average_minutes"],
 
         "active_delay_minutes": metrics["active_delay_minutes"],
 
