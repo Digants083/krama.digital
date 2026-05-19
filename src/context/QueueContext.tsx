@@ -9,6 +9,16 @@ type QueueItem = {
   blood_group?: string;
   doctor_delay?: string | null;
   estimated_wait_minutes?: number | null;
+  latest_estimated_wait_minutes?: number | null;
+  earliest_eta?: string | null;
+  predicted_eta?: string | null;
+  latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  active_delay_minutes?: number | null;
+  queue_adjusted_time?: string | null;
+  session_status?: string | null;
   source: "online" | "desk" | "walkin" | "skipped";
   clinic_id: string;
   appointment_id?: number;
@@ -34,6 +44,16 @@ type CurrentServing = {
   blood_group?: string;
   doctor_delay?: string | null;
   estimated_wait_minutes?: number | null;
+  latest_estimated_wait_minutes?: number | null;
+  earliest_eta?: string | null;
+  predicted_eta?: string | null;
+  latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  active_delay_minutes?: number | null;
+  queue_adjusted_time?: string | null;
+  session_status?: string | null;
   appointmentId?: number;
   clinicId?: string;
   source?: "online" | "desk" | "walkin" | "skipped";
@@ -49,12 +69,23 @@ type QueueAppointment = {
   blood_group?: string;
   doctor_delay?: string | null;
   estimated_wait_minutes?: number | null;
+  latest_estimated_wait_minutes?: number | null;
+  earliest_eta?: string | null;
+  predicted_eta?: string | null;
+  latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  active_delay_minutes?: number | null;
+  queue_adjusted_time?: string | null;
+  session_status?: string | null;
   source?: string;
   clinic_id?: string;
   queue_position?: number;
   slot_id?: number;
   status?: string;
   created_at?: string;
+  serving_started_at?: string;
 };
 
 type QueueSnapshot = {
@@ -79,6 +110,16 @@ type WalkinResult = {
   token_number: number;
   token_label: string;
   position: number;
+  estimated_wait_minutes?: number | null;
+  earliest_eta?: string | null;
+  predicted_eta?: string | null;
+  latest_eta?: string | null;
+  rolling_average_minutes?: number | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  active_delay_minutes?: number | null;
+  queue_adjusted_time?: string | null;
+  session_status?: string | null;
 };
 
 type QueueContextType = {
@@ -152,6 +193,16 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         blood_group: apt.blood_group,
         doctor_delay: apt.doctor_delay,
         estimated_wait_minutes: apt.estimated_wait_minutes,
+        latest_estimated_wait_minutes: apt.latest_estimated_wait_minutes,
+        earliest_eta: apt.earliest_eta,
+        predicted_eta: apt.predicted_eta,
+        latest_eta: apt.latest_eta,
+        rolling_average_minutes: apt.rolling_average_minutes,
+        consultation_window: apt.consultation_window,
+        estimated_window_text: apt.estimated_window_text,
+        active_delay_minutes: apt.active_delay_minutes,
+        queue_adjusted_time: apt.queue_adjusted_time,
+        session_status: apt.session_status,
         source: apt.source === "walkin" ? "walkin" : "online",
         clinic_id: apt.clinic_id || clinicId,
         appointment_id: apt.id,
@@ -170,7 +221,17 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             blood_group: servingAppointment.blood_group,
             doctor_delay: servingAppointment.doctor_delay,
             estimated_wait_minutes: servingAppointment.estimated_wait_minutes,
-            startTime: preserveStartTime || (servingAppointment.created_at ? new Date(servingAppointment.created_at) : null),
+            latest_estimated_wait_minutes: servingAppointment.latest_estimated_wait_minutes,
+            earliest_eta: servingAppointment.earliest_eta,
+            predicted_eta: servingAppointment.predicted_eta,
+            latest_eta: servingAppointment.latest_eta,
+            rolling_average_minutes: servingAppointment.rolling_average_minutes,
+            consultation_window: servingAppointment.consultation_window,
+            estimated_window_text: servingAppointment.estimated_window_text,
+            active_delay_minutes: servingAppointment.active_delay_minutes,
+            queue_adjusted_time: servingAppointment.queue_adjusted_time,
+            session_status: servingAppointment.session_status,
+            startTime: preserveStartTime || (servingAppointment.serving_started_at ? new Date(servingAppointment.serving_started_at) : null),
             appointmentId: servingAppointment.id,
             clinicId: servingAppointment.clinic_id,
             source: servingAppointment.source === "walkin" ? "walkin" : "online",
@@ -258,6 +319,16 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         token: data.token_label || `W-${data.token_number}`,
         name: payload.patient_name,
         phone: payload.phone,
+        estimated_wait_minutes: data.estimated_wait_minutes,
+        earliest_eta: data.earliest_eta,
+        predicted_eta: data.predicted_eta,
+        latest_eta: data.latest_eta,
+        rolling_average_minutes: data.rolling_average_minutes,
+        consultation_window: data.consultation_window,
+        estimated_window_text: data.estimated_window_text,
+        active_delay_minutes: data.active_delay_minutes,
+        queue_adjusted_time: data.queue_adjusted_time,
+        session_status: data.session_status,
         source: "walkin",
         clinic_id: payload.clinic_id,
       };
@@ -269,6 +340,16 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         token_number: data.token_number,
         token_label: data.token_label || `W-${data.token_number}`,
         position: data.position,
+        estimated_wait_minutes: data.estimated_wait_minutes,
+        earliest_eta: data.earliest_eta,
+        predicted_eta: data.predicted_eta,
+        latest_eta: data.latest_eta,
+        rolling_average_minutes: data.rolling_average_minutes,
+        consultation_window: data.consultation_window,
+        estimated_window_text: data.estimated_window_text,
+        active_delay_minutes: data.active_delay_minutes,
+        queue_adjusted_time: data.queue_adjusted_time,
+        session_status: data.session_status,
       };
     },
     []
@@ -289,8 +370,10 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
-          // Set start time to NOW when clicking Next - this is the actual serving start time
-          const startTimeNow = new Date();
+          const servedAppointment: QueueAppointment = await response.json().then((data) => data.appointment || {});
+          const startTimeNow = servedAppointment.serving_started_at
+            ? new Date(servedAppointment.serving_started_at)
+            : new Date();
           setCurrentServing({
             patientName: patient.name,
             token: patient.token,
@@ -301,6 +384,16 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             blood_group: patient.blood_group,
             doctor_delay: patient.doctor_delay,
             estimated_wait_minutes: patient.estimated_wait_minutes,
+            latest_estimated_wait_minutes: patient.latest_estimated_wait_minutes,
+            earliest_eta: patient.earliest_eta,
+            predicted_eta: patient.predicted_eta,
+            latest_eta: patient.latest_eta,
+            rolling_average_minutes: patient.rolling_average_minutes,
+            consultation_window: patient.consultation_window,
+            estimated_window_text: patient.estimated_window_text,
+            active_delay_minutes: patient.active_delay_minutes,
+            queue_adjusted_time: patient.queue_adjusted_time,
+            session_status: patient.session_status,
             startTime: startTimeNow, // Start timer NOW when clicking Next
             appointmentId: patient.appointment_id,
             clinicId: patient.clinic_id,
@@ -335,8 +428,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
-          // Preserve the current start time when refreshing
-          await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId, currentServing.startTime);
+          await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId);
         }
       } catch (error) {
         console.error("Error completing patient:", error);

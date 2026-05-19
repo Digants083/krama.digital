@@ -1,7 +1,9 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
+import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 
-// ─── Types ────────────────────────────────────────────────────────────────────────────────
+// Types
 interface ClinicInfo {
   id: string;
   name: string;
@@ -10,7 +12,7 @@ interface ClinicInfo {
 
 type Step = "form" | "loading" | "success" | "error";
 
-// ─── Component ────────────────────────────────────────────────────────────────────────────────
+// Component
 const WalkinQueue = () => {
   // QR codes should link to /walkin?clinic_id=XYZ
   const [searchParams] = useSearchParams();
@@ -26,10 +28,21 @@ const WalkinQueue = () => {
     token_label: string;
     position: number;
     patient_name: string;
+    predicted_eta?: string | null;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
+    estimated_wait_minutes?: number | null;
+    active_delay_minutes?: number | null;
+    doctor_delay?: string | null;
+    delay_minutes?: number | null;
+    delay_ends_at?: string | null;
+    delay_original_start_time?: string | null;
+    delay_updated_start_time?: string | null;
+    session_status?: string | null;
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // ─── Fetch clinic info when clinic_id is known ────────────────────────────────────────────────
+  // Fetch clinic info when clinic_id is known
   useEffect(() => {
     if (!qrClinicId) {
       setClinicLoading(false);
@@ -51,13 +64,43 @@ const WalkinQueue = () => {
       .finally(() => setClinicLoading(false));
   }, [qrClinicId]);
 
-  // ─── Validation ────────────────────────────────────────────────────────────────────────────────
+  const refreshTokenResult = useCallback(async () => {
+    if (!tokenResult || !phone) return;
+    try {
+      const response = await fetch(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const updated = (data.appointments || []).find((apt: any) => apt.token_label === tokenResult.token_label);
+      if (!updated) return;
+      setTokenResult((prev) => prev ? {
+        ...prev,
+        position: Number(String(updated.position || "").split("/")[0]) || prev.position,
+        predicted_eta: updated.predicted_eta,
+        consultation_window: updated.consultation_window,
+        estimated_window_text: updated.estimated_window_text,
+        estimated_wait_minutes: updated.estimated_wait_minutes,
+        active_delay_minutes: updated.active_delay_minutes,
+        doctor_delay: updated.doctor_delay,
+        delay_minutes: updated.delay_minutes,
+        delay_ends_at: updated.delay_ends_at,
+        delay_original_start_time: updated.delay_original_start_time,
+        delay_updated_start_time: updated.delay_updated_start_time,
+        session_status: updated.session_status,
+      } : prev);
+    } catch (error) {
+      console.error("Failed to refresh token timing:", error);
+    }
+  }, [phone, tokenResult]);
+
+  useQueueRealtime(step === "success" ? clinicInfo?.id : null, () => void refreshTokenResult());
+
+  // Validation
   const phoneRegex = /^[6-9]\d{9}$/;
   const isValid =
     name.trim().length >= 2 &&
     phoneRegex.test(phone.trim());
 
-  // ─── Submit ────────────────────────────────────────────────────────────────────────────────────
+  // Submit
   const handleJoin = async () => {
     if (!isValid || !clinicInfo) return;
     setStep("loading");
@@ -85,6 +128,17 @@ const WalkinQueue = () => {
         token_label: data.token_label,
         position: data.position,
         patient_name: data.patient_name,
+        predicted_eta: data.predicted_eta,
+        consultation_window: data.consultation_window,
+        estimated_window_text: data.estimated_window_text,
+        estimated_wait_minutes: data.estimated_wait_minutes,
+        active_delay_minutes: data.active_delay_minutes,
+        doctor_delay: data.doctor_delay,
+        delay_minutes: data.delay_minutes,
+        delay_ends_at: data.delay_ends_at,
+        delay_original_start_time: data.delay_original_start_time,
+        delay_updated_start_time: data.delay_updated_start_time,
+        session_status: data.session_status,
       });
       setStep("success");
     } catch (err: unknown) {
@@ -94,12 +148,12 @@ const WalkinQueue = () => {
     }
   };
 
-  // ─── Go back to home ────────────────────────────────────────────────────────────────────────────
+  // Go back to home
   const handleGoHome = () => {
     navigate("/");
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────────────────────────
+  // Render
 
   // Invalid QR code
   if (!qrClinicId) {
@@ -128,6 +182,9 @@ const WalkinQueue = () => {
 
   // Success screen
   if (step === "success" && tokenResult) {
+    const activeDelayMinutes = tokenResult.active_delay_minutes || tokenResult.delay_minutes || 0;
+    const hasActiveDelay = Boolean(tokenResult.doctor_delay || activeDelayMinutes > 0);
+    const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : tokenResult.doctor_delay;
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
         <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
@@ -157,6 +214,32 @@ const WalkinQueue = () => {
             <span className="text-gray-500">Patients ahead of you: </span>
             <span className="font-semibold">{Math.max(0, tokenResult.position - 1)}</span>
           </div>
+
+          <div className="mb-6 rounded-xl border border-[#00555A]/10 bg-[#00555A]/5 px-4 py-4 text-left">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Estimated Consultation Window</p>
+            <p className="mt-1 text-lg font-bold text-[#0F172A]">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
+            {tokenResult.predicted_eta && (
+              <p className="mt-1 text-xs font-semibold text-[#00555A]">Predicted Consultation Time: {formatIsoClock(tokenResult.predicted_eta)}</p>
+            )}
+            {tokenResult.estimated_wait_minutes != null && (
+              <p className="mt-1 text-xs text-gray-500">Estimated wait {formatDurationMinutes(tokenResult.estimated_wait_minutes)}</p>
+            )}
+          </div>
+
+          {hasActiveDelay && (
+            <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 px-4 py-4 text-left">
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Delay update</p>
+              <p className="mt-1 text-lg font-bold text-orange-900">Slot delayed by {delayAmountText}</p>
+              {tokenResult.delay_original_start_time && tokenResult.delay_updated_start_time && (
+                <p className="mt-1 text-sm text-orange-800">
+                  Original {tokenResult.delay_original_start_time} - New {tokenResult.delay_updated_start_time}
+                </p>
+              )}
+              <p className="mt-1 text-sm text-orange-800">
+                New ETA: {formatIsoClock(tokenResult.predicted_eta) || tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}
+              </p>
+            </div>
+          )}
 
           <p className="text-xs text-gray-400 mb-4">
             Please wait for your token to be called.

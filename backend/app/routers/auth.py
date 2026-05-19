@@ -20,7 +20,7 @@ from pydantic import BaseModel, EmailStr
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, or_, func
 
 from app.database.db import get_db
 
@@ -38,6 +38,8 @@ from app.services.email_service import send_clinic_registration_received_email
 
 from app.services.geocoding_service import get_coordinates_from_address, get_coordinates_from_structured_address
 from app.services.queue_metrics import get_live_queue_metrics
+from app.services.delay_jobs import parse_dt
+from app.services.realtime import publish_queue_event
 
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
@@ -74,6 +76,16 @@ def _load_slot_status(raw_slot_status):
     return list(slot_status or [])
 
 
+def _load_slot_delays(raw_delays, slots: list) -> list[int]:
+    delays = _load_slots(raw_delays)
+    normalized = []
+    for index, slot in enumerate(slots):
+        list_delay = _delay_minutes(str(delays[index])) if index < len(delays) and delays[index] else 0
+        slot_delay = _delay_minutes(str(slot.get("delay_minutes", 0))) if slot.get("delay_minutes") else 0
+        normalized.append(slot_delay or list_delay)
+    return normalized
+
+
 def _is_slot_available(slot: dict, slot_status: list, index: int) -> bool:
     if not slot.get("is_open"):
         return False
@@ -103,6 +115,67 @@ def _delay_minutes(delay: Optional[str]) -> int:
     if "hour" in lowered:
         return amount * 60
     return amount
+
+
+def _delay_label(minutes: int) -> Optional[str]:
+    if minutes <= 0:
+        return None
+    if minutes == 60:
+        return "1 hour"
+    if minutes > 60 and minutes % 60 == 0:
+        return f"{minutes // 60} hours"
+    return f"{minutes} min"
+
+
+def _format_hour_decimal(value: float) -> str:
+    total_minutes = int(round(value * 60)) % (24 * 60)
+    hour24 = total_minutes // 60
+    minute = total_minutes % 60
+    hour12 = hour24 % 12 or 12
+    suffix = "PM" if hour24 >= 12 else "AM"
+    return f"{hour12}:{minute:02d} {suffix}"
+
+
+async def _slot_delay_info(db: AsyncSession, clinic_id: str, slot_id: Optional[int]) -> dict:
+    if not slot_id:
+        return {"minutes": 0, "label": None, "delayed_start_time": None}
+    try:
+        slot_result = await db.execute(select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id))
+        slot_record = slot_result.scalar_one_or_none()
+        if not slot_record:
+            return {"minutes": 0, "label": None, "delayed_start_time": None}
+
+        slots = _load_slots(slot_record.slots)
+        slot_index = int(slot_id) - 1
+        if slot_index < 0 or slot_index >= len(slots):
+            return {"minutes": 0, "label": None, "delayed_start_time": None}
+
+        slot_delays = _load_slot_delays(getattr(slot_record, "slot_delays", []), slots)
+        slot = slots[slot_index]
+        minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
+        time_range = slot.get("time_range", [])
+        if minutes > 0 and isinstance(time_range, list) and len(time_range) > 1:
+            now = datetime.now(CLINIC_TIMEZONE)
+            current_decimal = now.hour + now.minute / 60.0
+            slot_end = float(time_range[1])
+            if slot_end > 24 and current_decimal < slot_end - 24:
+                current_decimal += 24
+            if current_decimal >= slot_end:
+                minutes = 0
+        delayed_start_time = None
+        if minutes > 0 and isinstance(time_range, list) and time_range:
+            delayed_start_time = _format_hour_decimal(float(time_range[0]) + minutes / 60)
+        return {
+            "minutes": minutes,
+            "label": _delay_label(minutes),
+            "delayed_start_time": delayed_start_time,
+            "delay_started_at": slot.get("delay_started_at") if minutes > 0 else None,
+            "delay_ends_at": slot.get("delay_ends_at") if minutes > 0 else None,
+            "delay_original_start_time": slot.get("delay_original_start_time") if minutes > 0 else None,
+            "delay_updated_start_time": slot.get("delay_updated_start_time") if minutes > 0 else None,
+        }
+    except Exception:
+        return {"minutes": 0, "label": None, "delayed_start_time": None}
 
 from app.schemas import (
 
@@ -1090,9 +1163,20 @@ async def clinic_verify_signup(
 
 async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_db)):
 
-    # First check if there's an approved clinic with this email
+    login_identifier = login_data.email.strip()
+    login_identifier_lower = login_identifier.lower()
+    login_identifier_upper = login_identifier.upper()
 
-    result = await db.execute(select(Clinic).where(Clinic.email == login_data.email))
+    # First check if there's an approved clinic with this email or clinic ID
+
+    result = await db.execute(
+        select(Clinic).where(
+            or_(
+                func.lower(Clinic.email) == login_identifier_lower,
+                func.upper(Clinic.clinic_id) == login_identifier_upper,
+            )
+        )
+    )
 
     clinic = result.scalar_one_or_none()
 
@@ -1100,11 +1184,9 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
     if clinic:
 
-        # A clinic needs to pin their location if they haven't done it yet
-
-        # OR if for some reason the coordinates are missing.
-
         first_login = not clinic.has_pinned_location or not clinic.latitude or not clinic.longitude
+        suggested_latitude = clinic.admin_pinned_latitude or (clinic.latitude if not clinic.has_pinned_location else None)
+        suggested_longitude = clinic.admin_pinned_longitude or (clinic.longitude if not clinic.has_pinned_location else None)
 
 
 
@@ -1114,7 +1196,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
                 status_code=status.HTTP_401_UNAUTHORIZED,
 
-                detail="Invalid email or password"
+                detail="Invalid email/clinic ID or password"
 
             )
 
@@ -1124,27 +1206,34 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
             user_type="clinic",
 
+            email=clinic.email,
+
             clinic_id=clinic.clinic_id,
 
             first_login=first_login,
 
             address=clinic.address, # Provide address for the frontend to center the map
 
-            latitude=clinic.latitude,
+            latitude=suggested_latitude if first_login and not clinic.has_pinned_location else clinic.latitude,
 
-            longitude=clinic.longitude
+            longitude=suggested_longitude if first_login and not clinic.has_pinned_location else clinic.longitude
 
         )
 
 
 
-    # Check if there's a pending registration with this email
+    # Check if there's a pending registration with this email or clinic ID
 
     result = await db.execute(
 
         select(PendingClinicRegistration)
 
-        .where(PendingClinicRegistration.email == login_data.email)
+        .where(
+            or_(
+                func.lower(PendingClinicRegistration.email) == login_identifier_lower,
+                func.upper(PendingClinicRegistration.clinic_id) == login_identifier_upper,
+            )
+        )
 
         .where(PendingClinicRegistration.status == "pending")
 
@@ -1176,7 +1265,12 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
         select(PendingClinicRegistration)
 
-        .where(PendingClinicRegistration.email == login_data.email)
+        .where(
+            or_(
+                func.lower(PendingClinicRegistration.email) == login_identifier_lower,
+                func.upper(PendingClinicRegistration.clinic_id) == login_identifier_upper,
+            )
+        )
 
         .where(PendingClinicRegistration.status == "rejected")
 
@@ -1204,7 +1298,7 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
         status_code=status.HTTP_401_UNAUTHORIZED,
 
-        detail="Invalid email or password"
+        detail="Invalid email/clinic ID or password"
 
     )
 
@@ -1320,7 +1414,18 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
 async def patient_login(login_data: PatientLogin, db: AsyncSession = Depends(get_db)):
 
-    result = await db.execute(select(Patient).where(Patient.email == login_data.email))
+    login_identifier = login_data.email.strip()
+    login_identifier_lower = login_identifier.lower()
+    login_identifier_upper = login_identifier.upper()
+
+    result = await db.execute(
+        select(Patient).where(
+            or_(
+                func.lower(Patient.email) == login_identifier_lower,
+                func.upper(Patient.patient_id) == login_identifier_upper,
+            )
+        )
+    )
 
     patient = result.scalar_one_or_none()
 
@@ -1332,7 +1437,7 @@ async def patient_login(login_data: PatientLogin, db: AsyncSession = Depends(get
 
             status_code=status.HTTP_401_UNAUTHORIZED,
 
-            detail="Invalid email or password"
+            detail="Invalid email/patient ID or password"
 
         )
 
@@ -1343,6 +1448,8 @@ async def patient_login(login_data: PatientLogin, db: AsyncSession = Depends(get
         message="Login successful",
 
         user_type="patient",
+
+        email=patient.email,
 
         patient_data={
 
@@ -1475,6 +1582,10 @@ async def get_clinic_data(
         "latitude": clinic.latitude,
 
         "longitude": clinic.longitude,
+
+        "admin_pinned_latitude": clinic.admin_pinned_latitude or (clinic.latitude if not clinic.has_pinned_location else None),
+
+        "admin_pinned_longitude": clinic.admin_pinned_longitude or (clinic.longitude if not clinic.has_pinned_location else None),
 
         "has_pinned_location": clinic.has_pinned_location,
 
@@ -2148,6 +2259,10 @@ async def update_clinic_profile(
 
         clinic.longitude = None
 
+        clinic.admin_pinned_latitude = None
+
+        clinic.admin_pinned_longitude = None
+
         clinic.has_pinned_location = False
 
 
@@ -2255,6 +2370,10 @@ async def update_clinic_location(
     clinic.longitude = longitude
 
     clinic.has_pinned_location = True
+
+    clinic.admin_pinned_latitude = None
+
+    clinic.admin_pinned_longitude = None
 
 
 
@@ -3201,6 +3320,10 @@ async def pin_clinic_location(
 
     clinic.has_pinned_location = True
 
+    clinic.admin_pinned_latitude = None
+
+    clinic.admin_pinned_longitude = None
+
 
 
     await db.commit()
@@ -3927,6 +4050,7 @@ async def create_appointment(
         # Calculate queue position
 
         queue_position = active_online + active_walkin + 1
+        slot_delay = await _slot_delay_info(db, clinic_id, slot_id)
 
 
 
@@ -3956,6 +4080,8 @@ async def create_appointment(
 
             session_id=slot_id,
 
+            doctor_delay=slot_delay["label"],
+
             queue_position=queue_position
 
         )
@@ -3968,145 +4094,17 @@ async def create_appointment(
 
         await db.refresh(new_appointment)
 
-
-
-        # Smart Reach-Turn Logic: Send immediate email if booking during active slot with 0-1 people ahead
-
-        try:
-
-            from app.services.email_service import send_queue_alert
-
-
-
-            now = datetime.now()
-
-            current_time_decimal = now.hour + now.minute / 60.0
-
-
-
-            # Get clinic time slots
-
-            slot_result = await db.execute(
-
-                select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id)
-
-            )
-
-            slot_record = slot_result.scalar_one_or_none()
-
-
-
-            if slot_record and slot_id is not None:
-
-                slots = slot_record.slots
-
-                if isinstance(slots, str):
-
-                    import json
-
-                    slots = json.loads(slots)
-
-                slots = list(slots or [])
-
-
-
-                # Find the slot being booked
-
-                slot_index = int(slot_id) - 1
-
-                if 0 <= slot_index < len(slots):
-
-                    slot = slots[slot_index]
-
-                    time_range = slot.get("time_range", [0, 0])
-
-                    start_time = time_range[0]
-
-                    end_time = time_range[1]
-
-
-
-                    # Check if booking is during active slot time
-
-                    if start_time <= current_time_decimal < end_time and slot.get("is_open"):
-
-                        # Count people ahead in same slot
-
-                        result = await db.execute(
-
-                            select(Appointment).where(
-
-                                Appointment.clinic_id == clinic_id,
-
-                                Appointment.date == date,
-
-                                Appointment.slot_id == slot_id,
-
-                                Appointment.status.in_(["booked", "serving"]),
-
-                                Appointment.id < new_appointment.id
-
-                            ).order_by(Appointment.id)
-
-                        )
-
-                        people_ahead = len(result.scalars().all())
-
-
-
-                        # If 0-1 people ahead, send immediate reach-turn email
-
-                        if people_ahead <= 1:
-
-                            clinic_result = await db.execute(
-
-                                select(Clinic).where(Clinic.clinic_id == clinic_id)
-
-                            )
-
-                            clinic = clinic_result.scalar_one_or_none()
-
-
-
-                            email_sent = send_queue_alert(
-
-                                patient_email,
-
-                                patient_name,
-
-                                clinic.clinic_name if clinic else clinic_id,
-
-                                "reach_turn",
-
-                                token_number=appointment_token,
-
-                                doctor_name=doctor_name or (clinic.doctor_name if clinic else ""),
-
-                                clinic_location=clinic.address if clinic else "",
-
-                                latitude=clinic.latitude if clinic else None,
-
-                                longitude=clinic.longitude if clinic else None,
-
-                            )
-
-
-
-                            if email_sent:
-
-                                # Set notification stage to prevent duplicate emails
-
-                                new_appointment.notification_stage = "reach_turn"
-
-                                await db.commit()
-
-                                await db.refresh(new_appointment)
-
-        except Exception as email_error:
-
-            # Don't fail the booking if email fails
-
-            print(f"Smart reach-turn email failed: {email_error}")
+        metrics = await get_live_queue_metrics(
+            db,
+            clinic_id,
+            date,
+            "online",
+            new_appointment.id,
+            new_appointment.appointment_token,
+            new_appointment.slot_id,
+        )
+
+        await publish_queue_event(clinic_id, "queue_updated", {"slot_id": new_appointment.slot_id})
 
 
 
@@ -4153,7 +4151,45 @@ async def create_appointment(
 
             "date": date,
 
-            "time": time
+            "time": time,
+
+            "earliest_eta": metrics["earliest_eta"],
+
+            "predicted_eta": metrics["predicted_eta"],
+
+            "latest_eta": metrics["latest_eta"],
+
+            "consultation_window": metrics["consultation_window"],
+
+            "estimated_window_text": metrics["estimated_window_text"],
+
+            "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+
+            "rolling_average_minutes": metrics["rolling_average_minutes"],
+
+            "weighted_average_minutes": metrics["weighted_average_minutes"],
+
+            "active_delay_minutes": metrics["active_delay_minutes"],
+
+            "doctor_delay_minutes": metrics["doctor_delay_minutes"],
+
+            "doctor_delay": slot_delay["label"],
+
+            "delay_minutes": slot_delay["minutes"],
+
+            "delay_started_at": slot_delay.get("delay_started_at"),
+
+            "delay_ends_at": slot_delay.get("delay_ends_at"),
+
+            "delay_original_start_time": slot_delay.get("delay_original_start_time"),
+
+            "delay_updated_start_time": slot_delay.get("delay_updated_start_time"),
+
+            "queue_adjusted_time": metrics["queue_adjusted_time"],
+
+            "queue_position": metrics["queue_position"],
+
+            "session_status": metrics["session_status"],
 
         }
 
@@ -4332,6 +4368,19 @@ async def get_patient_appointments_by_email(
                         time_range = selected_slot.get("time_range") or []
                         session_time = str(time_range)
 
+            metrics = None
+            slot_delay = await _slot_delay_info(db, apt.clinic_id, getattr(apt, "slot_id", None))
+            if apt.date == _clinic_today_str() and apt.status in ["booked", "pending", "serving"]:
+                metrics = await get_live_queue_metrics(
+                    db,
+                    apt.clinic_id,
+                    apt.date,
+                    "online",
+                    apt.id,
+                    apt.appointment_token,
+                    getattr(apt, "slot_id", None),
+                )
+
             appointment_list.append({
 
                 "id": apt.id,
@@ -4368,7 +4417,45 @@ async def get_patient_appointments_by_email(
 
                 "status": apt.status,
 
-                "created_at": apt.created_at
+                "created_at": apt.created_at,
+
+                "earliest_eta": metrics["earliest_eta"] if metrics and metrics["found"] else None,
+
+                "predicted_eta": metrics["predicted_eta"] if metrics and metrics["found"] else None,
+
+                "latest_eta": metrics["latest_eta"] if metrics and metrics["found"] else None,
+
+                "consultation_window": metrics["consultation_window"] if metrics and metrics["found"] else None,
+
+                "estimated_window_text": metrics["estimated_window_text"] if metrics and metrics["found"] else None,
+
+                "estimated_wait_minutes": metrics["estimated_wait_minutes"] if metrics and metrics["found"] else None,
+
+                "rolling_average_minutes": metrics["rolling_average_minutes"] if metrics and metrics["found"] else None,
+
+                "weighted_average_minutes": metrics["weighted_average_minutes"] if metrics and metrics["found"] else None,
+
+                "active_delay_minutes": metrics["active_delay_minutes"] if metrics and metrics["found"] else 0,
+
+                "doctor_delay_minutes": metrics["doctor_delay_minutes"] if metrics and metrics["found"] else 0,
+
+                "doctor_delay": apt.doctor_delay or slot_delay["label"],
+
+                "delay_minutes": slot_delay["minutes"],
+
+                "delay_started_at": slot_delay.get("delay_started_at"),
+
+                "delay_ends_at": slot_delay.get("delay_ends_at"),
+
+                "delay_original_start_time": slot_delay.get("delay_original_start_time"),
+
+                "delay_updated_start_time": slot_delay.get("delay_updated_start_time"),
+
+                "queue_adjusted_time": metrics["queue_adjusted_time"] if metrics and metrics["found"] else None,
+
+                "queue_position": metrics["queue_position"] if metrics and metrics["found"] else None,
+
+                "session_status": metrics["session_status"] if metrics and metrics["found"] else apt.status,
 
             })
 
@@ -4754,6 +4841,7 @@ async def get_today_appointments(
             "status": apt.status,
 
             "created_at": apt.created_at,
+            "serving_started_at": getattr(apt, "serving_started_at", None),
 
             "queue_position": apt.queue_position,
 
@@ -4798,6 +4886,7 @@ async def get_today_appointments(
             "status": apt.status,
 
             "created_at": apt.created_at,
+            "serving_started_at": getattr(apt, "serving_started_at", None),
 
             "queue_position": apt.queue_position,
 
@@ -4807,11 +4896,21 @@ async def get_today_appointments(
 
 
 
-    # Keep online + walk-in rows in the visible token order.
+    serving_token_number = next(
+        (_token_number(item.get("token")) for item in appointment_list if item.get("status") == "serving"),
+        None,
+    )
+    prefer_queue_position = any(item.get("status") == "skipped" for item in appointment_list)
+
+    # Keep online + walk-in rows in live queue order. If a patient is serving,
+    # the visible queue starts there. Normal queues use token order; skipped
+    # queues honor queue_position because skip intentionally moves a patient back.
     appointment_list.sort(
         key=lambda x: (
-            _token_number(x.get("token")),
-            x.get("queue_position") if x.get("queue_position") is not None else 10**9,
+            0 if x.get("status") == "serving" else 1,
+            0 if serving_token_number is None or _token_number(x.get("token")) >= serving_token_number else 1,
+            x.get("queue_position") if prefer_queue_position and x.get("queue_position") is not None else _token_number(x.get("token")),
+            _token_number(x.get("token")) if prefer_queue_position else x.get("queue_position") if x.get("queue_position") is not None else 10**9,
             _sort_datetime(x.get("created_at")),
             0 if x.get("source") != "walkin" else 1,
             x.get("id") or 0,
@@ -4824,9 +4923,32 @@ async def get_today_appointments(
 
     delay_minutes = _delay_minutes(active_delay)
 
-    for index, item in enumerate(appointment_list):
-
-        item["estimated_wait_minutes"] = delay_minutes + (index * 15)
+    for item in appointment_list:
+        metrics = await get_live_queue_metrics(
+            db,
+            clinic_id,
+            today,
+            "walkin" if item.get("source") == "walkin" else "online",
+            item.get("id"),
+            item.get("token"),
+            viewing_slot_id,
+        )
+        item["estimated_wait_minutes"] = metrics["estimated_wait_minutes"]
+        item["latest_estimated_wait_minutes"] = metrics["latest_estimated_wait_minutes"]
+        item["earliest_eta"] = metrics["earliest_eta"]
+        item["predicted_eta"] = metrics["predicted_eta"]
+        item["latest_eta"] = metrics["latest_eta"]
+        item["rolling_average_minutes"] = metrics["rolling_average_minutes"]
+        item["weighted_average_minutes"] = metrics["weighted_average_minutes"]
+        item["consultation_window"] = metrics["consultation_window"]
+        item["estimated_window_text"] = metrics["estimated_window_text"]
+        item["active_delay_minutes"] = metrics["active_delay_minutes"]
+        item["doctor_delay_minutes"] = metrics["doctor_delay_minutes"]
+        item["queue_adjusted_time"] = metrics["queue_adjusted_time"]
+        item["queue_position"] = metrics["queue_position"]
+        item["session_status"] = metrics["session_status"]
+        item["consultation_min_minutes"] = metrics["consultation_min_minutes"]
+        item["consultation_max_minutes"] = metrics["consultation_max_minutes"]
 
     return {
 
@@ -5020,11 +5142,40 @@ async def get_queue_position(
 
         )
 
+    slot_delay = await _slot_delay_info(db, clinic_id, getattr(current_appointment, "slot_id", None))
+    doctor_delay = getattr(current_appointment, "doctor_delay", None) or slot_delay["label"]
+
     return {
 
         "patients_ahead": metrics["patients_ahead"],
 
         "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+
+        "rolling_average_minutes": metrics["rolling_average_minutes"],
+
+        "weighted_average_minutes": metrics["weighted_average_minutes"],
+
+        "latest_estimated_wait_minutes": metrics["latest_estimated_wait_minutes"],
+
+        "earliest_eta": metrics["earliest_eta"],
+
+        "predicted_eta": metrics["predicted_eta"],
+
+        "latest_eta": metrics["latest_eta"],
+
+        "consultation_window": metrics["consultation_window"],
+
+        "estimated_window_text": metrics["estimated_window_text"],
+
+        "active_delay_minutes": metrics["active_delay_minutes"],
+
+        "doctor_delay_minutes": metrics["doctor_delay_minutes"],
+
+        "queue_adjusted_time": metrics["queue_adjusted_time"],
+
+        "queue_position": metrics["queue_position"],
+
+        "session_status": metrics["session_status"],
 
         "your_position": metrics["your_position"],
 
@@ -5034,7 +5185,19 @@ async def get_queue_position(
 
         "now_serving_token": metrics["now_serving_token"],
 
-        "doctor_delay": getattr(current_appointment, "doctor_delay", None),
+        "doctor_delay": doctor_delay,
+
+        "delay_minutes": slot_delay["minutes"],
+
+        "delayed_start_time": slot_delay["delayed_start_time"],
+
+        "delay_started_at": slot_delay.get("delay_started_at"),
+
+        "delay_ends_at": slot_delay.get("delay_ends_at"),
+
+        "delay_original_start_time": slot_delay.get("delay_original_start_time"),
+
+        "delay_updated_start_time": slot_delay.get("delay_updated_start_time"),
 
         "session_id": getattr(current_appointment, "session_id", None) or getattr(current_appointment, "slot_id", None),
 
@@ -5898,7 +6061,7 @@ async def create_token(
 
     # Calculate next token number (append to end of queue).
 
-    max_token_number = 0
+    max_token_number = -1
 
     for appointment in existing_appointments:
 
@@ -5974,6 +6137,18 @@ async def create_token(
 
     await db.refresh(new_appointment)
 
+    metrics = await get_live_queue_metrics(
+        db,
+        clinic_id,
+        today,
+        "online",
+        new_appointment.id,
+        new_appointment.appointment_token,
+        new_appointment.slot_id,
+    )
+
+    await publish_queue_event(clinic_id, "queue_updated", {"slot_id": new_appointment.slot_id})
+
 
 
     return {
@@ -5988,9 +6163,35 @@ async def create_token(
 
         "token_number": next_token_number,
 
-        "position": queue_position,
+        "position": metrics["queue_position"],
 
-        "patientsAhead": queue_position - 1,
+        "patientsAhead": metrics["patients_ahead"],
+
+        "earliest_eta": metrics["earliest_eta"],
+
+        "predicted_eta": metrics["predicted_eta"],
+
+        "latest_eta": metrics["latest_eta"],
+
+        "consultation_window": metrics["consultation_window"],
+
+        "estimated_window_text": metrics["estimated_window_text"],
+
+        "estimated_wait_minutes": metrics["estimated_wait_minutes"],
+
+        "rolling_average_minutes": metrics["rolling_average_minutes"],
+
+        "weighted_average_minutes": metrics["weighted_average_minutes"],
+
+        "active_delay_minutes": metrics["active_delay_minutes"],
+
+        "doctor_delay_minutes": metrics["doctor_delay_minutes"],
+
+        "queue_adjusted_time": metrics["queue_adjusted_time"],
+
+        "queue_position": metrics["queue_position"],
+
+        "session_status": metrics["session_status"],
 
         "appointmentId": new_appointment.id,
 

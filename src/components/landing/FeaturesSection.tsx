@@ -8,7 +8,7 @@ const patientFeatures = [
   { icon: CalendarCheck, title: "Book Appointments", desc: "Pick a doctor, choose a time slot, and confirm in seconds." },
   { icon: Radio, title: "Track Live Queue", desc: "Watch your queue position update in real time from anywhere." },
   { icon: BellRing, title: "Get Alerts Before Turn", desc: "Receive a notification when it's almost your turn." },
-  { icon: Smartphone, title: "No App Install", desc: "Works in any mobile browser — zero friction." },
+  { icon: Smartphone, title: "No App Install", desc: "Works in any mobile browser - zero friction." },
 ];
 
 const clinicFeatures = [

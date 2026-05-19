@@ -17,17 +17,24 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "slot_id": "INTEGER",
         "push_count": "INTEGER DEFAULT 0",
         "queue_position": "INTEGER",
+        "serving_started_at": "TIMESTAMP",
     },
     "qr_appointments": {
         "doctor_name": "VARCHAR",
         "slot_id": "INTEGER",
         "queue_position": "INTEGER",
+        "serving_started_at": "TIMESTAMP",
     },
     "completed_appointments": {
+        "doctor_id": "VARCHAR",
         "slot_id": "INTEGER",
+        "serving_started_at": "TIMESTAMP",
         "finished_at": "TIMESTAMP",
+        "completed_at": "TIMESTAMP",
         "status": "VARCHAR DEFAULT 'served'",
         "wait_time_minutes": "INTEGER",
+        "service_duration_seconds": "INTEGER",
+        "consultation_duration_minutes": "INTEGER",
         "outcome": "VARCHAR DEFAULT 'served'",
         "served": "BOOLEAN DEFAULT TRUE",
         "push_count": "INTEGER DEFAULT 0",
@@ -35,9 +42,29 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
     "clinic_time_slots": {
         "slots": "JSON DEFAULT '[]'",
         "slot": "VARCHAR[] DEFAULT '{}'",
+        "slot_delays": "JSON DEFAULT '[]'",
         "last_slot_change_date": "TIMESTAMP",
         "daily_toggle_counts": "JSON DEFAULT '[]'",
         "last_toggle_date": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    },
+    "doctor_sessions": {
+        "clinic_id": "VARCHAR",
+        "doctor_id": "VARCHAR",
+        "session_name": "VARCHAR DEFAULT ''",
+        "start_time": "VARCHAR DEFAULT ''",
+        "end_time": "VARCHAR DEFAULT ''",
+        "status": "VARCHAR DEFAULT 'available'",
+        "delay_minutes": "INTEGER DEFAULT 0",
+        "delay_started_at": "TIMESTAMP",
+        "delay_ends_at": "TIMESTAMP",
+        "delay_original_start_time": "VARCHAR",
+        "delay_updated_start_time": "VARCHAR",
+        "delay_version": "INTEGER DEFAULT 0",
+        "is_active": "BOOLEAN DEFAULT TRUE",
+        "slot_id": "INTEGER",
+        "session_date": "VARCHAR",
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     },
@@ -52,11 +79,15 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "pincode": "VARCHAR",
         "latitude": "VARCHAR",
         "longitude": "VARCHAR",
+        "admin_pinned_latitude": "VARCHAR",
+        "admin_pinned_longitude": "VARCHAR",
         "specialization": "VARCHAR",
         "experience": "VARCHAR",
         "qualifications": "VARCHAR",
         "has_pinned_location": "BOOLEAN DEFAULT FALSE",
         "booking_cutoff_minutes": "INTEGER DEFAULT 15",
+        "consultation_min_minutes": "INTEGER DEFAULT 8",
+        "consultation_max_minutes": "INTEGER DEFAULT 12",
         "is_active": "BOOLEAN DEFAULT FALSE",
         "manual_stop_date": "VARCHAR",
     },
@@ -82,10 +113,67 @@ EXPECTED_RELATED_TABLES = [
     "appointments",
     "qr_appointments",
     "completed_appointments",
+    "doctor_sessions",
     "clinic_time_slots",
     "reports",
     "completed_reports",
 ]
+
+
+REQUIRED_INDEXES: Dict[str, str] = {
+    "idx_appointments_queue_eta": (
+        "CREATE INDEX IF NOT EXISTS idx_appointments_queue_eta "
+        "ON appointments(clinic_id, date, slot_id, status, queue_position)"
+    ),
+    "idx_appointments_serving_started_at": (
+        "CREATE INDEX IF NOT EXISTS idx_appointments_serving_started_at "
+        "ON appointments(serving_started_at)"
+    ),
+    "idx_appointments_session_id": (
+        "CREATE INDEX IF NOT EXISTS idx_appointments_session_id "
+        "ON appointments(session_id)"
+    ),
+    "idx_qr_appointments_queue_eta": (
+        "CREATE INDEX IF NOT EXISTS idx_qr_appointments_queue_eta "
+        "ON qr_appointments(clinic_id, date, slot_id, status, queue_position)"
+    ),
+    "idx_qr_appointments_serving_started_at": (
+        "CREATE INDEX IF NOT EXISTS idx_qr_appointments_serving_started_at "
+        "ON qr_appointments(serving_started_at)"
+    ),
+    "idx_qr_appointments_session_id": (
+        "CREATE INDEX IF NOT EXISTS idx_qr_appointments_session_id "
+        "ON qr_appointments(session_id)"
+    ),
+    "idx_completed_appointments_eta_history": (
+        "CREATE INDEX IF NOT EXISTS idx_completed_appointments_eta_history "
+        "ON completed_appointments(clinic_id, date, slot_id, completed_at DESC)"
+    ),
+    "idx_completed_appointments_serving_started_at": (
+        "CREATE INDEX IF NOT EXISTS idx_completed_appointments_serving_started_at "
+        "ON completed_appointments(serving_started_at)"
+    ),
+    "idx_completed_appointments_status": (
+        "CREATE INDEX IF NOT EXISTS idx_completed_appointments_status "
+        "ON completed_appointments(status)"
+    ),
+    "idx_completed_appointments_session_id": (
+        "CREATE INDEX IF NOT EXISTS idx_completed_appointments_session_id "
+        "ON completed_appointments(session_id)"
+    ),
+    "idx_completed_appointments_doctor_id": (
+        "CREATE INDEX IF NOT EXISTS idx_completed_appointments_doctor_id "
+        "ON completed_appointments(doctor_id)"
+    ),
+    "idx_doctor_sessions_doctor_id": (
+        "CREATE INDEX IF NOT EXISTS idx_doctor_sessions_doctor_id "
+        "ON doctor_sessions(doctor_id)"
+    ),
+    "idx_doctor_sessions_eta": (
+        "CREATE INDEX IF NOT EXISTS idx_doctor_sessions_eta "
+        "ON doctor_sessions(clinic_id, slot_id, session_date, status)"
+    ),
+}
 
 
 async def table_exists(conn: AsyncConnection, table_name: str) -> bool:
@@ -166,6 +254,7 @@ async def ensure_required_schema(conn: AsyncConnection) -> None:
             added_columns.append(f"{table_name}.{column_name}")
 
     await _normalize_column_defaults(conn)
+    await _ensure_required_indexes(conn)
     await _log_relationship_status(conn)
 
     if added_columns:
@@ -200,9 +289,28 @@ async def get_schema_report(conn: AsyncConnection) -> Dict[str, object]:
 async def _normalize_column_defaults(conn: AsyncConnection) -> None:
     await conn.execute(text("UPDATE clinic_time_slots SET slots = '[]' WHERE slots IS NULL"))
     await conn.execute(text("UPDATE clinic_time_slots SET slot = '{}' WHERE slot IS NULL"))
+    await conn.execute(text("UPDATE clinic_time_slots SET slot_delays = '[]' WHERE slot_delays IS NULL"))
     await conn.execute(
         text("UPDATE clinic_time_slots SET daily_toggle_counts = '[]' WHERE daily_toggle_counts IS NULL")
     )
+    await conn.execute(text("UPDATE completed_appointments SET completed_at = finished_at WHERE completed_at IS NULL AND finished_at IS NOT NULL"))
+    await conn.execute(text("UPDATE completed_appointments SET serving_started_at = served_at WHERE serving_started_at IS NULL AND served_at IS NOT NULL"))
+    await conn.execute(
+        text(
+            """
+            UPDATE completed_appointments
+            SET consultation_duration_minutes = GREATEST(1, CEIL(service_duration_seconds / 60.0)::INTEGER)
+            WHERE consultation_duration_minutes IS NULL
+              AND service_duration_seconds IS NOT NULL
+              AND service_duration_seconds > 0
+            """
+        )
+    )
+
+
+async def _ensure_required_indexes(conn: AsyncConnection) -> None:
+    for index_sql in REQUIRED_INDEXES.values():
+        await conn.execute(text(index_sql))
 
 
 async def _log_relationship_status(conn: AsyncConnection) -> None:

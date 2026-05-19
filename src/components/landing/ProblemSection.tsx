@@ -12,13 +12,13 @@ const patientProblems = [
 const clinicProblems = [
   { icon: Clock, title: "Long Waiting Times", desc: "Patients wait 45+ minutes with no idea when their turn will come." },
   { icon: Users, title: "Crowded Clinics", desc: "Packed waiting rooms increase infection risk and discomfort." },
-  { icon: Frown, title: "Patient Frustration", desc: "Uncertainty breeds anxiety — patients leave or complain." },
+  { icon: Frown, title: "Patient Frustration", desc: "Uncertainty breeds anxiety - patients leave or complain." },
   { icon: EyeOff, title: "No Queue Visibility", desc: "Reception has no real-time view of queue status or bottlenecks." },
 ];
 
 const titles = {
   patient: { heading: <>Finding a Doctor Shouldn't Be <span className="text-primary">This Hard</span></>, sub: "Patients struggle with outdated clinic experiences every day." },
-  clinic: { heading: <>Waiting Rooms Are <span className="text-primary">Broken</span></>, sub: "Clinics lose patients — and trust — because of outdated queuing." },
+  clinic: { heading: <>Waiting Rooms Are <span className="text-primary">Broken</span></>, sub: "Clinics lose patients - and trust - because of outdated queuing." },
 };
 
 const ProblemSection = ({ role = "patient" }: { role?: UserRole }) => {

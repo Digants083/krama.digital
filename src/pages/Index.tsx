@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   ArrowRight,
@@ -116,160 +117,161 @@ const solutionGroups = [
 
 const Index = () => {
   return (
-    <div className="min-h-screen overflow-hidden">
-      <section className="section-container px-4 pb-16 pt-10 md:px-8 md:pb-20 md:pt-16">
-        <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-white/80 px-4 py-2 text-sm text-muted-foreground shadow-sm">
-              <Sparkles className="h-4 w-4 text-accent" />
-              Minimal clinic queueing for patients
-            </div>
-
-            <h1 className="mt-6 font-display text-5xl font-bold leading-[1.02] tracking-tight text-foreground md:text-6xl lg:text-7xl">
-              Make clinic visits feel calm, clear, and on time.
-            </h1>
-
-            <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground md:text-xl">
-              Krama keeps your existing flow intact while giving the website a cleaner face for patients and clinics.
-              Join digitally, track turns live, and reduce crowded waiting rooms.
-            </p>
-
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link to="/patient/login">
-                <Button size="lg" className="gap-2">
-                  Patient Login
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link to="/clinic/login">
-                <Button size="lg" variant="outline">
-                  Clinic Login
-                </Button>
-              </Link>
-            </div>
-
-            <div className="mt-10 grid max-w-xl gap-4 sm:grid-cols-3">
-              {heroStats.map((item) => (
-                <div key={item.label} className="rounded-[24px] border border-border/70 bg-white/75 p-5 shadow-sm backdrop-blur">
-                  <p className="font-display text-3xl font-bold text-primary">{item.value}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{item.label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="relative">
-            <div className="absolute inset-x-10 top-8 h-40 rounded-full bg-primary/10 blur-3xl" />
-            <div className="glass-panel relative overflow-hidden rounded-[32px] p-6 md:p-8">
-              <div className="flex items-center justify-between rounded-full border border-border/70 bg-background/80 px-4 py-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Live queue</p>
-                  <p className="mt-1 text-lg font-semibold text-foreground">CityCare Clinic</p>
-                </div>
-                <div className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">Active</div>
+    <div className="min-h-screen overflow-hidden bg-[#fbfaf7]">
+      <section className="section-container px-4 pb-14 pt-10 md:px-8 md:pb-24 md:pt-16">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.04fr_0.96fr] lg:gap-16">
+            <div className="text-foreground">
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#e6ded3] bg-white px-4 py-2 text-sm text-[#40514b] shadow-sm">
+                <Sparkles className="h-4 w-4 text-accent" />
+                Minimal clinic queueing for patients
               </div>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-[1fr_0.88fr]">
-                <div className="rounded-[28px] bg-primary px-6 py-8 text-primary-foreground shadow-[0_24px_60px_-32px_rgba(31,92,84,0.75)]">
-                  <p className="text-sm uppercase tracking-[0.22em] text-primary-foreground/70">Your token</p>
-                  <p className="mt-3 font-display text-6xl font-bold">A-17</p>
+              <h1 className="mt-7 max-w-3xl font-display text-5xl font-bold leading-[1.08] tracking-tight text-[#142620] sm:text-6xl lg:text-7xl">
+                Make clinic visits feel calm, clear, and on time.
+              </h1>
 
-                  <div className="mt-8 grid grid-cols-2 gap-3">
-                    <div className="rounded-[22px] bg-white/10 p-4">
-                      <p className="text-xs text-primary-foreground/70">Now serving</p>
-                      <p className="mt-2 text-2xl font-semibold">A-12</p>
-                    </div>
-                    <div className="rounded-[22px] bg-white/10 p-4">
-                      <p className="text-xs text-primary-foreground/70">Estimated wait</p>
-                      <p className="mt-2 text-2xl font-semibold">18 min</p>
-                    </div>
+              <p className="mt-7 max-w-2xl text-xl leading-8 text-[#40514b]">
+                Krama keeps your existing flow intact while giving the website a cleaner face for patients and clinics. Join digitally, track turns live, and reduce crowded waiting rooms.
+              </p>
+
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button asChild size="lg" className="h-12 rounded-full bg-[#1f6657] px-8 text-sm font-semibold text-white shadow-[0_18px_35px_-22px_rgba(31,102,87,0.9)] hover:bg-[#185449]">
+                  <Link to="/patient/login">
+                    Patient Login
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button
+                  asChild
+                  size="lg"
+                  variant="outline"
+                  className="h-12 rounded-full border-[#e0d7ca] bg-white px-8 text-sm font-semibold text-[#142620] hover:bg-[#f3efe8]"
+                >
+                  <Link to="/clinic/login">Clinic Login</Link>
+                </Button>
+              </div>
+
+              <div className="mt-10 grid max-w-2xl grid-cols-3 gap-4">
+                {heroStats.map((item) => (
+                  <div key={item.label} className="rounded-2xl border border-[#e6ded3] bg-white p-5 shadow-sm">
+                    <p className="font-display text-3xl font-bold text-[#1f6657]">{item.value}</p>
+                    <p className="mt-2 text-sm leading-tight text-[#60736d]">{item.label}</p>
                   </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mx-auto w-full max-w-[532px]">
+              <div className="rounded-[32px] bg-white p-8 shadow-[0_32px_90px_-58px_rgba(28,38,34,0.8)]">
+                <div className="flex items-center justify-between rounded-[32px] border border-[#e6ded3] bg-[#fbfaf7] px-5 py-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#60736d]">Live queue</p>
+                    <p className="mt-2 text-lg font-bold text-[#142620]">CityCare Clinic</p>
+                  </div>
+                  <div className="rounded-full bg-[#dfe9e4] px-4 py-2 text-sm font-semibold text-[#1f6657]">Active</div>
                 </div>
 
-                <div className="space-y-3">
-                  {[
-                    { icon: CalendarClock, label: "Booked digitally", value: "Today, 10:30 AM" },
-                    { icon: Bell, label: "Arrival reminder", value: "Notify 10 minutes before" },
-                    { icon: ShieldCheck, label: "Less crowding", value: "Arrive only when needed" },
-                  ].map(({ icon: Icon, label, value }) => (
-                    <div key={label} className="rounded-[24px] border border-border/70 bg-white/80 p-4 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-2xl bg-secondary p-3">
-                          <Icon className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">{label}</p>
-                          <p className="mt-1 font-medium text-foreground">{value}</p>
-                        </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-[1fr_0.88fr]">
+                  <div className="rounded-[28px] bg-[#1f6657] px-6 py-8 text-white">
+                    <p className="text-sm font-semibold uppercase tracking-[0.28em] text-white/72">Your token</p>
+                    <p className="mt-4 font-display text-6xl font-bold">A-17</p>
+
+                    <div className="mt-9 grid grid-cols-2 gap-3">
+                      <div className="rounded-[22px] bg-white/14 p-4">
+                        <p className="text-xs font-medium text-white/70">Now serving</p>
+                        <p className="mt-5 text-2xl font-bold">A-12</p>
+                      </div>
+                      <div className="rounded-[22px] bg-white/14 p-4">
+                        <p className="text-xs font-medium text-white/70">Estimated wait</p>
+                        <p className="mt-5 text-2xl font-bold">18 min</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-6 rounded-[24px] border border-dashed border-border bg-background/70 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-full bg-accent/25 px-3 py-1 text-sm font-medium text-foreground">
-                      5 patients ahead
-                    </div>
-                    <p className="text-sm text-muted-foreground">Track every update without calling reception.</p>
                   </div>
-                  <BarChart3 className="h-5 w-5 text-primary" />
+
+                  <div className="grid gap-3">
+                    {[
+                      { icon: CalendarClock, label: "Booked digitally", value: "Today, 10:30 AM" },
+                      { icon: Bell, label: "Arrival reminder", value: "Notify 10 minutes before" },
+                      { icon: ShieldCheck, label: "Less crowding", value: "Arrive only when needed" },
+                    ].map(({ icon: Icon, label, value }) => (
+                      <div key={label} className="rounded-[22px] border border-[#e6ded3] bg-white p-4 shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <div className="rounded-2xl bg-[#f3efe8] p-3">
+                            <Icon className="h-5 w-5 text-[#1f6657]" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-[#60736d]">{label}</p>
+                            <p className="mt-1 text-base font-medium text-[#142620]">{value}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-[20px] border border-dashed border-[#e0d7ca] bg-[#fbfaf7] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="shrink-0 rounded-full bg-[#f6d8c4] px-4 py-2 text-sm font-medium text-[#142620]">
+                        5 patients ahead
+                      </div>
+                      <p className="min-w-0 text-sm text-[#60736d]">Track every update without calling reception.</p>
+                    </div>
+                    <BarChart3 className="h-5 w-5 shrink-0 text-[#1f6657]" />
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
       </section>
 
-      <section className="section-container px-4 py-16 md:px-8 md:py-20">
-        <div className="grid gap-8 lg:grid-cols-2">
-          <div className="rounded-[32px] bg-white/80 p-8 shadow-sm ring-1 ring-border/70">
+      <section className="section-container px-4 py-12 md:px-8 md:py-16">
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div className="rounded-2xl border border-border bg-card/90 p-6 shadow-[0_20px_60px_-42px_rgba(18,80,70,0.6)] sm:p-8">
             <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-secondary p-3">
+              <div className="rounded-lg bg-secondary p-3">
                 <Ticket className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-sm uppercase tracking-[0.22em] text-muted-foreground">For patients</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">For patients</p>
                 <h2 className="mt-1 font-display text-3xl font-bold">Know when to leave, not when to wait.</h2>
               </div>
             </div>
 
-            <div className="mt-8 space-y-5">
+            <div className="mt-7 space-y-5">
               {patientFeatures.map((feature) => (
                 <Feature key={feature.text} icon={feature.icon} text={feature.text} />
               ))}
             </div>
           </div>
 
-          <div className="rounded-[32px] bg-primary p-8 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.85)]">
+          <div className="rounded-2xl border border-border bg-card/90 p-6 shadow-[0_20px_60px_-42px_rgba(90,70,42,0.52)] sm:p-8">
             <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-white/10 p-3">
-                <Layers3 className="h-5 w-5" />
+              <div className="rounded-lg bg-accent/15 p-3">
+                <Layers3 className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <p className="text-sm uppercase tracking-[0.22em] text-primary-foreground/70">For clinics</p>
-                <h2 className="mt-1 font-display text-3xl font-bold">Keep the queue moving without changing your system.</h2>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">For clinics</p>
+                <h2 className="mt-1 font-display text-3xl font-bold text-foreground">Keep the queue moving without changing your system.</h2>
               </div>
             </div>
 
-            <div className="mt-8 space-y-5">
+            <div className="mt-7 space-y-5">
               {clinicFeatures.map((feature) => (
-                <Feature key={feature.text} dark icon={feature.icon} text={feature.text} />
+                <Feature key={feature.text} accent icon={feature.icon} text={feature.text} />
               ))}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="bg-secondary/45 py-16 md:py-20">
+      <section className="bg-secondary/45 py-14 md:py-18">
         <div className="section-container px-4 md:px-8">
-          <div className="rounded-[32px] border border-border/70 bg-white/75 p-8 text-center shadow-sm md:p-12">
-            <p className="text-sm uppercase tracking-[0.28em] text-muted-foreground">How it works</p>
-            <h2 className="mt-4 font-display text-3xl font-bold md:text-4xl">A simpler visit in four small steps.</h2>
+          <div className="rounded-2xl border border-border bg-card/85 p-6 text-center shadow-[0_20px_60px_-44px_rgba(18,80,70,0.58)] md:p-10">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">How it works</p>
+            <h2 className="mt-3 font-display text-3xl font-bold md:text-4xl">A simpler visit in four small steps.</h2>
 
-            <div className="mt-10 grid gap-6 md:grid-cols-4">
+            <div className="mt-8 grid gap-4 md:grid-cols-4">
               {steps.map((step) => (
                 <Step key={step.title} icon={step.icon} title={step.title} desc={step.desc} />
               ))}
@@ -338,50 +340,32 @@ const Index = () => {
 
       <section className="section-container px-4 pb-16 md:px-8">
         <div className="mx-auto max-w-5xl">
-          <div className="flex items-center gap-4">
-            <div className="h-px flex-1 bg-border/70" />
-            <p className="text-xs font-medium uppercase tracking-[0.28em] text-muted-foreground">Get started</p>
-            <div className="h-px flex-1 bg-border/70" />
+          <div className="mb-6 text-center">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Get started</p>
+            <h2 className="mt-3 font-display text-3xl font-bold leading-tight text-foreground">
+              Choose the side of Krama you need today.
+            </h2>
+            <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Clinics can register their setup. Patients can create an account and start booking appointments.
+            </p>
           </div>
 
-          <div className="mt-10 grid gap-6 lg:grid-cols-2">
-            <div className="rounded-[32px] border border-border/70 bg-white/80 p-8 shadow-sm">
-              <p className="text-sm uppercase tracking-[0.22em] text-muted-foreground">For clinics</p>
-              <h3 className="mt-3 font-display text-2xl font-bold text-foreground">Register your clinic</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Create your clinic profile, add doctors, and set your time slots. Then go live and start serving.
-              </p>
-              <div className="mt-6 space-y-3 text-sm text-muted-foreground">
-                <p>1. Open Clinic Registration</p>
-                <p>2. Fill clinic details + add doctors</p>
-                <p>3. Set time slots and go online</p>
-              </div>
-              <div className="mt-8">
-                <Link to="/clinic/register">
-                  <Button className="w-full">Clinic Registration</Button>
-                </Link>
-              </div>
-            </div>
-
-            <div className="rounded-[32px] border border-border/70 bg-white/80 p-8 shadow-sm">
-              <p className="text-sm uppercase tracking-[0.22em] text-muted-foreground">For patients</p>
-              <h3 className="mt-3 font-display text-2xl font-bold text-foreground">Create your account</h3>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Sign up once, book appointments, and track your queue live so you arrive closer to your turn.
-              </p>
-              <div className="mt-6 space-y-3 text-sm text-muted-foreground">
-                <p>1. Sign up with your details</p>
-                <p>2. Choose a clinic and time slot</p>
-                <p>3. Track your token and reach on time</p>
-              </div>
-              <div className="mt-8">
-                <Link to="/patient/signup">
-                  <Button className="w-full" variant="outline">
-                    Patient Signup
-                  </Button>
-                </Link>
-              </div>
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <StartCard
+              label="For clinics"
+              title="Register your clinic"
+              description="Create your clinic profile, add doctors, set time slots, and start serving."
+              to="/clinic/register"
+              button="Clinic Registration"
+            />
+            <StartCard
+              label="For patients"
+              title="Create your account"
+              description="Sign up once, book appointments, and track your queue live."
+              to="/patient/signup"
+              button="Patient Signup"
+              outline
+            />
           </div>
         </div>
       </section>
@@ -389,22 +373,57 @@ const Index = () => {
   );
 };
 
-const Feature = ({ icon: Icon, text, dark = false }: any) => (
+const Feature = ({
+  icon: Icon,
+  text,
+  dark = false,
+  accent = false,
+}: {
+  icon: LucideIcon;
+  text: string;
+  dark?: boolean;
+  accent?: boolean;
+}) => (
   <div className="flex items-start gap-4">
-    <div className={`mt-1 rounded-2xl p-2.5 ${dark ? "bg-white/10" : "bg-secondary"}`}>
-      <Icon className={dark ? "text-white" : "text-primary"} size={18} />
+    <div className={`mt-1 rounded-lg p-2.5 ${dark ? "bg-white/10" : accent ? "bg-accent/15" : "bg-secondary"}`}>
+      <Icon className={dark ? "text-white" : accent ? "text-accent" : "text-primary"} size={18} />
     </div>
-    <p className={dark ? "text-primary-foreground/82" : "text-muted-foreground"}>{text}</p>
+    <p className={dark ? "text-white/80" : "text-muted-foreground"}>{text}</p>
   </div>
 );
 
-const Step = ({ icon: Icon, title, desc }: any) => (
-  <div className="rounded-[24px] border border-border/70 bg-background/80 p-6">
-    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
-      <Icon className="text-primary" size={22} />
+const Step = ({ icon: Icon, title, desc }: { icon: LucideIcon; title: string; desc: string }) => (
+  <div className="rounded-xl border border-border bg-background/75 p-5">
+    <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10">
+      <Icon className="text-primary" size={21} />
     </div>
-    <p className="mt-4 font-semibold">{title}</p>
+    <p className="mt-4 font-semibold text-foreground">{title}</p>
     <p className="mt-2 text-sm leading-6 text-muted-foreground">{desc}</p>
+  </div>
+);
+
+const StartCard = ({
+  label,
+  title,
+  description,
+  to,
+  button,
+  outline = false,
+}: {
+  label: string;
+  title: string;
+  description: string;
+  to: string;
+  button: string;
+  outline?: boolean;
+}) => (
+  <div className="rounded-xl border border-border bg-card/80 p-5">
+    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+    <h3 className="mt-3 font-display text-2xl font-bold text-foreground">{title}</h3>
+    <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+    <Button asChild className="mt-6 w-full" variant={outline ? "outline" : "default"}>
+      <Link to={to}>{button}</Link>
+    </Button>
   </div>
 );
 

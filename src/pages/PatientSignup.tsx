@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import AuthCard from "@/components/auth/AuthCard";
 import { User, Phone, Mail, Lock, ArrowRight, Check, X, Droplet } from "lucide-react";
 
@@ -11,7 +12,7 @@ const validatePassword = (password: string) => ({
   uppercase: /[A-Z]/.test(password),
   lowercase: /[a-z]/.test(password),
   number: /[0-9]/.test(password),
-  special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
+  special: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password),
 });
 
 const Requirement = ({ met, label }: { met: boolean; label: string }) => (
@@ -159,14 +160,14 @@ const PatientSignup = () => {
               <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="password" type="password" placeholder="••••••••" value={form.password} onChange={(e) => update("password", e.target.value)} className="pl-9" />
+                <PasswordInput id="password" placeholder="********" value={form.password} onChange={(e) => update("password", e.target.value)} className="pl-9" />
               </div>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="confirm">Confirm Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="confirm" type="password" placeholder="••••••••" value={form.confirm} onChange={(e) => update("confirm", e.target.value)} className="pl-9" />
+                <PasswordInput id="confirm" placeholder="********" value={form.confirm} onChange={(e) => update("confirm", e.target.value)} className="pl-9" />
               </div>
             </div>
           </div>
@@ -381,7 +382,7 @@ const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: {
               onClick={onBack}
               className="text-sm text-muted-foreground hover:text-foreground"
             >
-              ← Back to Signup
+              &lt;- Back to Signup
             </Button>
           </div>
         </form>

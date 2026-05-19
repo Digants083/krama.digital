@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { ArrowLeft, Phone, Lock, Trash2, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, MapPinned, CheckCircle, XCircle } from "lucide-react";
 import {
   Dialog,
@@ -724,15 +725,15 @@ const ClinicProfile = () => {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f3ee]">
         <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border/70 bg-background/90 backdrop-blur-xl">
+    <div className="min-h-screen bg-[#f5f3ee]">
+      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/90 backdrop-blur-xl">
         <div className="section-container flex h-16 items-center gap-3 px-4 md:px-8">
           <Link to="/clinic" className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition hover:text-foreground">
             <ArrowLeft className="h-4 w-4" />
@@ -752,32 +753,32 @@ const ClinicProfile = () => {
         </div>
       )}
 
-      <main className="section-container px-4 py-8 md:px-8 md:py-10">
-        <section className="rounded-[32px] bg-primary px-6 py-8 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] md:px-8">
-          <div className="flex items-center gap-4">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20">
-              <Building2 className="h-10 w-10" />
+      <main className="section-container px-4 py-6 md:px-8 md:py-10">
+        <section className="rounded-[24px] bg-primary px-4 py-6 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] sm:rounded-[32px] sm:px-6 sm:py-8 md:px-8">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20 sm:h-20 sm:w-20">
+              <Building2 className="h-7 w-7 sm:h-10 sm:w-10" />
             </div>
-            <div>
-              <p className="text-sm uppercase tracking-[0.22em] text-primary-foreground/70">Clinic Account</p>
-              <h1 className="mt-2 font-display text-3xl font-bold md:text-4xl">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.18em] text-primary-foreground/70 sm:text-sm sm:tracking-[0.22em]">Clinic Account</p>
+              <h1 className="mt-1 truncate font-display text-2xl font-bold sm:mt-2 sm:text-3xl md:text-4xl">
                 {dbProfile?.clinic_name || "Clinic"}
               </h1>
-              <p className="mt-2 text-primary-foreground/75">{dbProfile?.email || "clinic@example.com"}</p>
+              <p className="mt-1 truncate text-sm text-primary-foreground/75 sm:mt-2 sm:text-base">{dbProfile?.email || "clinic@example.com"}</p>
             </div>
           </div>
 
           {dbProfile && (
-            <div className="mt-8 grid gap-4 md:grid-cols-3">
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 md:grid-cols-3 md:gap-4">
               <ProfileStat label="Clinic ID" value={dbProfile.clinic_id} mono />
               <ProfileStat label="Phone" value={dbProfile.phone} />
-              <ProfileStat label="Address" value={dbProfile.full_formatted_address || dbProfile.address || "Not set"} />
+              <ProfileStat className="col-span-2 md:col-span-1" label="Address" value={dbProfile.full_formatted_address || dbProfile.address || "Not set"} />
             </div>
           )}
         </section>
 
-        <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-4">
+        <section className="mt-4 grid grid-cols-2 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-12 lg:gap-6">
+          <div className="col-span-2 sm:col-span-1 lg:col-span-4">
             <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
               <div className="flex gap-2">
                 <div className="w-20">
@@ -801,7 +802,7 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="lg:col-span-8">
+          <div className="col-span-2 lg:col-span-8">
             <ProfileCard icon={MapPin} title="Change Address" description="Update clinic location">
               <div className="rounded-2xl bg-secondary p-4 text-sm text-foreground">
                 <p className="text-muted-foreground">Current Address</p>
@@ -859,7 +860,7 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="lg:col-span-7">
+          <div className="col-span-2 sm:col-span-1 lg:col-span-7">
             <ProfileCard icon={ImagePlus} title="Clinic Images" description="Upload and manage up to 5 images">
               {imageUrls.filter(Boolean).length > 0 && (
                 <div className="grid grid-cols-3 gap-2">
@@ -892,11 +893,11 @@ const ClinicProfile = () => {
                   <input type="file" id="file-upload" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
                   <label
                     htmlFor="file-upload"
-                    className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-white px-4 py-3 transition hover:bg-secondary"
+                    className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#e6ded3] bg-[#fbfaf7] px-3 py-3 text-center transition hover:bg-[#f0ede6] sm:justify-start sm:px-4"
                   >
                     <ImagePlus className="h-5 w-5 text-primary" />
-                    <span className="truncate text-sm text-muted-foreground">
-                      {selectedFiles.length > 0 ? `${selectedFiles.length} file(s) selected` : "Choose files..."}
+                    <span className="min-w-0 truncate text-sm font-medium text-muted-foreground">
+                      {selectedFiles.length > 0 ? `${selectedFiles.length} image(s) selected` : "Choose from phone gallery"}
                     </span>
                   </label>
                   <Button onClick={handleUploadImage} variant="outline" disabled={selectedFiles.length === 0 || uploading} className="w-full">
@@ -912,7 +913,7 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="lg:col-span-5">
+          <div className="col-span-2 sm:col-span-1 lg:col-span-5">
             <ProfileCard icon={QrCode} title="QR Code" description="Show QR code for patients to join queue">
               <div className="space-y-4">
                 <div className="rounded-2xl border border-border bg-secondary/40 p-4">
@@ -927,16 +928,15 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="lg:col-span-7">
+          <div className="col-span-2 lg:col-span-7">
             <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
               {!showForgotPassword ? (
                 // Normal password change - verify current password first
                 <>
                   <div>
                     <Label htmlFor="current-pw">Current Password</Label>
-                    <Input 
+                    <PasswordInput 
                       id="current-pw" 
-                      type="password" 
                       value={currentPassword} 
                       onChange={(e) => setCurrentPassword(e.target.value)} 
                       className="mt-2" 
@@ -947,12 +947,12 @@ const ClinicProfile = () => {
                     <>
                       <div>
                         <Label htmlFor="new-pw">New Password</Label>
-                        <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+                        <PasswordInput id="new-pw" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
                       </div>
                       {newPassword && <PasswordRules checks={passwordChecks} />}
                       <div>
                         <Label htmlFor="confirm-pw">Confirm New Password</Label>
-                        <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                        <PasswordInput id="confirm-pw" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
                       </div>
                       <Button
                         onClick={async () => {
@@ -1016,12 +1016,12 @@ const ClinicProfile = () => {
                 <>
                   <div>
                     <Label htmlFor="new-pw-forgot">New Password</Label>
-                    <Input id="new-pw-forgot" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+                    <PasswordInput id="new-pw-forgot" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
                   </div>
                   {newPassword && <PasswordRules checks={passwordChecks} />}
                   <div>
                     <Label htmlFor="confirm-pw-forgot">Confirm New Password</Label>
-                    <Input id="confirm-pw-forgot" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                    <PasswordInput id="confirm-pw-forgot" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
                   </div>
                   <div className="flex gap-2 mt-4">
                     <Button
@@ -1040,13 +1040,12 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="lg:col-span-5">
+          <div className="col-span-2 lg:col-span-5">
             <ProfileCard icon={Trash2} title="Delete Account" description="Permanently delete your clinic account and all data" danger>
               <div>
                 <Label htmlFor="delete-clinic-pw">Enter Password to Confirm</Label>
-                <Input
+                <PasswordInput
                   id="delete-clinic-pw"
-                  type="password"
                   value={deletePassword}
                   onChange={(e) => setDeletePassword(e.target.value)}
                   placeholder="Enter your password"
@@ -1205,10 +1204,10 @@ const PasswordRule = ({ ok, text }: { ok: boolean; text: string }) => (
   </div>
 );
 
-const ProfileStat = ({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) => (
-  <div className="rounded-[22px] bg-white/10 px-4 py-4">
-    <p className="text-sm text-primary-foreground/70">{label}</p>
-    <p className={`mt-2 text-lg font-bold text-white ${mono ? "font-mono" : ""}`}>{value}</p>
+const ProfileStat = ({ label, value, mono = false, className = "" }: { label: string; value: string; mono?: boolean; className?: string }) => (
+  <div className={`rounded-[18px] bg-white/10 px-3 py-3 sm:rounded-[22px] sm:px-4 sm:py-4 ${className}`}>
+    <p className="text-xs text-primary-foreground/70 sm:text-sm">{label}</p>
+    <p className={`mt-1 break-words text-sm font-bold leading-tight text-white sm:mt-2 sm:text-lg ${mono ? "font-mono" : ""}`}>{value}</p>
   </div>
 );
 
@@ -1225,17 +1224,17 @@ const ProfileCard = ({
   children: React.ReactNode;
   danger?: boolean;
 }) => (
-  <div className={`rounded-[28px] border p-6 shadow-sm ${danger ? "border-red-200 bg-red-50/50" : "border-border/70 bg-white"}`}>
-    <div className="mb-6 flex items-center gap-3">
-      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-secondary text-primary"}`}>
-        <Icon className="h-5 w-5" />
+  <div className={`rounded-[20px] border p-4 shadow-sm sm:rounded-[28px] sm:p-6 ${danger ? "border-red-200 bg-red-50/50" : "border-[#e6ded3] bg-[#fbfaf7]"}`}>
+    <div className="mb-4 flex items-center gap-3 sm:mb-6">
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 sm:rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-[#f0ede6] text-primary"}`}>
+        <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
       </div>
-      <div>
-        <h2 className="text-xl font-bold text-foreground">{title}</h2>
-        <p className="text-sm text-muted-foreground">{description}</p>
+      <div className="min-w-0">
+        <h2 className="text-base font-bold leading-tight text-foreground sm:text-xl">{title}</h2>
+        <p className="mt-0.5 text-xs leading-snug text-muted-foreground sm:text-sm">{description}</p>
       </div>
     </div>
-    <div className="space-y-4">{children}</div>
+    <div className="space-y-3 sm:space-y-4">{children}</div>
   </div>
 );
 

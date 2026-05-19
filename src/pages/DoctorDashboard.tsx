@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRightCircle, Clock, Megaphone, PauseCircle, Play, RefreshCw, SkipForward, Users, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRightCircle, Clock, Megaphone, RefreshCw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueue } from "@/context/QueueContext";
 import { apiUrl } from "@/lib/api";
+import { formatDelayedStartTime, formatDelayLabel } from "@/lib/timeFormat";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 function formatElapsed(seconds: number) {
   const mins = Math.floor(seconds / 60);
@@ -36,17 +38,16 @@ const SourceBadge = memo(function SourceBadge({ source }: { source?: string }) {
   );
 });
 
-interface PatientHistoryNote {
+interface PreviousVisit {
+  id: number;
   date: string;
-  diagnosis?: string;
-  notes?: string;
 }
 
 interface PatientHistory {
   is_returning: boolean;
   visit_count: number;
   last_visit: string | null;
-  previous_notes: PatientHistoryNote[];
+  previous_visits?: PreviousVisit[];
 }
 
 interface DoctorSessionSlot {
@@ -60,7 +61,13 @@ interface DoctorSessionSlot {
   waiting_count: number;
   completed_count: number;
   delay_minutes: number;
+  delay_started_at?: string | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
+  is_delay_active?: boolean;
   is_active: boolean;
+  is_open?: boolean;
 }
 
 interface SessionsResponse {
@@ -69,6 +76,7 @@ interface SessionsResponse {
 }
 
 interface QueueDisplayState {
+  sessionId: number;
   queue: Array<{
     token: string;
     name: string;
@@ -78,6 +86,16 @@ interface QueueDisplayState {
     blood_group?: string;
     doctor_delay?: string | null;
     estimated_wait_minutes?: number | null;
+    latest_estimated_wait_minutes?: number | null;
+    earliest_eta?: string | null;
+    predicted_eta?: string | null;
+    latest_eta?: string | null;
+    rolling_average_minutes?: number | null;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
+    active_delay_minutes?: number | null;
+    queue_adjusted_time?: string | null;
+    session_status?: string | null;
     source: "online" | "desk" | "walkin" | "skipped";
     clinic_id: string;
     appointment_id?: number;
@@ -95,6 +113,16 @@ interface QueueDisplayState {
     blood_group?: string;
     doctor_delay?: string | null;
     estimated_wait_minutes?: number | null;
+    latest_estimated_wait_minutes?: number | null;
+    earliest_eta?: string | null;
+    predicted_eta?: string | null;
+    latest_eta?: string | null;
+    rolling_average_minutes?: number | null;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
+    active_delay_minutes?: number | null;
+    queue_adjusted_time?: string | null;
+    session_status?: string | null;
     appointmentId?: number;
     clinicId?: string;
     source?: "online" | "desk" | "walkin" | "skipped";
@@ -104,6 +132,16 @@ interface QueueDisplayState {
   totalToday: number;
   viewingSlotId: number | null;
 }
+
+const emptySessionDisplayState = (sessionId: number): QueueDisplayState => ({
+  sessionId,
+  queue: [],
+  currentServing: null,
+  completedCount: 0,
+  skippedCount: 0,
+  totalToday: 0,
+  viewingSlotId: sessionId,
+});
 
 function formatVisitDate(date?: string | null) {
   if (!date) return "N/A";
@@ -125,22 +163,21 @@ function VisitHistoryBadge({ isReturning }: { isReturning: boolean }) {
 }
 
 function VisitHistoryDetails({ history }: { history: PatientHistory }) {
-  const notes = history.previous_notes || [];
-  if (!notes.length) return null;
+  const previousVisits = history.previous_visits || [];
+  if (!previousVisits.length) return null;
 
   return (
-    <details className="mt-3 rounded-lg border border-[#d8d1c6] bg-white/70 px-3 py-2 text-left">
-      <summary className="cursor-pointer text-xs font-bold text-[#1a5c4a]">Previous Consultation Notes</summary>
-      <div className="mt-3 space-y-3">
-        {notes.map((note, index) => (
-          <div key={`${note.date}-${index}`} className="border-t border-[#e6ded3] pt-2 first:border-t-0 first:pt-0">
-            <p className="text-xs font-bold text-[#202825]">{formatVisitDate(note.date)}</p>
-            {note.diagnosis && <p className="mt-1 text-xs text-[#40514b]">Diagnosis: {note.diagnosis}</p>}
-            {note.notes && <p className="mt-1 text-xs text-[#40514b]">Notes: {note.notes}</p>}
+    <div className="mt-4 rounded-lg bg-white/45 px-3 py-3 text-left">
+      <p className="mb-3 text-[11px] font-bold uppercase tracking-wide text-[#77756f]">Previous Visits</p>
+      <div className="space-y-2">
+        {previousVisits.map((visit) => (
+          <div key={visit.id} className="flex items-center justify-between border-t border-[#e6ded3] pt-2 first:border-t-0 first:pt-0">
+            <p className="text-xs font-semibold text-[#58645f]">{formatVisitDate(visit.date)}</p>
+            <p className="text-xs font-semibold text-[#40514b]">Visited</p>
           </div>
         ))}
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -150,7 +187,7 @@ const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history,
   return (
     <div className="rounded-xl bg-[#f0ede6] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs text-[#77756f]">Visit History</p>
+        <p className="text-xs font-medium text-[#77756f]">Visit History</p>
         {isLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#77756f]" />}
       </div>
       {isLoading ? (
@@ -162,40 +199,19 @@ const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history,
           <VisitHistoryBadge isReturning={isReturning} />
           {isReturning ? (
             <div className="mt-2 space-y-1">
-              <p className="text-sm font-semibold text-[#202825]">Visited this clinic {history.visit_count} {history.visit_count === 1 ? "time" : "times"}</p>
-              <p className="text-xs text-[#58645f]">Last visit: {formatVisitDate(history.last_visit)}</p>
+              <p className="text-sm font-bold text-[#202825]">Previous visit to this clinic</p>
             </div>
           ) : (
-            <p className="mt-2 text-sm font-semibold text-[#202825]">First visit to this clinic</p>
+            <p className="mt-3 text-sm font-bold text-[#202825]">First visit to this clinic</p>
           )}
           <VisitHistoryDetails history={history} />
         </div>
       ) : (
-        <p className="text-sm font-semibold text-[#40514b]">No history found</p>
+        <div>
+          <VisitHistoryBadge isReturning={false} />
+          <p className="mt-3 text-sm font-bold text-[#202825]">First visit to this clinic</p>
+        </div>
       )}
-    </div>
-  );
-});
-
-const VisitHistoryInlineSummary = memo(function VisitHistoryInlineSummary({ history, isLoading }: { history: PatientHistory | null; isLoading: boolean }) {
-  if (isLoading) {
-    return <p className="mt-2 text-sm font-semibold text-[#40514b]">Previous Visits: Checking...</p>;
-  }
-
-  const visitCount = history?.visit_count || 0;
-  if (!history || visitCount === 0) {
-    return (
-      <div className="mt-2 space-y-1 text-sm font-semibold text-[#40514b]">
-        <p>Previous Visits: 0</p>
-        <p>First Time Patient</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-2 space-y-1 text-sm font-semibold text-[#40514b]">
-      <p>Previous Visits: {visitCount}</p>
-      <p>Last Visit: {formatVisitDate(history.last_visit)}</p>
     </div>
   );
 });
@@ -213,30 +229,40 @@ function SessionStatusBadge({ status }: { status: string }) {
 }
 
 const SessionCard = memo(function SessionCard({ session, selected, onSelect }: { session: DoctorSessionSlot; selected: boolean; onSelect: (sessionId: number) => void }) {
+  const delayLabel = formatDelayLabel(session.delay_minutes);
+  const originalStartTime = session.delay_original_start_time || (delayLabel ? formatDelayedStartTime(session.time_range, 0) : "");
+  const updatedStartTime = session.delay_updated_start_time || (delayLabel ? formatDelayedStartTime(session.time_range, session.delay_minutes) : "");
   return (
     <button
       type="button"
       onClick={() => onSelect(session.session_id)}
-      className={`min-w-0 rounded-xl border-2 p-4 text-left transition hover:shadow-sm ${selected ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-white hover:border-[#b7d7c8]"}`}
+      className={`min-w-0 rounded-xl border p-3 text-left transition hover:shadow-sm ${selected ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-[#fffdf8] hover:border-[#b7d7c8]"}`}
     >
-      <div className="mb-3 flex items-start justify-between gap-3">
+      <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-[#202825]">{session.session_name.replace("Time ", "Session ")}</p>
-          <p className="mt-1 text-xs font-semibold text-[#58645f]">{session.time_label}</p>
+          <p className="truncate text-xs font-bold text-[#202825] sm:text-sm">{session.session_name.replace("Time ", "Session ")}</p>
+          <p className="mt-0.5 truncate text-[11px] font-semibold text-[#58645f]">
+            {delayLabel && originalStartTime && updatedStartTime ? (
+              <>
+                <span className="text-orange-700 line-through decoration-red-500/70 decoration-2">{originalStartTime}</span>
+                <span className="px-1 text-orange-700">-&gt;</span>
+                <span className="text-orange-700">{updatedStartTime}</span>
+              </>
+            ) : session.time_label}
+          </p>
         </div>
         <SessionStatusBadge status={session.status} />
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-lg bg-[#f0ede6] px-3 py-2">
-          <p className="text-[#77756f]">Queue</p>
-          <p className="mt-1 font-bold text-[#202825]">{session.queue_count} patients</p>
+      <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+        <div className="rounded-lg bg-[#f0ede6] px-2 py-1.5">
+          <p className="text-[#77756f]">Patients</p>
+          <p className="mt-0.5 font-bold text-[#202825]">{session.queue_count}</p>
         </div>
-        <div className="rounded-lg bg-[#f0ede6] px-3 py-2">
+        <div className="rounded-lg bg-[#f0ede6] px-2 py-1.5">
           <p className="text-[#77756f]">Completed</p>
-          <p className="mt-1 font-bold text-[#202825]">{session.completed_count}</p>
+          <p className="mt-0.5 font-bold text-[#202825]">{session.completed_count}</p>
         </div>
       </div>
-      {session.delay_minutes > 0 && <p className="mt-2 text-xs font-semibold text-[#c2410c]">Delay: {session.delay_minutes} min</p>}
     </button>
   );
 });
@@ -249,14 +275,10 @@ const delayOptions = [
   { label: "1 hour", value: "1 hour" },
 ];
 
-const StatCard = memo(function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: boolean }) {
-  return (
-    <div className="rounded-xl bg-[#f0ede6] px-5 py-4">
-      <p className="mb-2 text-xs text-[#77756f]">{label}</p>
-      <p className={`text-2xl font-semibold ${accent ? "text-[#1a5c4a]" : "text-[#2c2c2a]"}`}>{value}</p>
-    </div>
-  );
-});
+const parseDelayMinutes = (value: string) => {
+  const amount = Number.parseInt(value.replace(/[^\d]/g, ""), 10) || 0;
+  return value.toLowerCase().includes("hour") ? amount * 60 : amount;
+};
 
 const SwitchingOverlay = memo(function SwitchingOverlay({ show }: { show: boolean }) {
   return (
@@ -276,9 +298,6 @@ export default function KramaDoctorDashboard() {
     completedCount,
     skippedCount,
     fetchQueueForClinic,
-    nextPatient,
-    completePatient,
-    skipPatient,
     viewingSlotId,
   } = useQueue();
 
@@ -297,7 +316,7 @@ export default function KramaDoctorDashboard() {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
-  const [sessionAction, setSessionAction] = useState<string | null>(null);
+  const [queueAction, setQueueAction] = useState<"next" | null>(null);
   const [displayQueueState, setDisplayQueueState] = useState<QueueDisplayState | null>(null);
   const [isSessionSwitching, setIsSessionSwitching] = useState(false);
   const queueRequestRef = useRef(0);
@@ -344,6 +363,8 @@ export default function KramaDoctorDashboard() {
 
   const activeSessionId = selectedSessionId ?? viewingSlotId ?? sessions.find((session) => session.is_active)?.session_id ?? sessions[0]?.session_id ?? null;
   const activeSession = sessions.find((session) => session.session_id === activeSessionId) || null;
+  const activeOriginalStartTime = activeSession?.delay_original_start_time || (activeSession?.delay_minutes ? formatDelayedStartTime(activeSession.time_range, 0) : "");
+  const activeUpdatedStartTime = activeSession?.delay_updated_start_time || (activeSession?.delay_minutes ? formatDelayedStartTime(activeSession.time_range, activeSession.delay_minutes) : "");
 
   const loadSessionQueue = useCallback(async (sessionId: number, showOverlay = true) => {
     if (!clinicId) return;
@@ -351,24 +372,41 @@ export default function KramaDoctorDashboard() {
     const requestId = ++queueRequestRef.current;
     if (showOverlay) setIsSessionSwitching(true);
 
-    const snapshot = await fetchQueueForClinic(clinicId, sessionId);
-    if (requestId !== queueRequestRef.current) return;
+    try {
+      const snapshot = await fetchQueueForClinic(clinicId, sessionId);
+      if (requestId !== queueRequestRef.current) return;
 
-    if (snapshot) {
-      const nextDisplayState: QueueDisplayState = {
-        queue: snapshot.queue,
-        currentServing: snapshot.currentServing,
-        completedCount: snapshot.completedCount,
-        skippedCount: snapshot.skippedCount,
-        totalToday: snapshot.totalToday,
-        viewingSlotId: snapshot.viewingSlotId,
-      };
-      queueCacheRef.current = { ...queueCacheRef.current, [sessionId]: nextDisplayState };
-      setDisplayQueueState(nextDisplayState);
+      if (snapshot) {
+        if (snapshot.viewingSlotId !== sessionId) return;
+
+        const nextDisplayState: QueueDisplayState = {
+          sessionId,
+          queue: snapshot.queue,
+          currentServing: snapshot.currentServing,
+          completedCount: snapshot.completedCount,
+          skippedCount: snapshot.skippedCount,
+          totalToday: snapshot.totalToday,
+          viewingSlotId: snapshot.viewingSlotId,
+        };
+        queueCacheRef.current = { ...queueCacheRef.current, [sessionId]: nextDisplayState };
+        setDisplayQueueState(nextDisplayState);
+      }
+    } catch (error) {
+      if (requestId === queueRequestRef.current) {
+        setMessage({ text: "Could not switch session. Showing the last queue view.", type: "error" });
+      }
+    } finally {
+      if (showOverlay && requestId === queueRequestRef.current) {
+        setIsSessionSwitching(false);
+      }
     }
-
-    if (showOverlay) setIsSessionSwitching(false);
   }, [clinicId, fetchQueueForClinic]);
+
+  useEffect(() => {
+    if (!isSessionSwitching) return;
+    const failsafe = window.setTimeout(() => setIsSessionSwitching(false), 3500);
+    return () => window.clearTimeout(failsafe);
+  }, [isSessionSwitching]);
 
   useEffect(() => {
     if (!clinicId || activeSessionId == null) return;
@@ -382,8 +420,10 @@ export default function KramaDoctorDashboard() {
   }, [clinicId, activeSessionId, loadSessionQueue]);
   useEffect(() => {
     if (activeSessionId == null || isSessionSwitching) return;
+    if (viewingSlotId !== activeSessionId) return;
 
     const nextDisplayState: QueueDisplayState = {
+      sessionId: activeSessionId,
       queue,
       currentServing,
       completedCount,
@@ -408,9 +448,18 @@ export default function KramaDoctorDashboard() {
     return () => window.clearInterval(interval);
   }, [clinicId, activeSessionId, fetchTodaySessions, loadSessionQueue]);
 
+  useQueueRealtime(clinicId, useCallback(() => {
+    if (!clinicId) return;
+    fetchTodaySessions(clinicId, true, false);
+    if (activeSessionId != null) {
+      loadSessionQueue(activeSessionId, false);
+    }
+  }, [activeSessionId, clinicId, fetchTodaySessions, loadSessionQueue]));
+
   const displayQueue = displayQueueState?.queue ?? queue;
   const displayCurrentServing = displayQueueState?.currentServing ?? currentServing;
   const displayCompletedCount = displayQueueState?.completedCount ?? completedCount;
+  const displayActivePatientCount = displayQueue.length + (displayCurrentServing ? 1 : 0);
   const displayTotalToday = displayQueueState?.totalToday ?? completedCount + queue.length + (currentServing ? 1 : 0);
   const displayViewingSlotId = displayQueueState?.viewingSlotId ?? viewingSlotId;
 
@@ -451,9 +500,20 @@ export default function KramaDoctorDashboard() {
         name: displayCurrentServing.patientName,
         phone: displayCurrentServing.phone || "",
         patient_id: displayCurrentServing.patient_id || "",
+        patient_email: displayCurrentServing.patient_email || "",
         blood_group: displayCurrentServing.blood_group || "N/A",
         doctor_delay: displayCurrentServing.doctor_delay,
         estimated_wait_minutes: displayCurrentServing.estimated_wait_minutes,
+        latest_estimated_wait_minutes: displayCurrentServing.latest_estimated_wait_minutes,
+        earliest_eta: displayCurrentServing.earliest_eta,
+        predicted_eta: displayCurrentServing.predicted_eta,
+        latest_eta: displayCurrentServing.latest_eta,
+        rolling_average_minutes: displayCurrentServing.rolling_average_minutes,
+        consultation_window: displayCurrentServing.consultation_window,
+        estimated_window_text: displayCurrentServing.estimated_window_text,
+        active_delay_minutes: displayCurrentServing.active_delay_minutes,
+        queue_adjusted_time: displayCurrentServing.queue_adjusted_time,
+        session_status: displayCurrentServing.session_status,
         source: displayCurrentServing.source,
         status: "Serving",
       }
@@ -463,9 +523,20 @@ export default function KramaDoctorDashboard() {
           name: selectedQueuePatient.name,
           phone: selectedQueuePatient.phone || "",
           patient_id: selectedQueuePatient.patient_id || "",
+          patient_email: selectedQueuePatient.patient_email || "",
           blood_group: selectedQueuePatient.blood_group || "N/A",
           doctor_delay: selectedQueuePatient.doctor_delay,
           estimated_wait_minutes: selectedQueuePatient.estimated_wait_minutes,
+          latest_estimated_wait_minutes: selectedQueuePatient.latest_estimated_wait_minutes,
+          earliest_eta: selectedQueuePatient.earliest_eta,
+          predicted_eta: selectedQueuePatient.predicted_eta,
+          latest_eta: selectedQueuePatient.latest_eta,
+          rolling_average_minutes: selectedQueuePatient.rolling_average_minutes,
+          consultation_window: selectedQueuePatient.consultation_window,
+          estimated_window_text: selectedQueuePatient.estimated_window_text,
+          active_delay_minutes: selectedQueuePatient.active_delay_minutes,
+          queue_adjusted_time: selectedQueuePatient.queue_adjusted_time,
+          session_status: selectedQueuePatient.session_status,
           source: selectedQueuePatient.source,
           status: "Waiting",
         }
@@ -474,7 +545,7 @@ export default function KramaDoctorDashboard() {
   const activePatientId = activePatient?.patient_id || "";
 
   useEffect(() => {
-    if (!clinicId || !activePatientId) {
+    if (!clinicId || (!activePatientId && !activePatient?.phone && !activePatient?.patient_email)) {
       setPatientHistory(null);
       setIsHistoryLoading(false);
       setHistoryError(null);
@@ -487,7 +558,12 @@ export default function KramaDoctorDashboard() {
       try {
         setIsHistoryLoading(true);
         setHistoryError(null);
-        const response = await fetch(apiUrl(`/api/patient/history/${encodeURIComponent(clinicId)}/${encodeURIComponent(activePatientId)}`), {
+        const historyParams = new URLSearchParams();
+        if (activePatient?.phone) historyParams.set("phone", activePatient.phone);
+        if (activePatient?.patient_email) historyParams.set("email", activePatient.patient_email);
+        const query = historyParams.toString();
+        const lookupId = activePatientId || "lookup";
+        const response = await fetch(apiUrl(`/api/patient/history/${encodeURIComponent(clinicId)}/${encodeURIComponent(lookupId)}${query ? `?${query}` : ""}`), {
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("Failed to fetch patient history");
@@ -507,17 +583,76 @@ export default function KramaDoctorDashboard() {
     fetchPatientHistory();
 
     return () => controller.abort();
-  }, [clinicId, activePatientId]);
+  }, [activePatient?.patient_email, activePatient?.phone, clinicId, activePatientId]);
 
   const totalToday = displayTotalToday;
-  const activeDelay = displayCurrentServing?.doctor_delay || displayQueue.find((patient) => patient.doctor_delay)?.doctor_delay || null;
+  const activeSessionDelay = activeSession?.delay_minutes ? `${activeSession.delay_minutes} min` : null;
+  const activeDelay = activeSessionDelay || displayCurrentServing?.doctor_delay || displayQueue.find((patient) => patient.doctor_delay)?.doctor_delay || null;
+  const activeSessionStatus = activeSession?.status || "";
+  const canAnnounceDelay = Boolean(
+    activeSession &&
+    activeSession.is_open &&
+    !["Closed", "Expired"].includes(activeSessionStatus)
+  );
+  const delayUnavailableMessage = activeSession
+    ? `Delay can only be added to an available slot. ${activeSession.session_name} is ${activeSession.status}.`
+    : "Select an available slot before adding delay.";
 
   const refreshQueue = useCallback(() => {
     if (clinicId) {
       fetchTodaySessions(clinicId, true, false);
-      if (activeSessionId != null) loadSessionQueue(activeSessionId, true);
+      if (activeSessionId != null) loadSessionQueue(activeSessionId, false);
     }
   }, [activeSessionId, clinicId, fetchTodaySessions, loadSessionQueue]);
+
+  const finishCurrentPatient = useCallback(async () => {
+    if (!displayCurrentServing?.appointmentId || !displayCurrentServing.clinicId) return false;
+
+    const response = await fetch(apiUrl("/api/auth/clinic/finish-patient"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clinic_id: displayCurrentServing.clinicId,
+        appointment_id: displayCurrentServing.appointmentId,
+        source: displayCurrentServing.source || "online",
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Failed to complete patient");
+    }
+
+    return true;
+  }, [displayCurrentServing]);
+
+  const handleNextPatient = useCallback(async () => {
+    if (!displayCurrentServing) return;
+
+    try {
+      setQueueAction("next");
+      await finishCurrentPatient();
+      setMessage({ text: "Patient marked as served.", type: "success" });
+      setSelectedToken(null);
+      await fetchTodaySessions(clinicId, true, false);
+      if (activeSessionId != null) {
+        await loadSessionQueue(activeSessionId, false);
+      }
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "Failed to update queue", type: "error" });
+      refreshQueue();
+    } finally {
+      setQueueAction(null);
+    }
+  }, [
+    activeSessionId,
+    clinicId,
+    displayCurrentServing,
+    fetchTodaySessions,
+    finishCurrentPatient,
+    loadSessionQueue,
+    refreshQueue,
+  ]);
 
   const selectSession = useCallback((sessionId: number) => {
     setSelectedToken(null);
@@ -525,35 +660,31 @@ export default function KramaDoctorDashboard() {
       setIsSessionSwitching(true);
     }
     const cachedQueue = queueCacheRef.current[sessionId];
-    if (cachedQueue) {
-      setDisplayQueueState(cachedQueue);
-    }
+    setDisplayQueueState(cachedQueue || emptySessionDisplayState(sessionId));
     setSelectedSessionId(sessionId);
   }, [activeSessionId]);
-
-  const runSessionAction = async (action: "start" | "pause" | "resume" | "close") => {
-    if (!clinicId || activeSessionId == null) return;
-    try {
-      setSessionAction(action);
-      const response = await fetch(apiUrl(`/api/sessions/${activeSessionId}/${action}`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clinic_id: clinicId }),
-      });
-      if (!response.ok) throw new Error(`Failed to ${action} session`);
-      setMessage({ text: `Session ${action} updated.`, type: "success" });
-      refreshQueue();
-    } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message : `Failed to ${action} session`, type: "error" });
-    } finally {
-      setSessionAction(null);
-    }
-  };
 
   const announceDelay = async () => {
     if (!clinicId) {
       setMessage({ text: "Clinic ID not found. Please log in again.", type: "error" });
       return;
+    }
+    if (!canAnnounceDelay) {
+      setMessage({ text: delayUnavailableMessage, type: "error" });
+      setIsDelayOpen(false);
+      return;
+    }
+
+    const addedDelayMinutes = parseDelayMinutes(selectedDelay);
+    const existingDelayMinutes = Number(activeSession?.delay_minutes || 0);
+    const totalDelayMinutes = existingDelayMinutes + addedDelayMinutes;
+    const delayToSave = existingDelayMinutes > 0 ? `${totalDelayMinutes} min` : selectedDelay;
+
+    if (existingDelayMinutes > 0) {
+      const shouldAdd = window.confirm(
+        `This slot already has ${existingDelayMinutes} min delay. Add ${addedDelayMinutes} min more for a total of ${totalDelayMinutes} min?`
+      );
+      if (!shouldAdd) return;
     }
 
     try {
@@ -562,21 +693,70 @@ export default function KramaDoctorDashboard() {
         ? await fetch(apiUrl(`/api/sessions/${activeSessionId}/delay`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ clinic_id: clinicId, delay: selectedDelay }),
+            body: JSON.stringify({ clinic_id: clinicId, delay: delayToSave }),
           })
-        : await fetch(apiUrl(`/api/auth/doctor/announce-delay/${encodeURIComponent(clinicId)}/${encodeURIComponent(selectedDelay)}`), {
+        : await fetch(apiUrl(`/api/auth/doctor/announce-delay/${encodeURIComponent(clinicId)}/${encodeURIComponent(delayToSave)}`), {
             method: "POST",
           });
-      if (!response.ok) throw new Error("Failed to announce delay");
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "Failed to announce delay");
+      }
       const data = await response.json().catch(() => ({}));
-      const notified = data.notified_count || data.clinic_notified_count || 0;
-      setDelayNotice(notified > 0 ? `${data.delay || selectedDelay} delay active. ${notified} notification${notified === 1 ? "" : "s"} sent.` : `${data.delay || selectedDelay} delay saved. Notifications were not sent; check SMTP setup.`);
-      setMessage({ text: notified > 0 ? "Delay notification sent." : "Delay saved, but notification email was not sent.", type: notified > 0 ? "success" : "error" });
+      const savedDelayMinutes = Number(data.delay_minutes) || 0;
+      if (activeSessionId != null && savedDelayMinutes > 0) {
+        setSessions((current) => current.map((session) => (
+          session.session_id === activeSessionId
+            ? {
+                ...session,
+                delay_minutes: savedDelayMinutes,
+                status: "Delayed",
+                delay_started_at: data.delay_started_at || session.delay_started_at,
+                delay_ends_at: data.delay_ends_at || session.delay_ends_at,
+                delay_original_start_time: data.delay_original_start_time || session.delay_original_start_time || formatDelayedStartTime(session.time_range, 0),
+                delay_updated_start_time: data.delay_updated_start_time || session.delay_updated_start_time || formatDelayedStartTime(session.time_range, savedDelayMinutes),
+                is_delay_active: true,
+              }
+            : session
+        )));
+      }
+      setDelayNotice(`${data.delay || delayToSave} delay active for this session.`);
+      setMessage({ text: "Delay saved for this session.", type: "success" });
       setIsDelayOpen(false);
       refreshQueue();
     } catch (error) {
       setMessage({ text: error instanceof Error ? error.message : "Failed to announce delay", type: "error" });
     } finally {
+      setIsSendingDelay(false);
+    }
+  };
+
+  const cancelDelay = async () => {
+    if (!clinicId || activeSessionId == null) return;
+    try {
+      setIsSendingDelay(true);
+      setIsSessionSwitching(false);
+      setDelayNotice(null);
+      setIsDelayOpen(false);
+      setSessions((current) => current.map((session) => (
+        session.session_id === activeSessionId
+          ? { ...session, delay_minutes: 0, status: "Ongoing", delay_ends_at: null, delay_started_at: null, delay_original_start_time: null, delay_updated_start_time: null, is_delay_active: false }
+          : session
+      )));
+      const response = await fetch(apiUrl(`/api/sessions/${activeSessionId}/resume`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clinic_id: clinicId }),
+      });
+      if (!response.ok) throw new Error("Failed to cancel delay");
+      setMessage({ text: "Delay cancelled and queue restored.", type: "success" });
+      await fetchTodaySessions(clinicId, true, false);
+      refreshQueue();
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "Failed to cancel delay", type: "error" });
+      fetchTodaySessions(clinicId, true, false);
+    } finally {
+      setIsSessionSwitching(false);
       setIsSendingDelay(false);
     }
   };
@@ -589,35 +769,59 @@ export default function KramaDoctorDashboard() {
         </div>
       )}
 
-      <header className="border-b border-black/10 bg-white">
-        <div className="mx-auto flex min-h-[72px] max-w-6xl items-center justify-between gap-4 px-5 md:px-8">
-          <div className="flex items-center gap-4">
-            <Link to="/clinic" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7]" aria-label="Back to clinic dashboard">
+      <header className="border-b border-[#e6ded3] bg-[#fbfaf7]">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 sm:min-h-[72px] sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 sm:py-0 md:px-8">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+            <Link to="/clinic" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7] sm:h-10 sm:w-10" aria-label="Back to clinic dashboard">
               <ArrowLeft className="h-5 w-5" />
             </Link>
-            <div>
-              <p className="text-lg font-semibold text-[#202825]">Doctor Dashboard</p>
-              <p className="mt-1 text-xs text-[#77756f]">{clinicId || "No clinic selected"}{activeSession ? ` - ${activeSession.session_name}` : ""}</p>
+            <div className="min-w-0">
+              <p className="truncate text-base font-semibold text-[#202825] sm:text-lg">Doctor Dashboard</p>
+              <p className="mt-0.5 truncate text-xs text-[#77756f] sm:mt-1">{clinicId || "No clinic selected"}{activeSession ? ` - ${activeSession.session_name}` : ""}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Button onClick={() => setIsDelayOpen((open) => !open)} className="rounded-full bg-[#1a5c4a] px-5 text-white hover:bg-[#144d3e]">
-                <Megaphone className="mr-2 h-4 w-4" />
-                {activeDelay ? `Delay active - ${activeDelay}` : "Announce Delay"}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-3">
+            <div className="relative min-w-0">
+              <Button
+                onClick={() => {
+                  if (!canAnnounceDelay) {
+                    setMessage({ text: delayUnavailableMessage, type: "error" });
+                    return;
+                  }
+                  setIsDelayOpen((open) => !open);
+                }}
+                disabled={!activeSession}
+                className="h-9 w-full min-w-0 rounded-full bg-[#1a5c4a] px-2 text-xs text-white hover:bg-[#144d3e] disabled:cursor-not-allowed disabled:bg-[#9ca3af] sm:h-10 sm:w-auto sm:px-5 sm:text-sm"
+              >
+                <Megaphone className="mr-1.5 h-4 w-4 shrink-0 sm:mr-2" />
+                <span className="truncate sm:hidden">{activeDelay ? activeDelay : "Delay"}</span>
+                <span className="hidden sm:inline">
+                  {activeDelay ? `Delay active: ${activeDelay}` : "Announce Delay"}
+                </span>
               </Button>
               {isDelayOpen && (
-                <div className="absolute right-0 top-[calc(100%+12px)] z-40 w-[min(90vw,520px)] rounded-2xl border border-[#f59e0b] bg-[#fffbeb] p-5 shadow-xl">
+                <div className="fixed inset-x-4 top-[92px] z-40 rounded-2xl border border-[#f59e0b] bg-[#fffbeb] p-4 shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+12px)] sm:w-[min(90vw,520px)] sm:p-5">
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-semibold text-[#92400e]">How long will you be delayed?</p>
+                      {activeSession && <p className="mt-1 text-xs text-[#92400e]">{activeSession.session_name.replace("Time ", "Session ")}</p>}
                       {activeDelay && <p className="mt-1 text-xs text-[#92400e]">Live delay: {activeDelay}</p>}
                     </div>
                     <button type="button" onClick={() => setIsDelayOpen(false)} className="rounded-full border border-[#f59e0b]/70 px-3 py-1 text-xs font-semibold text-[#92400e] hover:bg-white">
-                      Cancel
+                      Close
                     </button>
                   </div>
+                  {activeDelay && (
+                    <div className="mb-4 rounded-xl border border-orange-200 bg-white/75 px-4 py-3 text-sm font-semibold text-[#92400e] transition-all duration-300">
+                      {activeOriginalStartTime && activeUpdatedStartTime && (
+                        <>
+                          <p>Original Time: <span className="line-through decoration-red-500/70 decoration-2">{activeOriginalStartTime}</span></p>
+                          <p>New Time: <span className="text-[#c2410c]">{activeUpdatedStartTime}</span></p>
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div className="mb-4 flex flex-wrap gap-2">
                     {delayOptions.map((option) => (
                       <button
@@ -630,37 +834,48 @@ export default function KramaDoctorDashboard() {
                       </button>
                     ))}
                   </div>
-                  <Button onClick={announceDelay} disabled={isSendingDelay} className="bg-green-600 hover:bg-green-700 text-white">
-                    {isSendingDelay ? "Sending clinic email..." : "Send delay email to clinic"}
-                  </Button>=
+                  <Button onClick={announceDelay} disabled={isSendingDelay || !canAnnounceDelay} className="bg-green-600 hover:bg-green-700 text-white disabled:cursor-not-allowed disabled:bg-[#9ca3af]">
+                    {isSendingDelay ? "Saving delay..." : activeDelay ? "Add delay" : "Save delay"}
+                  </Button>
+                  {activeDelay && (
+                    <Button onClick={cancelDelay} disabled={isSendingDelay} variant="outline" className="ml-2 border-red-300 text-red-700 hover:bg-red-50">
+                      Cancel delay
+                    </Button>
+                  )}
                   {delayNotice && <p className="mt-3 text-sm font-medium text-[#92400e]">{delayNotice}</p>}
                 </div>
               )}
             </div>
-            <Button onClick={refreshQueue} variant="outline" className="rounded-full border-[#d8d1c6] bg-white px-5 text-[#40514b] hover:bg-[#f5f3ee]">
-              <RefreshCw className="mr-2 h-4 w-4" />
+            <Button onClick={refreshQueue} variant="outline" className="h-9 w-full rounded-full border-[#d8d1c6] bg-[#fbfaf7] px-2 text-xs text-[#40514b] hover:bg-[#f5f3ee] sm:h-10 sm:w-auto sm:px-5 sm:text-sm">
+              <RefreshCw className="mr-1.5 h-4 w-4 sm:mr-2" />
               Refresh
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-5 px-5 py-6 md:px-8 xl:grid-cols-[1fr_320px]">
-        <section className="space-y-5">
-          <div className="grid gap-4 md:grid-cols-4">
-            <StatCard label="Total today" value={totalToday} accent />
-            <StatCard label="Completed" value={displayCompletedCount} />
-            <StatCard label="Waiting" value={displayQueue.length} />
-            <StatCard label="Queue" value={displayCurrentServing ? "Serving" : displayQueue.length ? "Ready" : "Idle"} />
-          </div>
-
-          <div className="rounded-2xl border border-black/10 bg-white p-5">
+      <main className="mx-auto grid max-w-6xl gap-4 px-4 py-4 md:px-8 md:py-6 xl:grid-cols-[1fr_320px]">
+        <section className="space-y-4 md:space-y-5">
+          <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 md:p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-lg font-bold text-[#202825]">Today's Time Slots</p>
                 <p className="mt-1 text-xs text-[#77756f]">Each session has its own queue, token flow, and delay state.</p>
               </div>
               {activeSession && <SessionStatusBadge status={activeSession.status} />}
+            </div>
+            <div className="mb-4 grid grid-cols-4 gap-2">
+              {[
+                { label: "Patients", value: displayActivePatientCount },
+                { label: "Done", value: displayCompletedCount },
+                { label: "Waiting", value: displayQueue.length },
+                { label: "Queue", value: displayCurrentServing ? "Serving" : displayQueue.length ? "Ready" : "Idle" },
+              ].map((item) => (
+                <div key={item.label} className="rounded-lg bg-[#f0ede6] px-2 py-2 text-center">
+                  <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-[#77756f]">{item.label}</p>
+                  <p className="mt-0.5 truncate text-xs font-bold text-[#202825] sm:text-sm">{item.value}</p>
+                </div>
+              ))}
             </div>
             {sessionsError && sessions.length > 0 && (
               <p className="mb-3 rounded-xl bg-red-50 px-4 py-3 text-center text-sm font-semibold text-red-700">{sessionsError}</p>
@@ -672,58 +887,63 @@ export default function KramaDoctorDashboard() {
             ) : sessions.length === 0 ? (
               <p className="rounded-xl bg-[#f8f6f2] px-4 py-5 text-center text-sm text-[#77756f]">No sessions configured for today.</p>
             ) : (
-              <div className="grid min-h-[136px] gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid min-h-[104px] grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">
                 {sessions.map((session) => (
                   <SessionCard key={session.session_id} session={session} selected={activeSessionId === session.session_id} onSelect={selectSession} />
                 ))}
               </div>
             )}
-            {activeSession && (
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => runSessionAction("start")} disabled={sessionAction !== null} className="rounded-full border-[#d8d1c6] bg-white text-[#40514b] hover:bg-[#f5f3ee]">
-                  <Play className="mr-2 h-4 w-4" /> Start
-                </Button>
-                <Button variant="outline" onClick={() => runSessionAction("pause")} disabled={sessionAction !== null} className="rounded-full border-[#d8d1c6] bg-white text-[#40514b] hover:bg-[#f5f3ee]">
-                  <PauseCircle className="mr-2 h-4 w-4" /> Pause
-                </Button>
-                <Button variant="outline" onClick={() => runSessionAction("resume")} disabled={sessionAction !== null} className="rounded-full border-[#d8d1c6] bg-white text-[#40514b] hover:bg-[#f5f3ee]">
-                  <RefreshCw className="mr-2 h-4 w-4" /> Resume
-                </Button>
-                <Button variant="outline" onClick={() => runSessionAction("close")} disabled={sessionAction !== null} className="rounded-full border-red-200 bg-white text-red-700 hover:bg-red-50">
-                  <XCircle className="mr-2 h-4 w-4" /> Close
-                </Button>
-              </div>
-            )}
           </div>
 
-          <div className="relative min-h-[360px] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_20px_55px_-45px_rgba(18,64,54,0.65)] transition-colors duration-200">
+          <div className="relative overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-[0_20px_55px_-45px_rgba(18,64,54,0.65)] transition-colors duration-200">
             <SwitchingOverlay show={isSessionSwitching} />
             <div className="bg-[#1a5c4a] px-6 py-4 text-center text-white">
               <p className="font-semibold">{displayCurrentServing ? "Now Serving" : displayQueue.length ? "Next Patient" : "No Active Token"}</p>
             </div>
-            <div className={`p-6 text-center transition-opacity duration-200 ${isSessionSwitching ? "opacity-65" : "opacity-100"}`}>
+            <div className={`p-4 transition-opacity duration-200 md:p-6 ${isSessionSwitching ? "opacity-65" : "opacity-100"}`}>
               {activePatient ? (
-                <>
-                  <p className="mb-5 text-5xl font-extrabold tracking-[-0.04em] text-[#202638]">{activePatient.token}</p>
-                  <div className="mx-auto max-w-2xl rounded-xl border-2 border-[#99efb9] bg-[#effff5] px-5 py-5">
-                    <div className="flex flex-wrap items-center justify-center gap-3">
-                      <p className="text-xl font-bold text-[#202825]">{activePatient.name}</p>
-                      <SourceBadge source={activePatient.source} />
-                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#1a5c4a]">{activePatient.status}</span>
+                <div className="mx-auto max-w-3xl rounded-2xl border-2 border-[#99efb9] bg-[#effff5] p-4 md:p-5">
+                  <div className="grid gap-4 md:grid-cols-[180px_1fr] md:items-stretch">
+                    <div className="rounded-2xl bg-white/70 p-4 text-center">
+                      <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#1a5c4a]">{displayCurrentServing ? "Serving token" : "Selected token"}</p>
+                      <p className="mt-2 text-5xl font-extrabold tracking-[-0.04em] text-[#202638] md:text-6xl">{activePatient.token}</p>
+                      {displayCurrentServing && (
+                        <p className="mt-3 inline-flex items-center justify-center gap-2 rounded-full bg-[#e9f7f2] px-3 py-1.5 text-sm font-semibold text-[#40514b]">
+                          <Clock className="h-4 w-4" /> {formatElapsed(elapsedTime)}
+                        </p>
+                      )}
                     </div>
-                    {activePatient.phone && <p className="mt-2 text-sm text-[#58645f]">{activePatient.phone}</p>}
-                    <p className="mt-2 text-sm font-semibold text-[#40514b]">Blood group: {activePatient.blood_group}</p>
-                    <VisitHistoryInlineSummary history={patientHistory} isLoading={isHistoryLoading} />
-                    {activePatient.estimated_wait_minutes != null && <p className="mt-1 text-xs text-[#58645f]">Updated wait: {activePatient.estimated_wait_minutes} min</p>}
-                    {displayCurrentServing && (
-                      <p className="mt-3 inline-flex items-center gap-2 text-sm text-[#40514b]">
-                        <Clock className="h-4 w-4" /> Elapsed: {formatElapsed(elapsedTime)}
-                      </p>
-                    )}
+
+                    <div className="min-w-0 text-left">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="min-w-0 truncate text-xl font-bold text-[#202825] md:text-2xl">{activePatient.name}</p>
+                        <SourceBadge source={activePatient.source} />
+                        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#1a5c4a]">{activePatient.status}</span>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl bg-white/70 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Phone</p>
+                          <p className="mt-1 break-words text-sm font-bold text-[#202825]">{activePatient.phone || "N/A"}</p>
+                        </div>
+                        <div className="rounded-xl bg-white/70 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Blood</p>
+                          <p className="mt-1 text-sm font-bold text-[#202825]">{activePatient.blood_group || "N/A"}</p>
+                        </div>
+                        <div className="rounded-xl bg-white/70 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Source</p>
+                          <p className="mt-1 text-sm font-bold text-[#202825]">{sourceLabel(activePatient.source)}</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </>
+
+                  <div className="mt-4">
+                    <VisitHistorySidebarCard history={patientHistory} isLoading={isHistoryLoading} error={historyError} />
+                  </div>
+                </div>
               ) : (
-                <div className="py-7">
+                <div className="py-7 text-center">
                   <p className="mb-3 text-5xl font-extrabold text-[#d2ccc1]">--</p>
                   <p className="text-sm text-[#77756f]">No patients in queue.</p>
                 </div>
@@ -731,59 +951,66 @@ export default function KramaDoctorDashboard() {
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div>
             <Button
-              className={`rounded-xl py-6 text-base font-bold shadow-sm ${displayCurrentServing ? "bg-[#FFC107] text-[#111827] hover:bg-[#f0b400]" : "bg-[#1a5c4a] text-white hover:bg-[#144d3e]"}`}
-              onClick={() => displayCurrentServing ? completePatient() : nextPatient()}
-              disabled={isSessionSwitching || (!displayCurrentServing && displayQueue.length === 0)}
+              className="w-full rounded-xl bg-[#1a5c4a] py-6 text-base font-bold text-white shadow-sm hover:bg-[#144d3e]"
+              onClick={handleNextPatient}
+              disabled={queueAction !== null || isSessionSwitching || !displayCurrentServing}
             >
-              <ArrowRightCircle className="mr-2 h-5 w-5" />
-              {displayCurrentServing ? "Mark Completed" : "Start Next Patient"}
-            </Button>
-            <Button
-              variant="outline"
-              className="rounded-xl border-[#d8d1c6] py-6 text-base font-bold text-[#40514b] hover:bg-white"
-              onClick={() => skipPatient()}
-              disabled={isSessionSwitching || displayQueue.length === 0}
-            >
-              <SkipForward className="mr-2 h-5 w-5" />
-              Skip Next Patient
+              <ArrowRightCircle className={`mr-2 h-5 w-5 ${queueAction === "next" ? "animate-spin" : ""}`} />
+              {queueAction === "next" ? "Updating..." : "Next"}
             </Button>
           </div>
 
-          <div className="relative min-h-[300px] rounded-2xl border border-black/10 bg-white p-5 transition-colors duration-200">
+          <div className="relative min-h-[300px] rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 transition-colors duration-200 md:p-5">
             <SwitchingOverlay show={isSessionSwitching} />
             <div className={`transition-opacity duration-200 ${isSessionSwitching ? "opacity-65" : "opacity-100"}`}>
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-[#1a5c4a]" />
-                <p className="text-lg font-bold text-[#202825]">Waiting Queue</p>
+                <p className="text-lg font-bold text-[#202825]">Session Queue</p>
               </div>
               {typeof displayViewingSlotId === "number" && (
                 <span className="rounded-full bg-[#f1efe8] px-3 py-1 text-xs font-semibold text-[#40514b]">Slot {displayViewingSlotId}</span>
               )}
             </div>
 
-            {displayQueue.length === 0 ? (
-              <p className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">No waiting patients.</p>
+            {displayActivePatientCount === 0 ? (
+              <p className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">No patients in this session.</p>
             ) : (
               <div className="space-y-3">
+                {displayCurrentServing && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedToken(null)}
+                    className="grid w-full grid-cols-[64px_1fr] items-center gap-3 rounded-xl border border-[#1a5c4a] bg-[#e9f7f2] px-3 py-3 text-left transition sm:grid-cols-[72px_1fr_auto] sm:px-4"
+                  >
+                    <div className="rounded-xl bg-[#fff0bf] px-3 py-2 text-center font-bold text-[#7a5800]">{displayCurrentServing.token}</div>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-[#202825]">{displayCurrentServing.patientName}</p>
+                      <p className="truncate text-xs text-[#77756f]">{displayCurrentServing.phone || "No phone"} - Blood: {displayCurrentServing.blood_group || "N/A"}</p>
+                    </div>
+                    <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
+                      <SourceBadge source={displayCurrentServing.source} />
+                      <span className="rounded-full bg-[#1a5c4a] px-2 py-1 text-xs font-bold text-white">Serving</span>
+                    </div>
+                  </button>
+                )}
                 {displayQueue.map((patient, index) => (
                   <button
                     key={`${patient.source}-${patient.appointment_id || patient.token}`}
                     type="button"
                     onClick={() => setSelectedToken(patient.token)}
-                    className={`grid w-full grid-cols-[72px_1fr_auto] items-center gap-3 rounded-xl border px-4 py-3 text-left transition ${selectedQueuePatient?.token === patient.token ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-white hover:bg-[#fbfaf7]"}`}
+                    className={`grid w-full grid-cols-[64px_1fr] items-center gap-3 rounded-xl border px-3 py-3 text-left transition sm:grid-cols-[72px_1fr_auto] sm:px-4 ${selectedQueuePatient?.token === patient.token ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-[#fffdf8] hover:bg-[#f0ede6]"}`}
                   >
                     <div className="rounded-xl bg-[#fff0bf] px-3 py-2 text-center font-bold text-[#7a5800]">{patient.token}</div>
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-[#202825]">{patient.name}</p>
                       <p className="truncate text-xs text-[#77756f]">{patient.phone || "No phone"} - Blood: {patient.blood_group || "N/A"}</p>
-                      {patient.estimated_wait_minutes != null && <p className="truncate text-xs text-[#77756f]">Est. wait {patient.estimated_wait_minutes} min</p>}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
                       <SourceBadge source={patient.source} />
-                      <span className="rounded-full bg-[#f1efe8] px-2 py-1 text-xs font-bold text-[#77756f]">#{index + 1}</span>
+                      <span className="rounded-full bg-[#f1efe8] px-2 py-1 text-xs font-bold text-[#77756f]">#{index + 1 + (displayCurrentServing ? 1 : 0)}</span>
                     </div>
                   </button>
                 ))}
@@ -793,8 +1020,8 @@ export default function KramaDoctorDashboard() {
           </div>
         </section>
 
-        <aside className="space-y-5">
-          <div className="min-h-[420px] rounded-2xl border border-black/10 bg-white p-5 transition-colors duration-200">
+        <aside className="hidden space-y-5 xl:block">
+          <div className="min-h-[420px] rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-5 transition-colors duration-200">
             <p className="mb-4 text-xs font-bold uppercase tracking-[0.08em] text-[#77756f]">Current Patient</p>
             {activePatient ? (
               <div className="space-y-4">

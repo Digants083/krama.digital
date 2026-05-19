@@ -290,15 +290,15 @@ const ClinicManageTime = () => {
 
   return (
 
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen bg-[#f5f3ee]">
 
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
+      <header className="sticky top-0 z-50 bg-[#fbfaf7]/90 backdrop-blur-md border-b border-[#e6ded3] shadow-sm">
 
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
 
           <div className="flex items-center gap-3">
 
-            <Link to="/clinic" className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+            <Link to="/clinic" className="p-2 rounded-lg bg-[#f0ede6] hover:bg-[#e6ded3] text-slate-600 transition-colors">
 
               <ArrowLeft className="h-5 w-5" />
 
@@ -342,7 +342,7 @@ const ClinicManageTime = () => {
 
         {showAddForm && (
 
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border border-slate-100 overflow-hidden">
+          <div className="bg-[#fbfaf7] rounded-2xl shadow-lg p-6 mb-6 border border-[#e6ded3] overflow-hidden">
 
             <div className="bg-gradient-to-r from-[#00555A] to-[#006e78] -mx-6 -mt-6 px-6 py-4 mb-6">
 
@@ -358,7 +358,7 @@ const ClinicManageTime = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
 
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+              <div className="bg-[#f0ede6] rounded-xl p-4 border border-[#e6ded3]">
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">Slot Name</label>
 
@@ -370,7 +370,7 @@ const ClinicManageTime = () => {
 
                   onChange={(e) => setNewSlot({ ...newSlot, slot_name: e.target.value })}
 
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white transition-all"
+                  className="w-full border border-[#d8d1c6] rounded-lg px-4 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] transition-all"
 
                 >
 
@@ -386,7 +386,7 @@ const ClinicManageTime = () => {
 
               </div>
 
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+              <div className="bg-[#f0ede6] rounded-xl p-4 border border-[#e6ded3]">
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">Start Time</label>
 
@@ -400,7 +400,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_hour: parseInt(e.target.value) })}
 
-                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="flex-1 border border-[#d8d1c6] rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -422,7 +422,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_minute: parseInt(e.target.value) })}
 
-                    className="w-20 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-20 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -442,7 +442,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_ampm: e.target.value })}
 
-                    className="w-24 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-24 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -458,7 +458,7 @@ const ClinicManageTime = () => {
 
               </div>
 
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+              <div className="bg-[#f0ede6] rounded-xl p-4 border border-[#e6ded3]">
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">End Time</label>
 
@@ -472,7 +472,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_hour: parseInt(e.target.value) })}
 
-                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="flex-1 border border-[#d8d1c6] rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -494,7 +494,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_minute: parseInt(e.target.value) })}
 
-                    className="w-20 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-20 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -514,7 +514,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_ampm: e.target.value })}
 
-                    className="w-24 border border-slate-300 rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-24 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -574,7 +574,7 @@ const ClinicManageTime = () => {
 
                 onClick={() => setShowAddForm(false)}
 
-                className="border-slate-300 text-slate-600 hover:bg-slate-100 px-6 py-2.5 rounded-lg font-medium transition-all"
+                className="border-[#d8d1c6] text-slate-600 hover:bg-[#f0ede6] px-6 py-2.5 rounded-lg font-medium transition-all"
 
               >
 
@@ -592,9 +592,9 @@ const ClinicManageTime = () => {
 
         {/* Time Slots List */}
 
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden">
+        <div className="bg-[#fbfaf7] rounded-2xl shadow-lg border border-[#e6ded3] overflow-hidden">
 
-          <div className="bg-gradient-to-r from-slate-50 to-white px-6 py-4 border-b border-slate-100">
+          <div className="bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] px-6 py-4 border-b border-[#e6ded3]">
 
             <div className="flex items-center justify-between">
 
@@ -632,7 +632,7 @@ const ClinicManageTime = () => {
 
             <div className="text-center py-12">
 
-              <div className="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="bg-[#f0ede6] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
 
                 <Clock className="h-8 w-8 text-slate-400" />
 
@@ -654,7 +654,7 @@ const ClinicManageTime = () => {
 
                   key={originalIndex}
 
-                  className={`border-2 rounded-xl p-5 transition-all hover:shadow-md ${slot.is_open ? 'bg-gradient-to-r from-green-50 to-white border-green-200' : 'bg-gradient-to-r from-red-50 to-white border-red-200'}`}
+                  className={`border-2 rounded-xl p-5 transition-all hover:shadow-md ${slot.is_open ? 'bg-gradient-to-r from-green-50 to-[#fbfaf7] border-green-200' : 'bg-gradient-to-r from-red-50 to-[#fbfaf7] border-red-200'}`}
 
                 >
 
@@ -754,11 +754,11 @@ const ClinicManageTime = () => {
 
           <ul className="text-sm text-slate-700 space-y-2 ml-6">
 
-            <li>• Add time slots for different sessions (Morning, Afternoon, Evening)</li>
+            <li>- Add time slots for different sessions (Morning, Afternoon, Evening)</li>
 
-            <li>• Click Open/Close to control slot availability for bookings</li>
+            <li>- Click Open/Close to control slot availability for bookings</li>
 
-            <li>• Patients will see available slots when booking</li>
+            <li>- Patients will see available slots when booking</li>
 
           </ul>
 

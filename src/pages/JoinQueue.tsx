@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
-import { formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
+import { formatDelayedStartTime, formatDelayLabel, formatDurationMinutes, formatIsoClock, formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
 import { ArrowRight, MapPinned, Search, Ticket } from "lucide-react";
 import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 // Types
 interface TimeSlot {
@@ -16,6 +17,10 @@ interface TimeSlot {
   is_open: boolean;
   is_expired: boolean;
   display_status: string;
+  delay_minutes?: number;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
 }
 
 type RawTimeSlot = Omit<TimeSlot, "is_open" | "is_expired" | "display_status"> & {
@@ -33,6 +38,10 @@ type SessionSlot = {
   time_label?: string;
   status?: string;
   is_open?: boolean;
+  delay_minutes?: number;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
 };
 
 // Types
@@ -79,8 +88,49 @@ const JoinQueue = () => {
   const [tokenResult, setTokenResult] = useState<{
     token_label: string;
     position: number;
+    predicted_eta?: string | null;
+    consultation_window?: string | null;
+    estimated_window_text?: string | null;
+    estimated_wait_minutes?: number | null;
+    active_delay_minutes?: number | null;
+    doctor_delay?: string | null;
+    delay_minutes?: number | null;
+    delay_ends_at?: string | null;
+    delay_original_start_time?: string | null;
+    delay_updated_start_time?: string | null;
+    session_status?: string | null;
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+
+  const refreshTokenResult = useCallback(async () => {
+    if (!tokenResult || !phone) return;
+    try {
+      const response = await fetch(`/api/auth/queue/lookup-by-phone?phone=${encodeURIComponent(phone)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const updated = (data.appointments || []).find((apt: any) => apt.token_label === tokenResult.token_label);
+      if (!updated) return;
+      setTokenResult((prev) => prev ? {
+        ...prev,
+        position: Number(String(updated.position || "").split("/")[0]) || prev.position,
+        predicted_eta: updated.predicted_eta,
+        consultation_window: updated.consultation_window,
+        estimated_window_text: updated.estimated_window_text,
+        estimated_wait_minutes: updated.estimated_wait_minutes,
+        active_delay_minutes: updated.active_delay_minutes,
+        doctor_delay: updated.doctor_delay,
+        delay_minutes: updated.delay_minutes,
+        delay_ends_at: updated.delay_ends_at,
+        delay_original_start_time: updated.delay_original_start_time,
+        delay_updated_start_time: updated.delay_updated_start_time,
+        session_status: updated.session_status,
+      } : prev);
+    } catch (error) {
+      console.error("Failed to refresh token timing:", error);
+    }
+  }, [phone, tokenResult]);
+
+  useQueueRealtime(step === "success" ? clinicInfo?.id : null, () => void refreshTokenResult());
 
   // Fetch clinic info when clinic_id is known
   useEffect(() => {
@@ -122,13 +172,15 @@ const JoinQueue = () => {
         is_open: slotStatus.is_open,
         is_expired: slotStatus.is_expired,
         display_status: slotStatus.display_status,
+        delay_minutes: Number(session.delay_minutes || 0),
       };
     };
 
-    const mapLegacySlot = (slot: RawTimeSlot, idx: number, slotArray: string[]): TimeSlot => {
+    const mapLegacySlot = (slot: RawTimeSlot, idx: number, slotArray: string[], slotDelays: number[]): TimeSlot => {
       const isOpen = isSlotManuallyOpen(slot, slotArray, idx);
       const slotStatus = getPatientSlotStatus(slot.time_range, isOpen);
       const slotId = idx + 1;
+      const delayMinutes = Number(slot.delay_minutes || slotDelays[idx] || 0);
       return {
         ...slot,
         slot_name: toDisplayName({ ...slot, slot_id: slotId }),
@@ -136,7 +188,8 @@ const JoinQueue = () => {
         session_id: slotId,
         is_open: slotStatus.is_open,
         is_expired: slotStatus.is_expired,
-        display_status: slotStatus.display_status,
+        display_status: delayMinutes > 0 && slotStatus.is_open && !slotStatus.is_expired ? "Delayed" : slotStatus.display_status,
+        delay_minutes: delayMinutes,
       };
     };
 
@@ -162,7 +215,8 @@ const JoinQueue = () => {
         const legacyResponse = await fetch(`/api/auth/clinic/time-slots?clinic_id=${encodeURIComponent(qrClinicId)}`);
         const legacyData = await legacyResponse.json();
         const slotArray = legacyData.slot || [];
-        const slots = (legacyData.slots || []).map((slot: RawTimeSlot, idx: number) => mapLegacySlot(slot, idx, slotArray)).sort(sortSlots);
+        const slotDelays = legacyData.slot_delays || [];
+        const slots = (legacyData.slots || []).map((slot: RawTimeSlot, idx: number) => mapLegacySlot(slot, idx, slotArray, slotDelays)).sort(sortSlots);
         setTimeSlots(slots);
       } catch (error) {
         console.error("Error fetching time slots:", error);
@@ -268,6 +322,17 @@ const JoinQueue = () => {
       setTokenResult({
         token_label: data.token_label,
         position: data.position,
+        predicted_eta: data.predicted_eta,
+        consultation_window: data.consultation_window,
+        estimated_window_text: data.estimated_window_text,
+        estimated_wait_minutes: data.estimated_wait_minutes,
+        active_delay_minutes: data.active_delay_minutes,
+        doctor_delay: data.doctor_delay,
+        delay_minutes: data.delay_minutes,
+        delay_ends_at: data.delay_ends_at,
+        delay_original_start_time: data.delay_original_start_time,
+        delay_updated_start_time: data.delay_updated_start_time,
+        session_status: data.session_status,
       });
       setStep("success");
     } catch (err: unknown) {
@@ -359,6 +424,9 @@ const JoinQueue = () => {
 
   // Success screen
   if (step === "success" && tokenResult) {
+    const activeDelayMinutes = tokenResult.active_delay_minutes || tokenResult.delay_minutes || 0;
+    const hasActiveDelay = Boolean(tokenResult.doctor_delay || activeDelayMinutes > 0);
+    const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : tokenResult.doctor_delay;
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
         <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
@@ -388,6 +456,32 @@ const JoinQueue = () => {
             <span className="text-muted-foreground">Patients ahead of you: </span>
             <span className="font-semibold">{Math.max(0, tokenResult.position - 1)}</span>
           </div>
+
+          <div className="mb-6 rounded-xl border border-primary/10 bg-white px-4 py-4 text-left">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
+            <p className="mt-1 text-lg font-bold text-foreground">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
+            {tokenResult.predicted_eta && (
+              <p className="mt-1 text-xs font-semibold text-primary">Predicted Consultation Time: {formatIsoClock(tokenResult.predicted_eta)}</p>
+            )}
+            {tokenResult.estimated_wait_minutes != null && (
+              <p className="mt-1 text-xs text-muted-foreground">Estimated wait {formatDurationMinutes(tokenResult.estimated_wait_minutes)}</p>
+            )}
+          </div>
+
+          {hasActiveDelay && (
+            <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 px-4 py-4 text-left">
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Delay update</p>
+              <p className="mt-1 text-lg font-bold text-orange-900">Slot delayed by {delayAmountText}</p>
+              {tokenResult.delay_original_start_time && tokenResult.delay_updated_start_time && (
+                <p className="mt-1 text-sm text-orange-800">
+                  Original {tokenResult.delay_original_start_time} - New {tokenResult.delay_updated_start_time}
+                </p>
+              )}
+              <p className="mt-1 text-sm text-orange-800">
+                New ETA: {formatIsoClock(tokenResult.predicted_eta) || tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}
+              </p>
+            </div>
+          )}
 
           <p className="mb-4 text-xs text-muted-foreground">
             Please wait for your token to be called.
@@ -533,6 +627,7 @@ const JoinQueue = () => {
                   const slotNum = slot.slot_id ?? idx + 1;
                   const isUnavailable = !slot.is_open || slot.is_expired;
                   const isSelected = selectedSlotId === slotNum;
+                  const delayLabel = formatDelayLabel(slot.delay_minutes);
                   const statusBadgeClass = slot.display_status === "Expired"
                     ? "bg-red-100 text-red-700"
                     : slot.display_status === "Delayed"
@@ -563,6 +658,19 @@ const JoinQueue = () => {
                         <span className={isSelected ? "mt-0.5 block text-xs text-white/75" : "mt-0.5 block text-xs text-muted-foreground"}>
                           {slot.time_label || formatTimeRange(slot.time_range[0], slot.time_range[1])}
                         </span>
+                        {delayLabel && !slot.is_expired && (
+                          <span className={isSelected ? "mt-2 block rounded-lg bg-white/15 px-3 py-2 text-xs font-semibold text-white" : "mt-2 block rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700"}>
+                            Delay: {delayLabel}
+                            <br />
+                            {slot.delay_original_start_time && slot.delay_updated_start_time ? (
+                              <>
+                                <span className="line-through decoration-red-500/70 decoration-2">{slot.delay_original_start_time}</span>
+                                {" -> "}
+                                {slot.delay_updated_start_time}
+                              </>
+                            ) : <>New time: {formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</>}
+                          </span>
+                        )}
                       </span>
                       <span
                         className={[

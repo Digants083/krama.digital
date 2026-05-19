@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
 
+from app.config import admin_usernames
 from app.database.db import get_db
 from app.database.models import (
     PendingClinicRegistration, Clinic, Admin, ClinicImage
@@ -26,6 +27,10 @@ from app.services.email_service import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_SESSION_HOURS = 24
 admin_sessions: dict[str, dict[str, Union[str, datetime]]] = {}
+
+
+def valid_admin_usernames() -> set[str]:
+    return admin_usernames() or {"admin1", "admin2"}
 
 
 def generate_clinic_id():
@@ -121,17 +126,15 @@ async def send_admin_otp(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Send OTP to admin's email and confirmation email.
-    For admin1: sends to diganths083@gmail.com and digitalkrama@gmail.com
-    For admin2: sends to yashavanthb28@gmail.com and digitalkrama@gmail.com
+    Send OTP to the admin email and confirmation email configured in environment variables.
     """
     username = request.username
 
     # Check if username is valid
-    if username not in ["admin1", "admin2"]:
+    if username not in valid_admin_usernames():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid username. Use admin1 or admin2"
+            detail=f"Invalid username. Use one of: {', '.join(sorted(valid_admin_usernames()))}"
         )
 
     # Get admin from database
@@ -539,8 +542,10 @@ async def approve_registration(
             city=pending_reg.city,
             pincode=pending_reg.pincode,
             address=pending_reg.address,
-            latitude=latitude,
-            longitude=longitude,
+            latitude=None,
+            longitude=None,
+            admin_pinned_latitude=latitude,
+            admin_pinned_longitude=longitude,
             image_urls=pending_reg.image_urls,
             doctor_name=pending_reg.doctor_name,
             specialization=pending_reg.specialization,
@@ -586,6 +591,8 @@ async def approve_registration(
                 "address": new_clinic.address,
                 "latitude": new_clinic.latitude,
                 "longitude": new_clinic.longitude,
+                "admin_pinned_latitude": new_clinic.admin_pinned_latitude,
+                "admin_pinned_longitude": new_clinic.admin_pinned_longitude,
                 "category": new_clinic.category,
                 "categories": new_clinic.categories or ([] if not new_clinic.category else [new_clinic.category]),
                 "city": new_clinic.city,

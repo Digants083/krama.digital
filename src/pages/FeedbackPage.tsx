@@ -105,57 +105,95 @@ const FeedbackPage = () => {
   const messageMaxLength = 1000;
   const messageRemaining = messageMaxLength - messageLength;
 
+  const inputClass = (hasError: boolean) =>
+    `w-full rounded-lg border bg-background/80 px-4 py-3 text-sm text-foreground outline-none transition focus:ring-2 ${
+      hasError
+        ? "border-destructive/60 focus:border-destructive focus:ring-destructive/15"
+        : "border-border focus:border-primary focus:ring-primary/15"
+    }`;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
-        <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate(-1)}
-              className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-slate-800">Feedback</h1>
-              <p className="text-xs text-slate-500">Share your thoughts with us</p>
-            </div>
+    <div className="min-h-screen bg-background sm:bg-[linear-gradient(180deg,hsl(var(--secondary))_0%,hsl(var(--background))_40%,hsl(var(--background))_100%)]">
+      <header className="border-b border-primary/10 bg-background/80 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card/85 text-muted-foreground shadow-sm transition hover:border-primary/30 hover:text-primary"
+            aria-label="Go back"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
+            <h1 className="font-display text-xl font-bold text-foreground">Feedback</h1>
+            <p className="hidden text-xs text-muted-foreground sm:block">Share what worked, what did not, and what should improve.</p>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-4 py-8">
-        {/* Status Messages */}
+      <main className="mx-auto grid max-w-6xl gap-4 px-4 py-5 sm:gap-6 sm:py-8 lg:grid-cols-[0.86fr_1.14fr] lg:py-12">
+        <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm sm:rounded-2xl sm:border-primary/15 sm:bg-primary sm:shadow-[0_24px_70px_-38px_rgba(18,80,70,0.75)] lg:sticky lg:top-24 lg:self-start">
+          <div className="p-5 text-foreground sm:p-8 sm:text-primary-foreground">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:h-11 sm:w-11 sm:bg-white/12 sm:text-primary-foreground">
+            <MessageSquare className="h-5 w-5" />
+          </div>
+          <h2 className="mt-4 font-display text-2xl font-bold leading-tight sm:mt-5 sm:text-3xl">Help Krama grow.</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-white">
+            Tell us what felt good, confusing, or slow. Short feedback is enough.
+          </p>
+          <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground sm:mt-6 sm:space-y-3 sm:border-white/10 sm:pt-5 sm:text-white">
+            <div className="flex gap-3">
+              <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
+              <span>Issues, suggestions, and rough ideas help.</span>
+            </div>
+            <div className="flex gap-3">
+              <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
+              <span>Specific notes are easier to fix.</span>
+            </div>
+          </div>
+          </div>
+          <div className="hidden grid-cols-2 border-t border-white/10 bg-white/[0.07] text-primary-foreground sm:grid">
+            <div className="border-r border-white/10 p-5">
+              <p className="text-2xl font-bold">10 AM</p>
+              <p className="mt-1 text-xs text-white">Support starts</p>
+            </div>
+            <div className="p-5">
+              <p className="text-2xl font-bold">4 PM</p>
+              <p className="mt-1 text-xs text-white">Daily help window</p>
+            </div>
+          </div>
+        </section>
+
+        <section>
         {submitStatus === "success" && (
-          <div className="mb-6 bg-green-50 border-2 border-green-200 rounded-xl p-4 flex items-start gap-3">
-            <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+          <div className="mb-4 flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/5 p-4">
+            <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
             <div>
-              <p className="font-semibold text-green-800">Feedback Submitted Successfully</p>
-              <p className="text-sm text-green-700">{statusMessage}</p>
+              <p className="font-semibold text-foreground">Feedback submitted</p>
+              <p className="text-sm text-muted-foreground">{statusMessage}</p>
             </div>
           </div>
         )}
 
         {submitStatus === "error" && (
-          <div className="mb-6 bg-red-50 border-2 border-red-200 rounded-xl p-4 flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+          <div className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/25 bg-destructive/5 p-4">
+            <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-destructive" />
             <div>
-              <p className="font-semibold text-red-800">Submission Failed</p>
-              <p className="text-sm text-red-700">{statusMessage}</p>
+              <p className="font-semibold text-foreground">Submission failed</p>
+              <p className="text-sm text-muted-foreground">{statusMessage}</p>
             </div>
           </div>
         )}
 
-        {/* Main Form Card */}
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden">
-          {/* Form Content */}
-          <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {/* Name Field */}
+        <div className="overflow-hidden rounded-xl border border-border bg-card/90 shadow-sm sm:rounded-2xl sm:shadow-[0_24px_70px_-45px_rgba(18,80,70,0.65)]">
+          <div className="border-b border-border bg-secondary/35 px-4 py-4 sm:bg-[linear-gradient(135deg,hsl(var(--card))_0%,hsl(var(--secondary))_100%)] sm:px-6 sm:py-5">
+            <h2 className="font-display text-xl font-bold text-foreground sm:text-2xl">Send feedback</h2>
+            <p className="mt-1 text-sm text-muted-foreground">A few details help us understand the exact experience.</p>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:space-y-5 sm:p-6">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
+              <label className="mb-2 block text-sm font-semibold text-foreground">
                 <div className="flex items-center gap-2">
-                  <User className="h-4 w-4 text-[#00555A]" />
+                  <User className="h-4 w-4 text-primary" />
                   Your Name
                 </div>
               </label>
@@ -165,26 +203,21 @@ const FeedbackPage = () => {
                 value={formData.name}
                 onChange={handleChange}
                 placeholder="Enter your full name"
-                className={`w-full px-4 py-3 rounded-xl border-2 transition-all ${
-                  errors.name
-                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-2 focus:ring-red-200"
-                    : "border-slate-200 bg-slate-50 focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20"
-                } focus:outline-none`}
+                className={inputClass(Boolean(errors.name))}
                 disabled={isSubmitting}
               />
               {errors.name && (
-                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                <p className="mt-2 flex items-center gap-1 text-sm text-destructive">
                   <AlertCircle className="h-3 w-3" />
                   {errors.name}
                 </p>
               )}
             </div>
 
-            {/* Email Field */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
+              <label className="mb-2 block text-sm font-semibold text-foreground">
                 <div className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-[#00555A]" />
+                  <Mail className="h-4 w-4 text-primary" />
                   Email Address
                 </div>
               </label>
@@ -194,26 +227,21 @@ const FeedbackPage = () => {
                 value={formData.email}
                 onChange={handleChange}
                 placeholder="your.email@example.com"
-                className={`w-full px-4 py-3 rounded-xl border-2 transition-all ${
-                  errors.email
-                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-2 focus:ring-red-200"
-                    : "border-slate-200 bg-slate-50 focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20"
-                } focus:outline-none`}
+                className={inputClass(Boolean(errors.email))}
                 disabled={isSubmitting}
               />
               {errors.email && (
-                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                <p className="mt-2 flex items-center gap-1 text-sm text-destructive">
                   <AlertCircle className="h-3 w-3" />
                   {errors.email}
                 </p>
               )}
             </div>
 
-            {/* Phone Field */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
+              <label className="mb-2 block text-sm font-semibold text-foreground">
                 <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4 text-[#00555A]" />
+                  <Phone className="h-4 w-4 text-primary" />
                   Phone Number
                 </div>
               </label>
@@ -223,26 +251,21 @@ const FeedbackPage = () => {
                 value={formData.phone}
                 onChange={handleChange}
                 placeholder="Enter your phone number"
-                className={`w-full px-4 py-3 rounded-xl border-2 transition-all ${
-                  errors.phone
-                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-2 focus:ring-red-200"
-                    : "border-slate-200 bg-slate-50 focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20"
-                } focus:outline-none`}
+                className={inputClass(Boolean(errors.phone))}
                 disabled={isSubmitting}
               />
               {errors.phone && (
-                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                <p className="mt-2 flex items-center gap-1 text-sm text-destructive">
                   <AlertCircle className="h-3 w-3" />
                   {errors.phone}
                 </p>
               )}
             </div>
 
-            {/* Message Field */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
+              <label className="mb-2 block text-sm font-semibold text-foreground">
                 <div className="flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-[#00555A]" />
+                  <MessageSquare className="h-4 w-4 text-primary" />
                   Your Feedback
                 </div>
               </label>
@@ -252,35 +275,30 @@ const FeedbackPage = () => {
                 onChange={handleChange}
                 placeholder="Share your experience, suggestions, or any issues you encountered..."
                 rows={6}
-                className={`w-full px-4 py-3 rounded-xl border-2 transition-all resize-none ${
-                  errors.message
-                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-2 focus:ring-red-200"
-                    : "border-slate-200 bg-slate-50 focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20"
-                } focus:outline-none`}
+                className={`${inputClass(Boolean(errors.message))} resize-none`}
                 disabled={isSubmitting}
               />
-              <div className="flex items-center justify-between mt-1">
+              <div className="mt-2 flex items-center justify-between">
                 {errors.message && (
-                  <p className="text-sm text-red-600 flex items-center gap-1">
+                  <p className="flex items-center gap-1 text-sm text-destructive">
                     <AlertCircle className="h-3 w-3" />
                     {errors.message}
                   </p>
                 )}
-                <p className={`text-sm ml-auto ${messageRemaining < 100 ? 'text-amber-600' : 'text-slate-500'}`}>
+                <p className={`ml-auto text-sm ${messageRemaining < 100 ? 'text-accent' : 'text-muted-foreground'}`}>
                   {messageLength} / {messageMaxLength} characters
                 </p>
               </div>
             </div>
 
-            {/* Submit Button */}
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-gradient-to-r from-[#00555A] to-[#006e78] hover:from-[#00494F] hover:to-[#00555A] text-white py-4 rounded-xl font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-6 font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90"
             >
               {isSubmitting ? (
                 <>
-                  <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
                   Submitting...
                 </>
               ) : (
@@ -292,29 +310,7 @@ const FeedbackPage = () => {
             </Button>
           </form>
         </div>
-
-        {/* Info Card */}
-        <div className="mt-6 bg-white rounded-2xl shadow-lg border border-slate-100 p-6">
-          <h3 className="font-semibold text-slate-800 mb-3">Why Your Feedback Matters</h3>
-          <ul className="space-y-2 text-sm text-slate-600">
-            <li className="flex items-start gap-2">
-              <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-              <span>Helps us improve our services and user experience</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-              <span>Allows us to identify and fix issues quickly</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-              <span>Enables us to better understand your needs</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-              <span>Contributes to building a better platform for everyone</span>
-            </li>
-          </ul>
-        </div>
+        </section>
       </main>
     </div>
   );

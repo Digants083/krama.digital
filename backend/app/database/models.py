@@ -24,6 +24,8 @@ class Clinic(Base):
     address = Column(String, nullable=True)
     latitude = Column(String, nullable=True)
     longitude = Column(String, nullable=True)
+    admin_pinned_latitude = Column(String, nullable=True)
+    admin_pinned_longitude = Column(String, nullable=True)
     image_urls = Column(JSON, default=list)
     doctor_name = Column(String, nullable=True)
     specialization = Column(String, nullable=True)
@@ -33,6 +35,8 @@ class Clinic(Base):
     start = Column(Integer, nullable=True)
     end = Column(Integer, nullable=True)
     booking_cutoff_minutes = Column(Integer, default=15)
+    consultation_min_minutes = Column(Integer, default=8)
+    consultation_max_minutes = Column(Integer, default=12)
     is_active = Column(Boolean, default=False)
     manual_stop_date = Column(String, nullable=True)
     has_pinned_location = Column(Boolean, default=False)
@@ -76,6 +80,7 @@ class Appointment(Base):
     doctor_delay = Column(String, nullable=True)
     notification_stage = Column(String, default="pending")
     last_email_sent_at = Column(DateTime(timezone=True), nullable=True)  # Track when email was actually sent
+    serving_started_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     source = Column(String, default="online")
     slot_id = Column(Integer, nullable=True)
@@ -95,14 +100,19 @@ class CompletedAppointment(Base):
     patient_email = Column(String, nullable=False)
     patient_phone = Column(String, nullable=False)
     doctor_name = Column(String, nullable=True)
+    doctor_id = Column(String, nullable=True)
     date = Column(String, nullable=False)
     time = Column(String, nullable=False)
     slot_id = Column(Integer, nullable=True)
     session_id = Column(Integer, nullable=True)
+    serving_started_at = Column(DateTime(timezone=True), nullable=True)
     served_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, default="served")  # served, completed, skipped
     wait_time_minutes = Column(Integer, nullable=True)  # how long they waited
+    service_duration_seconds = Column(Integer, nullable=True)
+    consultation_duration_minutes = Column(Integer, nullable=True)
     outcome = Column(String, default="served")  # served or not_served
     diagnosis = Column(String, nullable=True)
     notes = Column(String, nullable=True)
@@ -121,9 +131,34 @@ class DoctorSession(Base):
     end_time = Column(String, nullable=False)
     status = Column(String, default="available")
     delay_minutes = Column(Integer, default=0)
+    delay_started_at = Column(DateTime(timezone=True), nullable=True)
+    delay_ends_at = Column(DateTime(timezone=True), nullable=True)
+    delay_original_start_time = Column(String, nullable=True)
+    delay_updated_start_time = Column(String, nullable=True)
+    delay_version = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     slot_id = Column(Integer, nullable=True)
     session_date = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class NotificationJob(Base):
+    """Durable notification/reminder jobs that survive server restarts."""
+    __tablename__ = "notification_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_type = Column(String, nullable=False, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    session_id = Column(Integer, nullable=True, index=True)
+    recipient_email = Column(String, nullable=True, index=True)
+    patient_name = Column(String, nullable=True)
+    token_number = Column(String, nullable=True)
+    scheduled_for = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String, default="pending", index=True)
+    dedupe_key = Column(String, unique=True, nullable=False, index=True)
+    payload = Column(JSON, default=dict)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -135,6 +170,7 @@ class ClinicTimeSlot(Base):
     clinic_id = Column(String, unique=True, nullable=False, index=True)
     slots = Column(JSON, default=list)  # Array of {slot_name, time_range, is_open}
     slot = Column(ARRAY(String), default=list)  # Array of "open"/"close" for each slot
+    slot_delays = Column(JSON, default=list)  # Array of delay minutes per slot, e.g. [0, 15, 0]
     last_slot_change_date = Column(DateTime(timezone=True), nullable=True)  # Track when slots were last modified
     daily_toggle_counts = Column(JSON, default=list)  # Array of toggle counts per slot [0, 0, 0] for 3 slots
     last_toggle_date = Column(DateTime(timezone=True), nullable=True)  # Track date of last toggle operation
@@ -196,6 +232,7 @@ class QRAppointment(Base):
     date = Column(String, nullable=False)
     status = Column(String, default="booked")
     doctor_delay = Column(String, nullable=True)
+    serving_started_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     slot_id = Column(Integer, nullable=True)
     session_id = Column(Integer, nullable=True)
@@ -289,7 +326,7 @@ class Feedback(Base):
     reviewed_by = Column(String, nullable=True)  # admin_id who reviewed
 
 class PatientReport(Base):
-    """Model for storing patient reports for diagnostic/scanning centers"""
+    """Model for storing patient reports for clinics"""
     __tablename__ = "patient_reports"
 
     id = Column(Integer, primary_key=True, index=True)

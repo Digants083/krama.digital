@@ -20,13 +20,10 @@ const ClinicDashboard = () => {
   const [showLocationConfirm, setShowLocationConfirm] = useState(false);
   const { fetchQueueForClinic } = useQueue();
 
-  const hasLocation = clinicProfile?.latitude && clinicProfile?.longitude;
-  const needsLocationConfirmation = hasLocation && clinicProfile?.has_pinned_location === false;
-
-  // Check if clinic is diagnostic or scanning center
-  const isDiagnosticCenter = clinicProfile?.categories?.some(
-    (cat: string) => ["diagnostic_center", "scanning_center", "diagnostic", "scanning", "lab", "x-ray", "mri", "ct_scan"].includes(cat)
-  );
+  const hasLocation = clinicProfile?.latitude && clinicProfile?.longitude && clinicProfile?.has_pinned_location;
+  const pendingLatitude = clinicProfile?.admin_pinned_latitude || (!clinicProfile?.has_pinned_location ? clinicProfile?.latitude : null);
+  const pendingLongitude = clinicProfile?.admin_pinned_longitude || (!clinicProfile?.has_pinned_location ? clinicProfile?.longitude : null);
+  const needsLocationConfirmation = pendingLatitude && pendingLongitude && clinicProfile?.has_pinned_location === false;
 
   const actions = [
     {
@@ -44,11 +41,11 @@ const ClinicDashboard = () => {
       title: "Look Up Patients",
       icon: Eye,
     },
-    ...(isDiagnosticCenter ? [{
+    {
       to: "/clinic/reports",
       title: "Reports",
       icon: FileText,
-    }] : []),
+    },
   ];
 
   useEffect(() => {
@@ -81,9 +78,11 @@ const ClinicDashboard = () => {
         if (response.ok) {
           const data = await response.json();
           setClinicProfile(data);
-          if (data.latitude && data.longitude && data.has_pinned_location === false) {
+          const suggestedLatitude = data.admin_pinned_latitude || (!data.has_pinned_location ? data.latitude : null);
+          const suggestedLongitude = data.admin_pinned_longitude || (!data.has_pinned_location ? data.longitude : null);
+          if (suggestedLatitude && suggestedLongitude && data.has_pinned_location === false) {
             setShowLocationConfirm(true);
-          } else if (!data.latitude || !data.longitude) {
+          } else if (!data.latitude || !data.longitude || !data.has_pinned_location) {
             setShowLocationModal(true);
           }
         }
@@ -117,6 +116,8 @@ const ClinicDashboard = () => {
           ...prev,
           latitude: data.latitude,
           longitude: data.longitude,
+          admin_pinned_latitude: null,
+          admin_pinned_longitude: null,
           has_pinned_location: data.has_pinned_location,
         }));
         setShowLocationConfirm(false);
@@ -130,49 +131,49 @@ const ClinicDashboard = () => {
   };
 
   const handleAcceptPinnedLocation = async () => {
-    if (!clinicProfile?.latitude || !clinicProfile?.longitude) return;
+    if (!pendingLatitude || !pendingLongitude) return;
     await handleSaveLocation(
-      clinicProfile.latitude,
-      clinicProfile.longitude,
+      pendingLatitude,
+      pendingLongitude,
       clinicProfile.address || ""
     );
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#f5f3ee]">
       {message && (
         <div className="fixed right-4 top-4 z-50 rounded-full bg-foreground px-4 py-2 text-sm text-white shadow-lg">
           {message.text}
         </div>
       )}
 
-      <main className="section-container px-4 py-8 md:px-8 md:py-10">
-        <section className="rounded-[32px] bg-primary px-6 py-8 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] md:px-8">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm uppercase tracking-[0.22em] text-primary-foreground/70">Clinic Dashboard</p>
-              <h1 className="mt-3 font-display text-4xl font-bold tracking-tight md:text-5xl">
+      <main className="section-container px-4 py-6 md:px-8 md:py-10">
+        <section className="rounded-[24px] bg-primary px-4 py-6 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] sm:rounded-[32px] sm:px-6 sm:py-8 md:px-8">
+          <div className="flex items-start justify-between gap-3 sm:gap-4">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.18em] text-primary-foreground/70 sm:text-sm sm:tracking-[0.22em]">Clinic Dashboard</p>
+              <h1 className="mt-2 truncate font-display text-3xl font-bold tracking-tight sm:mt-3 sm:text-4xl md:text-5xl">
                 {clinicProfile?.clinic_name || "Clinic"}
               </h1>
-              <p className="mt-3 text-primary-foreground/78">
+              <p className="mt-2 text-sm text-primary-foreground/78 sm:mt-3 sm:text-base">
                 Keep queue control simple and visible.
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
               {!hasLocation && (
                 <Button
                   variant="outline"
                   onClick={() => setShowLocationModal(true)}
-                  className="border-yellow-400 bg-yellow-400/20 text-yellow-100 hover:bg-yellow-400/30"
+                  className="h-10 rounded-full border-yellow-400 bg-yellow-400/20 px-3 text-xs text-yellow-100 hover:bg-yellow-400/30 sm:px-4 sm:text-sm"
                 >
-                  <MapPin className="mr-2 h-4 w-4" />
-                  Set Location
+                  <MapPin className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Set Location</span>
                 </Button>
               )}
               <Link
                 to="/clinic/profile"
-                className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20 sm:h-12 sm:w-12"
                 aria-label="Clinic profile"
               >
                 <User className="h-5 w-5" />
@@ -198,15 +199,15 @@ const ClinicDashboard = () => {
             </div>
           )}
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:grid-cols-4 sm:gap-4">
             {actions.map((action) => (
               <Link
                 key={action.title}
                 to={action.to}
-                className="rounded-[22px] bg-white/10 px-4 py-5 transition hover:bg-white/15"
+                className="rounded-[18px] bg-white/10 px-3 py-4 transition hover:bg-white/15 sm:rounded-[22px] sm:px-4 sm:py-5"
               >
-                <action.icon className="h-7 w-7 text-white" />
-                <p className="mt-4 text-lg font-bold text-white">{action.title}</p>
+                <action.icon className="h-6 w-6 text-white sm:h-7 sm:w-7" />
+                <p className="mt-3 text-sm font-bold leading-tight text-white sm:mt-4 sm:text-lg">{action.title}</p>
               </Link>
             ))}
           </div>
@@ -217,8 +218,8 @@ const ClinicDashboard = () => {
         isOpen={showLocationModal}
         onClose={() => setShowLocationModal(false)}
         onSave={handleSaveLocation}
-        initialLatitude={clinicProfile?.latitude}
-        initialLongitude={clinicProfile?.longitude}
+        initialLatitude={clinicProfile?.latitude || pendingLatitude}
+        initialLongitude={clinicProfile?.longitude || pendingLongitude}
         clinicAddress={
           [
             clinicProfile?.street_address,
@@ -243,19 +244,19 @@ const ClinicDashboard = () => {
           <div className="rounded-lg border bg-secondary/40 p-4 text-sm">
             <div className="font-medium text-foreground">Pinned coordinate</div>
             <div className="mt-1 text-muted-foreground">
-              {clinicProfile?.latitude}, {clinicProfile?.longitude}
+              {pendingLatitude}, {pendingLongitude}
             </div>
             {!!clinicProfile?.address && (
               <div className="mt-2 text-muted-foreground">{clinicProfile.address}</div>
             )}
           </div>
 
-          {clinicProfile?.latitude && clinicProfile?.longitude && (
+          {pendingLatitude && pendingLongitude && (
             <iframe
               title="Admin pinned clinic location"
               className="h-64 w-full rounded-lg border"
               loading="lazy"
-              src={`https://maps.google.com/maps?q=${clinicProfile.latitude},${clinicProfile.longitude}&z=17&output=embed`}
+              src={`https://maps.google.com/maps?q=${pendingLatitude},${pendingLongitude}&z=17&output=embed`}
             />
           )}
 

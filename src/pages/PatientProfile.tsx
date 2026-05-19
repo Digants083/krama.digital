@@ -4,6 +4,7 @@ import { usePatient } from "@/context/PatientContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowLeft, CheckCircle, Lock, LogOut, Phone, Trash2, User, XCircle } from "lucide-react";
 
@@ -52,7 +53,6 @@ const PatientProfile = () => {
   const [otpCooldown, setOtpCooldown] = useState(0);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotPasswordOtpVerified, setForgotPasswordOtpVerified] = useState(false);
-  const [deletePasswordVerified, setDeletePasswordVerified] = useState(false);
 
   const passwordChecks = getPasswordChecks(newPassword);
   const isNewPasswordStrong = Object.values(passwordChecks).every(Boolean);
@@ -298,15 +298,15 @@ const PatientProfile = () => {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f3ee]">
         <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border/70 bg-background/90 backdrop-blur-xl">
+    <div className="min-h-screen bg-[#f5f3ee]">
+      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/90 backdrop-blur-xl">
         <div className="section-container flex h-16 items-center gap-3 px-4 md:px-8">
           <Link to="/patient" className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition hover:text-foreground">
             <ArrowLeft className="h-4 w-4" />
@@ -326,25 +326,25 @@ const PatientProfile = () => {
         </div>
       )}
 
-      <main className="section-container px-4 py-8 md:px-8 md:py-10">
-        <section className="rounded-[32px] bg-primary px-6 py-8 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] md:px-8">
-          <div className="flex items-center gap-4">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20">
-              <User className="h-10 w-10" />
+      <main className="section-container px-4 py-6 md:px-8 md:py-10">
+        <section className="rounded-[24px] bg-primary px-4 py-6 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] sm:rounded-[32px] sm:px-6 sm:py-8 md:px-8">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20 sm:h-20 sm:w-20">
+              <User className="h-7 w-7 sm:h-10 sm:w-10" />
             </div>
-            <div>
-              <p className="text-sm uppercase tracking-[0.22em] text-primary-foreground/70">Account</p>
-              <h1 className="mt-2 font-display text-3xl font-bold md:text-4xl">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.18em] text-primary-foreground/70 sm:text-sm sm:tracking-[0.22em]">Patient Account</p>
+              <h1 className="mt-1 truncate font-display text-2xl font-bold sm:mt-2 sm:text-3xl md:text-4xl">
                 {dbProfile ? dbProfile.name : profile.name}
               </h1>
-              <p className="mt-2 text-primary-foreground/75">
+              <p className="mt-1 truncate text-sm text-primary-foreground/75 sm:mt-2 sm:text-base">
                 {dbProfile ? dbProfile.email : profile.email}
               </p>
             </div>
           </div>
 
           {dbProfile && (
-            <div className="mt-8 grid gap-4 md:grid-cols-3">
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 md:grid-cols-4 md:gap-4">
               <ProfileStat label="Patient ID" value={dbProfile.patient_id} mono />
               <ProfileStat label="Phone" value={dbProfile.phone} />
               <ProfileStat label="Blood Group" value={dbProfile.blood_group || "N/A"} />
@@ -353,223 +353,175 @@ const PatientProfile = () => {
           )}
         </section>
 
-        <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
-            <div className="flex gap-2">
-              <div className="w-20">
-                <Label htmlFor="countryCode">Code</Label>
-                <Input
-                  id="countryCode"
-                  type="tel"
-                  value="+91"
-                  disabled
-                  className="mt-2 bg-slate-100"
-                />
-              </div>
-              <div className="flex-1">
-                <Label htmlFor="phone">Phone Number</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="9876543210"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="mt-2"
-                />
-              </div>
-            </div>
-            <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full mt-4">
-              {otpSending && pendingAction === "phone" ? "Sending OTP..." : "Verify OTP and Update"}
-            </Button>
-          </ProfileCard>
-
-          <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
-            {!showForgotPassword ? (
-              // Normal password change - verify current password first, no OTP
-              <>
-                <div>
-                  <Label htmlFor="current-pw">Current Password</Label>
+        <section className="mt-4 grid grid-cols-2 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-12 lg:gap-6">
+          <div className="col-span-2 sm:col-span-1 lg:col-span-4">
+            <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
+              <div className="flex gap-2">
+                <div className="w-20">
+                  <Label htmlFor="countryCode">Code</Label>
                   <Input
-                    id="current-pw"
-                    type="password"
-                    value={currentPassword}
-                    onChange={(e) => {
-                      setCurrentPassword(e.target.value);
-                      setPasswordVerified(false);
-                    }}
+                    id="countryCode"
+                    type="tel"
+                    value="+91"
+                    disabled
+                    className="mt-2 bg-[#f0ede6]"
+                  />
+                </div>
+                <div className="flex-1">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="9876543210"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
                     className="mt-2"
                   />
                 </div>
-                {passwordVerified ? (
-                  // Password verified - show new password fields
-                  <>
-                    <div>
-                      <Label htmlFor="new-pw">New Password</Label>
-                      <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
-                    </div>
-                    {newPassword && <PasswordRules checks={passwordChecks} />}
-                    <div>
-                      <Label htmlFor="confirm-pw">Confirm New Password</Label>
-                      <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
-                    </div>
-                    <Button
-                      onClick={async () => {
-                        if (!loggedInEmail || !newPassword || !isNewPasswordStrong || newPassword !== confirmPassword) {
-                          setMessage({ text: "Please fill all fields correctly", type: "error" });
-                          return;
-                        }
-                        setOtpSubmitting(true);
-                        try {
-                          const response = await fetch("/api/auth/patient/change-password-direct", {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              patient_email: loggedInEmail,
-                              current_password: currentPassword,
-                              new_password: newPassword,
-                            }),
-                          });
-                          if (response.ok) {
-                            setCurrentPassword("");
-                            setNewPassword("");
-                            setConfirmPassword("");
-                            setPasswordVerified(false);
-                            setMessage({ text: "Password changed successfully!", type: "success" });
-                          } else {
-                            const error = await response.json();
-                            setMessage({ text: error.detail || "Failed to change password", type: "error" });
-                          }
-                        } catch {
-                          setMessage({ text: "Network error", type: "error" });
-                        } finally {
-                          setOtpSubmitting(false);
-                        }
-                      }}
-                      disabled={!newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSubmitting}
-                      className="w-full"
-                    >
-                      {otpSubmitting ? "Changing..." : "Change Password"}
-                    </Button>
-                  </>
-                ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={verifyCurrentPassword}
-                      disabled={!currentPassword || verifyingPassword}
-                      className="flex-1"
-                    >
-                      {verifyingPassword ? "Verifying..." : "Verify Password"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => setShowForgotPassword(true)}
-                    >
-                      Forgot?
-                    </Button>
-                  </div>
-                )}
-              </>
-            ) : (
-              // Forgot password - send OTP, verify, and change password in one flow
-              <>
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-sm text-amber-800">
-                    <strong>Forgot Password?</strong> We'll send an OTP to your email to verify your identity.
-                  </p>
-                </div>
-                <div>
-                  <Label htmlFor="new-pw">New Password</Label>
-                  <Input id="new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
-                </div>
-                {newPassword && <PasswordRules checks={passwordChecks} />}
-                <div>
-                  <Label htmlFor="confirm-pw">Confirm New Password</Label>
-                  <Input id="confirm-pw" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => void sendProfileOtp("password_forgot")}
-                    disabled={!newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
-                    className="flex-1"
-                  >
-                    {otpSending ? "Sending..." : "Send OTP"}
-                  </Button>
-                  <Button variant="outline" onClick={() => { setShowForgotPassword(false); setForgotPasswordOtpVerified(false); setNewPassword(""); setConfirmPassword(""); }}>
-                    Back
-                  </Button>
-                </div>
-              </>
-            )}
-          </ProfileCard>
+              </div>
+              <Button onClick={() => void sendProfileOtp("phone")} disabled={!phone || otpSending} className="w-full mt-4">
+                {otpSending && pendingAction === "phone" ? "Sending OTP..." : "Verify OTP and Update"}
+              </Button>
+            </ProfileCard>
+          </div>
 
-          <div className="lg:col-span-2">
-            <ProfileCard icon={Trash2} title="Delete Account" description="Permanently delete your account and all data" danger>
-              {!deletePasswordVerified ? (
-                // Step 1: Verify password first
+          <div className="col-span-2 lg:col-span-7">
+            <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
+              {!showForgotPassword ? (
+                // Normal password change - verify current password first, no OTP
                 <>
                   <div>
-                    <Label htmlFor="delete-pw">Enter Password to Confirm</Label>
-                    <Input
-                      id="delete-pw"
-                      type="password"
-                      value={deletePassword}
-                      onChange={(e) => setDeletePassword(e.target.value)}
-                      placeholder="Enter your password"
+                    <Label htmlFor="current-pw">Current Password</Label>
+                    <PasswordInput
+                      id="current-pw"
+                      value={currentPassword}
+                      onChange={(e) => {
+                        setCurrentPassword(e.target.value);
+                        setPasswordVerified(false);
+                      }}
                       className="mt-2"
                     />
                   </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      onClick={async () => {
-                        if (!loggedInEmail || !deletePassword) return;
-                        setVerifyingPassword(true);
-                        try {
-                          const response = await fetch("/api/auth/patient/verify-current-password", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              patient_email: loggedInEmail,
-                              current_password: deletePassword
-                            }),
-                          });
-                          if (response.ok) {
-                            setDeletePasswordVerified(true);
-                            // Now send OTP
-                            void sendProfileOtp("delete");
-                          } else {
-                            const error = await response.json();
-                            setMessage({ text: error.detail || "Password is incorrect", type: "error" });
+                  {passwordVerified ? (
+                    // Password verified - show new password fields
+                    <>
+                      <div>
+                        <Label htmlFor="new-pw">New Password</Label>
+                        <PasswordInput id="new-pw" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
+                      </div>
+                      {newPassword && <PasswordRules checks={passwordChecks} />}
+                      <div>
+                        <Label htmlFor="confirm-pw">Confirm New Password</Label>
+                        <PasswordInput id="confirm-pw" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                      </div>
+                      <Button
+                        onClick={async () => {
+                          if (!loggedInEmail || !newPassword || !isNewPasswordStrong || newPassword !== confirmPassword) {
+                            setMessage({ text: "Please fill all fields correctly", type: "error" });
+                            return;
                           }
-                        } catch {
-                          setMessage({ text: "Network error", type: "error" });
-                        } finally {
-                          setVerifyingPassword(false);
-                        }
-                      }}
-                      disabled={!deletePassword || verifyingPassword}
-                      className="bg-red-600 text-white hover:bg-red-700"
-                    >
-                      {verifyingPassword ? "Verifying..." : "Verify Password"}
-                    </Button>
-                    <Button variant="outline" onClick={handleLogout}>
-                      <LogOut className="mr-2 h-4 w-4" />
-                      Sign Out
-                    </Button>
-                  </div>
+                          setVerifyingPassword(true);
+                          try {
+                            const response = await fetch("/api/auth/patient/change-password-direct", {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                patient_email: loggedInEmail,
+                                current_password: currentPassword,
+                                new_password: newPassword,
+                              }),
+                            });
+                            if (response.ok) {
+                              setCurrentPassword("");
+                              setNewPassword("");
+                              setConfirmPassword("");
+                              setPasswordVerified(false);
+                              setMessage({ text: "Password changed successfully!", type: "success" });
+                            } else {
+                              const error = await response.json();
+                              setMessage({ text: error.detail || "Failed to change password", type: "error" });
+                            }
+                          } catch {
+                            setMessage({ text: "Network error", type: "error" });
+                          } finally {
+                            setVerifyingPassword(false);
+                          }
+                        }}
+                        disabled={!newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || verifyingPassword}
+                        className="w-full mt-4"
+                      >
+                        {verifyingPassword ? "Changing..." : "Change Password"}
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex gap-2 mt-4">
+                      <Button
+                        onClick={verifyCurrentPassword}
+                        disabled={!currentPassword || verifyingPassword}
+                        className="flex-1"
+                      >
+                        {verifyingPassword ? "Verifying..." : "Verify Password"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowForgotPassword(true)}
+                      >
+                        Forgot?
+                      </Button>
+                    </div>
+                  )}
                 </>
               ) : (
-                // Step 2: Password verified, waiting for OTP verification
+                // Forgot password - send OTP, verify, and change password in one flow
                 <>
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                    <p className="text-sm text-amber-800">
-                      OK Password verified! We've sent an OTP to your email. Verify to delete your account.
-                    </p>
+                  <div>
+                    <Label htmlFor="new-pw-forgot">New Password</Label>
+                    <PasswordInput id="new-pw-forgot" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="mt-2" />
                   </div>
-                  <Button variant="outline" onClick={() => { setDeletePasswordVerified(false); setDeletePassword(""); }}>
-                    Cancel
-                  </Button>
+                  {newPassword && <PasswordRules checks={passwordChecks} />}
+                  <div>
+                    <Label htmlFor="confirm-pw-forgot">Confirm New Password</Label>
+                    <PasswordInput id="confirm-pw-forgot" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="mt-2" />
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <Button
+                      onClick={() => void sendProfileOtp("password_forgot")}
+                      disabled={!newPassword || newPassword !== confirmPassword || !isNewPasswordStrong || otpSending}
+                      className="flex-1"
+                    >
+                      {otpSending ? "Sending..." : "Send OTP"}
+                    </Button>
+                    <Button variant="outline" onClick={() => { setShowForgotPassword(false); setForgotPasswordOtpVerified(false); setNewPassword(""); setConfirmPassword(""); }}>
+                      Back
+                    </Button>
+                  </div>
                 </>
               )}
+            </ProfileCard>
+          </div>
+
+          <div className="col-span-2 lg:col-span-5">
+            <ProfileCard icon={Trash2} title="Delete Account" description="Permanently delete your account and all data" danger>
+              <div>
+                <Label htmlFor="delete-pw">Enter Password to Confirm</Label>
+                <PasswordInput
+                  id="delete-pw"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="mt-2"
+                />
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={() => void sendProfileOtp("delete")} disabled={!deletePassword || otpSending} className="bg-red-600 text-white hover:bg-red-700">
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Verify OTP and Delete
+                </Button>
+                <Button variant="outline" onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sign Out
+                </Button>
+              </div>
             </ProfileCard>
           </div>
         </section>
@@ -582,7 +534,6 @@ const PatientProfile = () => {
           if (!open) {
             setOtpCode("");
             setPendingAction(null);
-            setDeletePasswordVerified(false);
           }
         }}
       >
@@ -638,7 +589,7 @@ const PatientProfile = () => {
 };
 
 const PasswordRules = ({ checks }: { checks: ReturnType<typeof getPasswordChecks> }) => (
-  <div className="space-y-2 rounded-2xl bg-secondary/60 p-4">
+  <div className="space-y-2 rounded-2xl bg-[#f0ede6] p-4">
     <p className="text-xs text-muted-foreground">Password must contain:</p>
     <PasswordRule ok={checks.length} text="At least 8 characters" />
     <PasswordRule ok={checks.uppercase} text="One uppercase letter (A-Z)" />
@@ -655,10 +606,10 @@ const PasswordRule = ({ ok, text }: { ok: boolean; text: string }) => (
   </div>
 );
 
-const ProfileStat = ({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) => (
-  <div className="rounded-[22px] bg-white/10 px-4 py-4">
-    <p className="text-sm text-primary-foreground/70">{label}</p>
-    <p className={`mt-2 text-lg font-bold text-white ${mono ? "font-mono" : ""}`}>{value}</p>
+const ProfileStat = ({ label, value, mono = false, className = "" }: { label: string; value: string; mono?: boolean; className?: string }) => (
+  <div className={`rounded-[18px] bg-white/10 px-3 py-3 sm:rounded-[22px] sm:px-4 sm:py-4 ${className}`}>
+    <p className="text-xs text-primary-foreground/70 sm:text-sm">{label}</p>
+    <p className={`mt-1 break-words text-sm font-bold leading-tight text-white sm:mt-2 sm:text-lg ${mono ? "font-mono" : ""}`}>{value}</p>
   </div>
 );
 
@@ -675,17 +626,17 @@ const ProfileCard = ({
   children: React.ReactNode;
   danger?: boolean;
 }) => (
-  <div className={`rounded-[28px] border p-6 shadow-sm ${danger ? "border-red-200 bg-red-50/50" : "border-border/70 bg-white"}`}>
-    <div className="mb-6 flex items-center gap-3">
-      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-secondary text-primary"}`}>
-        <Icon className="h-5 w-5" />
+  <div className={`rounded-[20px] border p-4 shadow-sm sm:rounded-[28px] sm:p-6 ${danger ? "border-red-200 bg-red-50/50" : "border-[#e6ded3] bg-[#fbfaf7]"}`}>
+    <div className="mb-4 flex items-center gap-3 sm:mb-6">
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 sm:rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-[#f0ede6] text-primary"}`}>
+        <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
       </div>
-      <div>
-        <h2 className="text-xl font-bold text-foreground">{title}</h2>
-        <p className="text-sm text-muted-foreground">{description}</p>
+      <div className="min-w-0">
+        <h2 className="text-base font-bold leading-tight text-foreground sm:text-xl">{title}</h2>
+        <p className="mt-0.5 text-xs leading-snug text-muted-foreground sm:text-sm">{description}</p>
       </div>
     </div>
-    <div className="space-y-4">{children}</div>
+    <div className="space-y-3 sm:space-y-4">{children}</div>
   </div>
 );
 

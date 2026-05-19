@@ -1,10 +1,11 @@
+import { APP_NAME, SUPPORT_EMAIL } from "@/config/app";
 import { Link } from "react-router-dom";
 
 const Footer = () => (
   <footer id="contact" className="border-t border-border/70 bg-white/70 px-4 py-6 backdrop-blur md:px-8">
     <div className="section-container flex flex-col gap-6 text-center md:flex-row md:items-start md:justify-between md:text-left">
       <div>
-        <p className="font-display text-2xl font-semibold text-primary">Krama</p>
+        <p className="font-display text-2xl font-semibold text-primary">{APP_NAME}</p>
         <p className="mt-2 max-w-sm text-sm text-muted-foreground">
           Smart queue management connecting patients and clinics for seamless healthcare.
         </p>
@@ -41,11 +42,11 @@ const Footer = () => (
       </nav>
 
       <div className="space-y-2 text-sm text-muted-foreground">
-        <p>support@krama.in</p>
+        <p>{SUPPORT_EMAIL}</p>
         <Link to="/feedback" className="text-[#00555A] hover:underline font-medium">
           Send Feedback
         </Link>
-        <p>&copy; {new Date().getFullYear()} Krama. All rights reserved.</p>
+        <p>&copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.</p>
       </div>
     </div>
   </footer>

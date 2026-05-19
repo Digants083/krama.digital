@@ -1,8 +1,8 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X, CheckCircle2, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatTimeRange } from "@/lib/timeFormat";
+import { formatDelayedStartTime, formatDelayLabel, formatTimeRange } from "@/lib/timeFormat";
 import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 
 interface Review {
@@ -38,6 +38,10 @@ interface ClinicSlot {
   is_open: boolean | string | number | null;
   is_expired?: boolean;
   display_status?: string;
+  delay_minutes?: number;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
 }
 
 interface DisplayClinicSlot extends Omit<ClinicSlot, "is_open" | "is_expired" | "display_status"> {
@@ -207,18 +211,21 @@ const ClinicDetails = () => {
         const data = await response.json();
         // Use slot array from database to determine open/close status
         const slotArray = data.slot || [];
+        const slotDelays = data.slot_delays || [];
 
         // Process slots and add disabled status based on current time
         const processedSlots = (data.slots || []).map((slot: ClinicSlot, idx: number) => {
           const isOpen = isSlotManuallyOpen(slot, slotArray, idx);
           const slotStatus = getPatientSlotStatus(slot.time_range, isOpen);
+          const delayMinutes = Number(slot.delay_minutes || slotDelays[idx] || 0);
 
           return {
             ...slot,
             slot_id: idx + 1,
+            delay_minutes: delayMinutes,
             is_open: slotStatus.is_open,
             is_expired: slotStatus.is_expired,
-            display_status: slotStatus.display_status
+            display_status: delayMinutes > 0 && slotStatus.is_open && !slotStatus.is_expired ? "Delayed" : slotStatus.display_status
           };
         }).sort((a: DisplayClinicSlot, b: DisplayClinicSlot) => {
           const aStart = a.time_range?.[0] ?? Number.POSITIVE_INFINITY;
@@ -405,6 +412,15 @@ const ClinicDetails = () => {
             time: selectedTime,
             address: clinic.address,
             token: data.token,
+            consultation_window: data.consultation_window,
+            estimated_window_text: data.estimated_window_text,
+            estimated_wait_minutes: data.estimated_wait_minutes,
+            earliest_eta: data.earliest_eta,
+            predicted_eta: data.predicted_eta,
+            latest_eta: data.latest_eta,
+            active_delay_minutes: data.active_delay_minutes,
+            queue_position: data.queue_position,
+            session_status: data.session_status,
             patient_name: requestData.patient_name,
             patient_phone: requestData.patient_phone,
             patient_email: requestData.patient_email
@@ -508,7 +524,7 @@ const ClinicDetails = () => {
             </div>
 
             <div className="hidden mt-4 flex h-36 items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
-              ??? Map placeholder - {clinic.address}
+              Map placeholder - {clinic.address}
             </div>
 
             {/* Clinic Images Gallery - only show valid URLs */}
@@ -543,7 +559,7 @@ const ClinicDetails = () => {
               <div className="mt-3 rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-                    <span className="text-lg">?????</span>
+                    <Stethoscope className="h-6 w-6 text-blue-700" />
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground">{clinic.doctor_name || "Available Doctor"}</h3>
@@ -659,7 +675,9 @@ const ClinicDetails = () => {
                   const patientCount = slotQueueCounts[slotId] || 0;
                   const isSelected = selectedSlotId === slotId;
                   const isUnavailable = slot.is_expired || !slot.is_open;
-
+                  const delayLabel = formatDelayLabel(slot.delay_minutes);
+                  const originalSlotRange = formatTimeRange(slot.time_range);
+                  const delayedStartTime = formatDelayedStartTime(slot.time_range, slot.delay_minutes);
                   return (
                     <button
                       key={slotId}
@@ -693,8 +711,16 @@ const ClinicDetails = () => {
                                 ? "text-white/85"
                                 : "text-muted-foreground"
                           }`}>
-                            {formatTimeRange(slot.time_range)}
+                            {originalSlotRange}
                           </p>
+                          {delayLabel && !slot.is_expired && (
+                            <div className={`mt-2 rounded-lg px-3 py-2 text-xs font-semibold ${
+                              isSelected ? "bg-white/15 text-white" : "bg-orange-50 text-orange-700"
+                            }`}>
+                              <p>Delay: {delayLabel}</p>
+                              <p>{delayedStartTime}</p>
+                            </div>
+                          )}
                         </div>
                         <div className="text-right">
                           <span className={`text-sm font-medium ${
@@ -710,7 +736,7 @@ const ClinicDetails = () => {
                             </div>
                           ) : !isUnavailable && (
                             <div className="mt-1 flex items-center justify-end gap-1">
-                              <span className="text-lg">??</span>
+                              <span className="text-[1.3rem] leading-none" aria-hidden="true">🧑🏼</span>
                               <span className="text-xs text-muted-foreground">
                                 {patientCount}
                               </span>

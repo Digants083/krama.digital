@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
-import { CalendarDays, Clock, Hash, MapPin, Stethoscope, Timer, Users, type LucideIcon } from "lucide-react";
+import { CalendarDays, MapPin, Stethoscope, type LucideIcon } from "lucide-react";
+import { useQueueRealtime } from "@/hooks/useQueueRealtime";
+import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 
 interface ConfirmationState {
   clinic: string;
@@ -11,12 +13,28 @@ interface ConfirmationState {
   time: string;
   sessionName?: string;
   sessionTime?: string;
+  originalSessionTime?: string;
+  delay?: string;
   sessionId?: number;
   address: string;
   token: string;
   patient_name?: string;
   patient_email?: string;
   patient_phone?: string;
+  earliest_eta?: string | null;
+  predicted_eta?: string | null;
+  latest_eta?: string | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  estimated_wait_minutes?: number | null;
+  active_delay_minutes?: number | null;
+  doctor_delay?: string | null;
+  delay_minutes?: number | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
+  queue_position?: number | null;
+  session_status?: string | null;
 }
 
 interface AppointmentDetails {
@@ -37,6 +55,20 @@ interface AppointmentDetails {
   session_time?: string;
   address?: string;
   created_at: string;
+  earliest_eta?: string | null;
+  predicted_eta?: string | null;
+  latest_eta?: string | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  estimated_wait_minutes?: number | null;
+  active_delay_minutes?: number | null;
+  doctor_delay?: string | null;
+  delay_minutes?: number | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
+  queue_position?: number | null;
+  session_status?: string | null;
 }
 
 interface QueuePosition {
@@ -46,11 +78,24 @@ interface QueuePosition {
   total_in_queue: number;
   now_serving_token?: string;
   doctor_delay?: string | null;
+  delayed_start_time?: string | null;
   session_id?: number;
   slot_id?: number;
+  earliest_eta?: string | null;
+  predicted_eta?: string | null;
+  latest_eta?: string | null;
+  consultation_window?: string | null;
+  estimated_window_text?: string | null;
+  active_delay_minutes?: number | null;
+  delay_minutes?: number | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
+  queue_position?: number | null;
+  session_status?: string | null;
 }
 
-const LIVE_REFRESH_MS = 5000;
+const LIVE_REFRESH_MS = 5 * 60 * 1000;
 
 const AppointmentConfirmation = () => {
   const { state } = useLocation() as { state: ConfirmationState | null };
@@ -61,14 +106,11 @@ const AppointmentConfirmation = () => {
   const [loading, setLoading] = useState(true);
   const addedVisitTokenRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchAppointmentDetails = async () => {
+  const fetchAppointmentDetails = useCallback(async (cancelledRef?: { current: boolean }) => {
       try {
         const userStr = localStorage.getItem("user");
         if (!userStr) {
-          if (!cancelled) setLoading(false);
+          if (!cancelledRef?.current) setLoading(false);
           return;
         }
 
@@ -77,7 +119,7 @@ const AppointmentConfirmation = () => {
           `/api/auth/patient/appointments?email=${encodeURIComponent(user.email)}`
         );
         if (!response.ok) {
-          if (!cancelled) setLoading(false);
+          if (!cancelledRef?.current) setLoading(false);
           return;
         }
 
@@ -96,7 +138,7 @@ const AppointmentConfirmation = () => {
         }
         
         if (selectedAppointment) {
-          if (cancelled) return;
+          if (cancelledRef?.current) return;
           setAppointmentDetails(selectedAppointment);
 
           const queueParams = new URLSearchParams({
@@ -107,24 +149,29 @@ const AppointmentConfirmation = () => {
           const queueResponse = await fetch(`/api/auth/appointments/queue-position?${queueParams}`);
           if (queueResponse.ok) {
             const queueData = await queueResponse.json();
-            if (!cancelled) setQueuePosition(queueData);
+            if (!cancelledRef?.current) setQueuePosition(queueData);
           }
         }
       } catch (error) {
         console.error("Error fetching appointment details:", error);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelledRef?.current) setLoading(false);
       }
-    };
+    }, [state?.token]);
 
-    void fetchAppointmentDetails();
+  useQueueRealtime(appointmentDetails?.clinic_id, () => void fetchAppointmentDetails());
+
+  useEffect(() => {
+    const cancelledRef = { current: false };
+
+    void fetchAppointmentDetails(cancelledRef);
     const intervalId = window.setInterval(() => void fetchAppointmentDetails(), LIVE_REFRESH_MS);
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       window.clearInterval(intervalId);
     };
-  }, [state?.token]);
+  }, [fetchAppointmentDetails]);
 
   const token = state?.token || appointmentDetails?.appointment_token || "T-1";
   const clinicName = state?.clinic || appointmentDetails?.clinic_name || "Unknown Clinic";
@@ -132,12 +179,29 @@ const AppointmentConfirmation = () => {
   const doctorName = state?.doctor || appointmentDetails?.doctor_name || "Available Doctor";
   const dateText = state?.date || appointmentDetails?.date || "";
   const timeText = state?.time || appointmentDetails?.time || "";
-  const sessionName = state?.sessionName || appointmentDetails?.session_name || (appointmentDetails?.session_id ? `Session ${appointmentDetails.session_id}` : "Session");
-  const sessionTime = state?.sessionTime || appointmentDetails?.session_time || timeText;
+  const displayTimeText = timeText.replace(/^(time|session)\s*\d+\s*/i, "").trim();
   const patientsAhead = queuePosition?.patients_ahead ?? 0;
-  const estimatedWait = queuePosition?.estimated_wait_minutes ?? 0;
+  const estimatedWait = queuePosition?.estimated_wait_minutes ?? state?.estimated_wait_minutes ?? appointmentDetails?.estimated_wait_minutes ?? 0;
+  const consultationWindow =
+    queuePosition?.consultation_window ||
+    queuePosition?.estimated_window_text ||
+    state?.consultation_window ||
+    state?.estimated_window_text ||
+    appointmentDetails?.consultation_window ||
+    appointmentDetails?.estimated_window_text ||
+    "";
+  const predictedConsultationTime = formatIsoClock(
+    queuePosition?.predicted_eta ||
+    state?.predicted_eta ||
+    appointmentDetails?.predicted_eta ||
+    null
+  );
   const nowServing = queuePosition?.now_serving_token || token;
-  const delayNotice = queuePosition?.doctor_delay || null;
+  const activeDelayMinutes = queuePosition?.active_delay_minutes ?? queuePosition?.delay_minutes ?? state?.active_delay_minutes ?? state?.delay_minutes ?? appointmentDetails?.active_delay_minutes ?? appointmentDetails?.delay_minutes ?? 0;
+  const delayNotice = queuePosition?.doctor_delay || state?.doctor_delay || appointmentDetails?.doctor_delay || state?.delay || (activeDelayMinutes > 0 ? formatDurationMinutes(activeDelayMinutes) : null);
+  const sessionStatusText = queuePosition?.session_status || appointmentDetails?.session_status || state?.session_status || "";
+  const hasActiveDelay = Boolean(delayNotice || activeDelayMinutes > 0 || sessionStatusText.toLowerCase() === "delayed");
+  const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : delayNotice || "Delayed";
 
   useEffect(() => {
     if (!token || !clinicName || !doctorName || !dateText || !timeText) return;
@@ -152,6 +216,9 @@ const AppointmentConfirmation = () => {
       status: appointmentDetails?.status === "serving" ? "with_doctor" : "waiting",
       estimatedWaitMins: estimatedWait,
       patientsAhead,
+      consultationWindow,
+      earliestEta: queuePosition?.earliest_eta || state?.earliest_eta || appointmentDetails?.earliest_eta || null,
+      latestEta: queuePosition?.latest_eta || state?.latest_eta || appointmentDetails?.latest_eta || null,
     });
     if (addedVisitTokenRef.current !== token) {
       addedVisitTokenRef.current = token;
@@ -161,7 +228,7 @@ const AppointmentConfirmation = () => {
         date: `${dateText} at ${timeText}`,
       });
     }
-  }, [token, clinicName, doctorName, dateText, timeText, clinicAddress, appointmentDetails?.status, estimatedWait, patientsAhead, setActiveAppointment, addVisit]);
+  }, [token, clinicName, doctorName, dateText, timeText, clinicAddress, appointmentDetails?.status, estimatedWait, patientsAhead, consultationWindow, queuePosition?.earliest_eta, queuePosition?.latest_eta, state?.earliest_eta, state?.latest_eta, appointmentDetails?.earliest_eta, appointmentDetails?.latest_eta, setActiveAppointment, addVisit]);
 
   if (loading) {
     return (
@@ -198,13 +265,29 @@ const AppointmentConfirmation = () => {
             </div>
             <div className="rounded-[24px] bg-white/10 p-5">
               <p className="text-sm text-white/70">Estimated wait</p>
-              <p className="mt-3 text-3xl font-bold">{estimatedWait} min</p>
+              <p className="mt-3 text-3xl font-bold">{formatDurationMinutes(estimatedWait)}</p>
             </div>
           </div>
 
           <div className="mt-4 rounded-[24px] bg-white/10 p-5">
-            <p className="text-sm text-white/70">Patients ahead</p>
-            <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
+            <p className="text-sm text-white/70">Estimated Consultation Window</p>
+            <p className="mt-3 text-2xl font-bold leading-tight">{consultationWindow || "Calculating..."}</p>
+            {predictedConsultationTime && (
+              <p className="mt-2 text-sm font-semibold text-white/80">Predicted Consultation Time: {predictedConsultationTime}</p>
+            )}
+          </div>
+
+          <div className={`mt-4 grid gap-4 ${hasActiveDelay ? "grid-cols-2" : "grid-cols-1"}`}>
+            <div className="rounded-[24px] bg-white/10 p-5">
+              <p className="text-sm text-white/70">Patients ahead</p>
+              <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
+            </div>
+            {hasActiveDelay && (
+              <div className="rounded-[24px] bg-white/10 p-5">
+                <p className="text-sm text-white/70">Delay update</p>
+                <p className="mt-3 text-3xl font-bold">{delayAmountText}</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -212,8 +295,7 @@ const AppointmentConfirmation = () => {
           <div className="space-y-4">
             <DetailRow icon={MapPin} label="Clinic" value={clinicName} subvalue={clinicAddress} />
             <DetailRow icon={Stethoscope} label="Doctor" value={doctorName} />
-            <DetailRow icon={Clock} label="Session" value={sessionName} subvalue={sessionTime} />
-            <DetailRow icon={CalendarDays} label="Appointment" value={`${dateText} at ${timeText}`} />
+            <DetailRow icon={CalendarDays} label="Appointment" value={dateText} subvalue={displayTimeText} />
             <div className="grid grid-cols-2 gap-4 rounded-[20px] bg-secondary/60 p-4">
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Token</p>
@@ -222,9 +304,20 @@ const AppointmentConfirmation = () => {
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Position</p>
                 <p className="mt-1 text-lg font-bold text-foreground">
-                  {queuePosition ? `${queuePosition.your_position} / ${queuePosition.total_in_queue}` : "1 / 1"}
+                  {queuePosition ? `${queuePosition.queue_position || queuePosition.your_position} / ${queuePosition.total_in_queue}` : "1 / 1"}
                 </p>
               </div>
+            </div>
+            <div className="rounded-[20px] bg-secondary/60 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Queue Status</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{sessionStatusText || "Active"}</p>
+            </div>
+            <div className="rounded-[20px] bg-primary/5 p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{consultationWindow || "Calculating..."}</p>
+              {predictedConsultationTime && (
+                <p className="mt-1 text-sm font-semibold text-primary">Predicted Consultation Time: {predictedConsultationTime}</p>
+              )}
             </div>
           </div>
         </div>

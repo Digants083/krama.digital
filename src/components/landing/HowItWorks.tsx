@@ -6,7 +6,7 @@ const patientSteps = [
   { icon: MapPin, title: "Allow Location Access", desc: "Enable GPS to find clinics near you instantly." },
   { icon: CalendarCheck, title: "See Nearby Clinics", desc: "Browse clinics by distance, specialty, and ratings." },
   { icon: Radio, title: "Book Appointment", desc: "Pick a doctor, choose a slot, and confirm your visit." },
-  { icon: BellRing, title: "Visit When Notified", desc: "Get alerted when it's your turn — skip the wait." },
+  { icon: BellRing, title: "Visit When Notified", desc: "Get alerted when it's your turn - skip the wait." },
 ];
 
 const clinicSteps = [

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,25 +8,49 @@ from app.database.models import CompletedAppointment
 router = APIRouter(prefix="/patient", tags=["patient-history"])
 
 
+def _clean_identifier(value: str | None) -> str:
+    return (value or "").strip()
+
+
 @router.get("/history/{clinic_id}/{patient_id}")
 async def get_patient_history(
     clinic_id: str,
     patient_id: str,
+    phone: str | None = Query(default=None),
+    email: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Return completed visit history for a patient at one clinic.
     Counts only served/completed appointments for the same clinic and patient.
     """
-    if not clinic_id.strip() or not patient_id.strip():
+    clinic_id = _clean_identifier(clinic_id)
+    patient_id = _clean_identifier(patient_id)
+    phone = _clean_identifier(phone)
+    email = _clean_identifier(email).lower()
+
+    if not clinic_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="clinic_id and patient_id are required",
+            detail="clinic_id and at least one patient identifier are required",
+        )
+
+    patient_match_filters = []
+    if patient_id and patient_id != "lookup":
+        patient_match_filters.append(CompletedAppointment.patient_id == patient_id)
+    if phone:
+        patient_match_filters.append(CompletedAppointment.patient_phone == phone)
+    if email:
+        patient_match_filters.append(CompletedAppointment.patient_email == email)
+    if not patient_match_filters:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one patient identifier is required",
         )
 
     completed_filters = and_(
         CompletedAppointment.clinic_id == clinic_id,
-        CompletedAppointment.patient_id == patient_id,
+        or_(*patient_match_filters),
         CompletedAppointment.status.notin_(["cancelled", "skipped", "not_served", "auto_finished"]),
         or_(
             CompletedAppointment.status.in_(["completed", "served"]),
@@ -47,16 +71,12 @@ async def get_patient_history(
     )
     visits = result.scalars().all()
 
-    previous_notes = []
+    previous_visits = []
     for visit in visits:
-        diagnosis = getattr(visit, "diagnosis", None)
-        notes = getattr(visit, "notes", None)
-        if diagnosis or notes:
-            previous_notes.append({
-                "date": visit.date,
-                "diagnosis": diagnosis or "",
-                "notes": notes or "",
-            })
+        previous_visits.append({
+            "id": visit.id,
+            "date": visit.date,
+        })
 
     last_visit = visits[0].date if visits else None
 
@@ -64,5 +84,5 @@ async def get_patient_history(
         "is_returning": len(visits) > 0,
         "visit_count": len(visits),
         "last_visit": last_visit,
-        "previous_notes": previous_notes,
+        "previous_visits": previous_visits,
     }

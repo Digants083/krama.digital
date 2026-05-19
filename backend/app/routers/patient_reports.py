@@ -1,5 +1,5 @@
 """
-Patient Reports router for diagnostic and scanning centers.
+Patient Reports router for clinics.
 Provides endpoints for managing patient reports and sending PDF reports via email.
 """
 import os
@@ -110,6 +110,14 @@ class ReportProcessRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class ReportRequest(BaseModel):
+    clinic_id: str
+    patient_id: str
+    patient_name: str
+    patient_email: Optional[str] = ""
+    patient_phone: Optional[str] = ""
+
+
 @router.get("/file")
 async def view_report_pdf(
     path: str = Query(..., description="Stored report PDF path"),
@@ -140,6 +148,38 @@ async def view_report_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'}
     )
+
+
+@router.post("/request")
+async def request_patient_report(
+    request: ReportRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Add a patient to the existing pending reports table when clinic staff requests it.
+    """
+    if not request.clinic_id or not request.patient_id or not request.patient_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing clinic_id, patient_id, or patient_name"
+        )
+
+    result = await add_patient_to_reports(
+        patient_id=request.patient_id,
+        clinic_id=request.clinic_id,
+        patient_name=request.patient_name,
+        patient_email=request.patient_email or "",
+        patient_phone=request.patient_phone or "",
+        db=db
+    )
+
+    if not result.get("added") and str(result.get("message", "")).startswith("Failed"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("message", "Failed to add patient to reports")
+        )
+
+    return result
 
 
 @router.get("/pending")
@@ -529,7 +569,7 @@ async def get_report_statistics(
         )
 
 
-async def auto_add_patient_to_reports(
+async def add_patient_to_reports(
     patient_id: str,
     clinic_id: str,
     patient_name: str,
@@ -538,14 +578,13 @@ async def auto_add_patient_to_reports(
     db: AsyncSession
 ):
     """
-    Internal function to automatically add patient to reports table.
-    Called when patient completes appointment.
+    Add a patient to the existing reports table as pending.
     """
     import logging
     logger = logging.getLogger(__name__)
 
     try:
-        logger.info(f"auto_add_patient_to_reports called: clinic_id={clinic_id}, patient_id={patient_id}")
+        logger.info(f"add_patient_to_reports called: clinic_id={clinic_id}, patient_id={patient_id}")
 
         # Check if report already exists for this patient
         existing_result = await db.execute(

@@ -9,7 +9,7 @@ const Navbar = () => {
     >
       <div className="section-container flex h-16 items-center justify-between px-4 md:px-8">
         
-        {/* LOGO → HOME */}
+        {/* Logo home link */}
         <Link
           to="/"
           className="flex items-center gap-2 font-display text-xl font-bold tracking-tight text-[#00555A] hover:opacity-80 transition-all duration-200"
