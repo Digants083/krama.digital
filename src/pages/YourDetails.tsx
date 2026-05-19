@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock, Building2, UserCheck, Search } from "lucide-react";
 import { apiUrl } from "@/lib/api";
-import { formatCountdown, formatIsoClock, secondsUntil } from "@/lib/timeFormat";
+import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 interface AppointmentDetails {
@@ -48,10 +48,11 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
   const consultationWindow = appointment.consultation_window || appointment.estimated_window_text || "";
   const predictedConsultationTime = formatIsoClock(appointment.predicted_eta);
   const activeDelayMinutes = appointment.active_delay_minutes || appointment.delay_minutes || 0;
+  const hasActiveDelay = Boolean(appointment.doctor_delay || activeDelayMinutes > 0);
+  const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : appointment.doctor_delay;
   const nowServing = appointment.now_serving_token || appointment.token_label;
   const positionText = appointment.position ? appointment.position.replace("/", " / ") : "1 / 1";
   const appointmentTime = appointment.time.replace(/^(time|session)\s*\d+\s*/i, "").trim();
-  const delayRemaining = secondsUntil(appointment.delay_ends_at);
 
   return (
     <div className="rounded-3xl border border-primary/10 bg-white p-5 shadow-[0_18px_60px_-38px_rgba(19,55,50,0.55)]">
@@ -66,7 +67,7 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
           </div>
           <div className="rounded-[24px] bg-white/10 p-5">
             <p className="text-sm text-primary-foreground/70">Estimated wait</p>
-            <p className="mt-3 text-3xl font-bold">{estimatedWait} min</p>
+            <p className="mt-3 text-3xl font-bold">{formatDurationMinutes(estimatedWait)}</p>
           </div>
         </div>
 
@@ -78,18 +79,15 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
           )}
         </div>
 
-        <div className={`mt-4 grid gap-4 ${appointment.doctor_delay || activeDelayMinutes > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+        <div className={`mt-4 grid gap-4 ${hasActiveDelay ? "grid-cols-2" : "grid-cols-1"}`}>
           <div className="rounded-[24px] bg-white/10 p-5">
             <p className="text-sm text-primary-foreground/70">Patients ahead</p>
             <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
           </div>
-          {(appointment.doctor_delay || activeDelayMinutes > 0) && (
+          {hasActiveDelay && (
             <div className="rounded-[24px] bg-white/10 p-5">
-              <p className="text-sm text-primary-foreground/70">Delay</p>
-              <p className="mt-3 text-3xl font-bold">{appointment.doctor_delay || `${activeDelayMinutes} min`}</p>
-              {delayRemaining > 0 && (
-                <p className="mt-2 text-sm font-semibold text-primary-foreground/80">Opening in {formatCountdown(delayRemaining)}</p>
-              )}
+              <p className="text-sm text-primary-foreground/70">Delay added</p>
+              <p className="mt-3 text-3xl font-bold">{delayAmountText}</p>
             </div>
           )}
         </div>
@@ -115,14 +113,6 @@ const AppointmentCard = ({ appointment }: { appointment: AppointmentDetails }) =
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Position</p>
             <p className="mt-1 text-lg font-bold text-foreground">{positionText}</p>
           </div>
-        </div>
-        <div className="rounded-[20px] border border-primary/10 bg-primary/5 p-4">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
-          <p className="mt-1 text-lg font-bold text-foreground">{consultationWindow || "Calculating..."}</p>
-          {predictedConsultationTime && (
-            <p className="mt-1 text-sm font-semibold text-primary">Predicted Consultation Time: {predictedConsultationTime}</p>
-          )}
-          <p className="mt-1 text-sm text-muted-foreground">Status: {appointment.session_status || appointment.status}</p>
         </div>
       </div>
     </div>
@@ -213,7 +203,7 @@ const YourDetails = () => {
         data.appointments?.some((apt) => apt.doctor_delay)
       ) {
         new Notification("Your appointment has been delayed", {
-          body: "Open your token for the updated time and countdown.",
+          body: "Open your token for the updated time.",
         });
       }
       lastDelayNotificationRef.current = delayKey;
@@ -243,7 +233,7 @@ const YourDetails = () => {
     if (!appointments || appointments.length === 0 || !phoneRegex.test(phone)) return;
     const timer = window.setInterval(() => {
       void handleLookup(false);
-    }, 15000);
+    }, 5 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [appointments, handleLookup, phone]);
 

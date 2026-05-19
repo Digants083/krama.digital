@@ -80,8 +80,9 @@ def _load_slot_delays(raw_delays, slots: list) -> list[int]:
     delays = _load_slots(raw_delays)
     normalized = []
     for index, slot in enumerate(slots):
-        raw_delay = delays[index] if index < len(delays) else slot.get("delay_minutes", 0)
-        normalized.append(_delay_minutes(str(raw_delay)) if raw_delay else 0)
+        list_delay = _delay_minutes(str(delays[index])) if index < len(delays) and delays[index] else 0
+        slot_delay = _delay_minutes(str(slot.get("delay_minutes", 0))) if slot.get("delay_minutes") else 0
+        normalized.append(slot_delay or list_delay)
     return normalized
 
 
@@ -152,10 +153,15 @@ async def _slot_delay_info(db: AsyncSession, clinic_id: str, slot_id: Optional[i
         slot_delays = _load_slot_delays(getattr(slot_record, "slot_delays", []), slots)
         slot = slots[slot_index]
         minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
-        delay_ends_at = parse_dt(slot.get("delay_ends_at"))
-        if minutes > 0 and delay_ends_at and delay_ends_at <= datetime.now(timezone.utc):
-            minutes = 0
         time_range = slot.get("time_range", [])
+        if minutes > 0 and isinstance(time_range, list) and len(time_range) > 1:
+            now = datetime.now(CLINIC_TIMEZONE)
+            current_decimal = now.hour + now.minute / 60.0
+            slot_end = float(time_range[1])
+            if slot_end > 24 and current_decimal < slot_end - 24:
+                current_decimal += 24
+            if current_decimal >= slot_end:
+                minutes = 0
         delayed_start_time = None
         if minutes > 0 and isinstance(time_range, list) and time_range:
             delayed_start_time = _format_hour_decimal(float(time_range[0]) + minutes / 60)
@@ -4167,6 +4173,18 @@ async def create_appointment(
 
             "doctor_delay_minutes": metrics["doctor_delay_minutes"],
 
+            "doctor_delay": slot_delay["label"],
+
+            "delay_minutes": slot_delay["minutes"],
+
+            "delay_started_at": slot_delay.get("delay_started_at"),
+
+            "delay_ends_at": slot_delay.get("delay_ends_at"),
+
+            "delay_original_start_time": slot_delay.get("delay_original_start_time"),
+
+            "delay_updated_start_time": slot_delay.get("delay_updated_start_time"),
+
             "queue_adjusted_time": metrics["queue_adjusted_time"],
 
             "queue_position": metrics["queue_position"],
@@ -4351,6 +4369,7 @@ async def get_patient_appointments_by_email(
                         session_time = str(time_range)
 
             metrics = None
+            slot_delay = await _slot_delay_info(db, apt.clinic_id, getattr(apt, "slot_id", None))
             if apt.date == _clinic_today_str() and apt.status in ["booked", "pending", "serving"]:
                 metrics = await get_live_queue_metrics(
                     db,
@@ -4419,6 +4438,18 @@ async def get_patient_appointments_by_email(
                 "active_delay_minutes": metrics["active_delay_minutes"] if metrics and metrics["found"] else 0,
 
                 "doctor_delay_minutes": metrics["doctor_delay_minutes"] if metrics and metrics["found"] else 0,
+
+                "doctor_delay": apt.doctor_delay or slot_delay["label"],
+
+                "delay_minutes": slot_delay["minutes"],
+
+                "delay_started_at": slot_delay.get("delay_started_at"),
+
+                "delay_ends_at": slot_delay.get("delay_ends_at"),
+
+                "delay_original_start_time": slot_delay.get("delay_original_start_time"),
+
+                "delay_updated_start_time": slot_delay.get("delay_updated_start_time"),
 
                 "queue_adjusted_time": metrics["queue_adjusted_time"] if metrics and metrics["found"] else None,
 
@@ -4907,10 +4938,10 @@ async def get_today_appointments(
         item["earliest_eta"] = metrics["earliest_eta"]
         item["predicted_eta"] = metrics["predicted_eta"]
         item["latest_eta"] = metrics["latest_eta"]
-        item["consultation_window"] = metrics["consultation_window"]
-        item["estimated_window_text"] = metrics["estimated_window_text"]
         item["rolling_average_minutes"] = metrics["rolling_average_minutes"]
         item["weighted_average_minutes"] = metrics["weighted_average_minutes"]
+        item["consultation_window"] = metrics["consultation_window"]
+        item["estimated_window_text"] = metrics["estimated_window_text"]
         item["active_delay_minutes"] = metrics["active_delay_minutes"]
         item["doctor_delay_minutes"] = metrics["doctor_delay_minutes"]
         item["queue_adjusted_time"] = metrics["queue_adjusted_time"]
@@ -5159,6 +5190,14 @@ async def get_queue_position(
         "delay_minutes": slot_delay["minutes"],
 
         "delayed_start_time": slot_delay["delayed_start_time"],
+
+        "delay_started_at": slot_delay.get("delay_started_at"),
+
+        "delay_ends_at": slot_delay.get("delay_ends_at"),
+
+        "delay_original_start_time": slot_delay.get("delay_original_start_time"),
+
+        "delay_updated_start_time": slot_delay.get("delay_updated_start_time"),
 
         "session_id": getattr(current_appointment, "session_id", None) or getattr(current_appointment, "slot_id", None),
 

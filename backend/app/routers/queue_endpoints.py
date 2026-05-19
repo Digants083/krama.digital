@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.db import get_db
 from app.database.models import Appointment, Clinic, ClinicTimeSlot, CompletedAppointment, Patient, QRAppointment
-from app.services.email_service import send_delay_alert
 from app.services.queue_metrics import get_live_queue_metrics
 from app.services.delay_jobs import parse_dt
 from app.services.realtime import publish_queue_event
@@ -67,8 +66,9 @@ def _load_slot_delays(raw_delays, slots: list) -> list[int]:
     delays = _load_slots(raw_delays)
     normalized = []
     for index, slot in enumerate(slots):
-        raw_delay = delays[index] if index < len(delays) else slot.get("delay_minutes", 0)
-        normalized.append(_delay_minutes(raw_delay))
+        list_delay = _delay_minutes(delays[index]) if index < len(delays) else 0
+        slot_delay = _delay_minutes(slot.get("delay_minutes", 0))
+        normalized.append(slot_delay or list_delay)
     return normalized
 
 
@@ -89,6 +89,20 @@ def _slot_time_label(value: float) -> str:
     hour12 = hour24 % 12 or 12
     suffix = "PM" if hour24 >= 12 else "AM"
     return f"{hour12}:{minute:02d} {suffix}"
+
+
+def _slot_decimal_to_datetime(date_text: str, decimal_hour: float) -> datetime:
+    base_date = datetime.strptime(date_text, "%Y-%m-%d").date()
+    day_offset = int(decimal_hour // 24)
+    total_minutes = int(round((decimal_hour % 24) * 60))
+    if total_minutes >= 24 * 60:
+        day_offset += 1
+        total_minutes -= 24 * 60
+    return datetime.combine(
+        base_date + timedelta(days=day_offset),
+        datetime.min.time(),
+        tzinfo=CLINIC_TIMEZONE,
+    ).replace(hour=total_minutes // 60, minute=total_minutes % 60)
 
 
 def _timeline_now_for_slots(slots: list, slot_status: list, current_decimal: float) -> float:
@@ -123,7 +137,7 @@ async def _clear_stale_slot_delays(record: ClinicTimeSlot, db: AsyncSession) -> 
         time_range = slots[index].get("time_range", [0, 0])
         slot_end = float(time_range[1] if len(time_range) > 1 else 0)
         delay_ends_at = parse_dt(slots[index].get("delay_ends_at"))
-        if delay_minutes > 0 and (should_clear_all or (delay_ends_at and delay_ends_at <= now_utc) or (not delay_ends_at and current_decimal >= slot_end)):
+        if delay_minutes > 0 and (should_clear_all or current_decimal >= slot_end):
             slot_delays[index] = 0
             slots[index]["delay_minutes"] = 0
             for key in ("delay_started_at", "delay_ends_at", "delay_original_start_time", "delay_updated_start_time"):
@@ -138,7 +152,7 @@ async def _clear_stale_slot_delays(record: ClinicTimeSlot, db: AsyncSession) -> 
                 slot_start = float(time_range[0] if len(time_range) > 0 else current_decimal)
                 if not delay_ends_at:
                     slots[index]["delay_started_at"] = now_utc.isoformat()
-                    slots[index]["delay_ends_at"] = (now_utc + timedelta(minutes=delay_minutes)).isoformat()
+                    slots[index]["delay_ends_at"] = _slot_decimal_to_datetime(today, slot_end).astimezone(timezone.utc).isoformat()
                     changed = True
                 if not slots[index].get("delay_original_start_time"):
                     slots[index]["delay_original_start_time"] = _slot_time_label(slot_start)
@@ -170,6 +184,32 @@ async def _slot_delay_label(db: AsyncSession, clinic_id: str, slot_id: Optional[
         return None
     minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
     return _delay_label(minutes)
+
+
+async def _slot_delay_meta(db: AsyncSession, clinic_id: str, slot_id: Optional[int]) -> dict:
+    if not slot_id:
+        return {}
+    try:
+        slot_result = await db.execute(select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id))
+        slot_record = slot_result.scalar_one_or_none()
+        if not slot_record:
+            return {}
+        slots, slot_delays = await _clear_stale_slot_delays(slot_record, db)
+        slot_index = int(slot_id) - 1
+        if slot_index < 0 or slot_index >= len(slots):
+            return {}
+        minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
+        slot = slots[slot_index]
+        return {
+            "doctor_delay": _delay_label(minutes),
+            "delay_minutes": minutes,
+            "delay_started_at": slot.get("delay_started_at") if minutes > 0 else None,
+            "delay_ends_at": slot.get("delay_ends_at") if minutes > 0 else None,
+            "delay_original_start_time": slot.get("delay_original_start_time") if minutes > 0 else None,
+            "delay_updated_start_time": slot.get("delay_updated_start_time") if minutes > 0 else None,
+        }
+    except Exception:
+        return {}
 
 
 def _load_slot_status(raw_slot_status):
@@ -407,6 +447,56 @@ def _token_number(token: Optional[str]) -> int:
     return int(digits) if digits else 0
 
 
+async def _refresh_clinic_consultation_range(clinic: Clinic, db: AsyncSession) -> dict:
+    today = _clinic_today_str()
+    result = await db.execute(
+        text(
+            """
+            SELECT duration_minutes
+            FROM (
+                SELECT
+                    id,
+                    COALESCE(completed_at, finished_at, served_at) AS completed_sort_at,
+                    CEIL(
+                        COALESCE(
+                            NULLIF(consultation_duration_minutes, 0),
+                            NULLIF(service_duration_seconds, 0) / 60.0,
+                            EXTRACT(EPOCH FROM (COALESCE(completed_at, finished_at) - COALESCE(serving_started_at, served_at))) / 60.0
+                        )
+                    )::INTEGER AS duration_minutes
+                FROM completed_appointments
+                WHERE clinic_id = :clinic_id
+                  AND date = :today
+                  AND (served IS TRUE OR outcome = 'served' OR status IN ('completed', 'served'))
+            ) recent_served
+            WHERE duration_minutes IS NOT NULL
+              AND duration_minutes > 0
+            ORDER BY completed_sort_at DESC NULLS LAST, id DESC
+            LIMIT 10
+            """
+        ),
+        {"clinic_id": clinic.clinic_id, "today": today},
+    )
+    durations = [int(row.duration_minutes) for row in result if row.duration_minutes]
+    if not durations:
+        return {
+            "updated": False,
+            "sample_count": 0,
+            "consultation_min_minutes": clinic.consultation_min_minutes,
+            "consultation_max_minutes": clinic.consultation_max_minutes,
+        }
+
+    clinic.consultation_min_minutes = min(durations)
+    clinic.consultation_max_minutes = max(durations)
+
+    return {
+        "updated": True,
+        "sample_count": len(durations),
+        "consultation_min_minutes": clinic.consultation_min_minutes,
+        "consultation_max_minutes": clinic.consultation_max_minutes,
+    }
+
+
 @router.post("/clinic/set-active")
 async def set_clinic_active(
     request: dict,
@@ -467,6 +557,10 @@ async def set_clinic_active(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No time slots available for today. Live window has ended."
             )
+
+    consultation_range = None
+    if is_active:
+        consultation_range = await _refresh_clinic_consultation_range(clinic, db)
 
     clinic.is_active = is_active
     if is_active:
@@ -552,7 +646,8 @@ async def set_clinic_active(
     return {
         "message": f"Clinic {'activated' if is_active else 'deactivated'}",
         "is_active": is_active,
-        "manual_stop_date": clinic.manual_stop_date
+        "manual_stop_date": clinic.manual_stop_date,
+        "consultation_range": consultation_range
     }
 
 @router.get("/clinic/active-status")
@@ -790,26 +885,6 @@ async def finish_patient(
     await db.commit()
     await publish_queue_event(clinic_id, "queue_updated", {"slot_id": getattr(completed, "slot_id", None)})
 
-    # Auto-add to reports table for all served patients (online patients only)
-    if source == "online":
-        try:
-            from app.routers.patient_reports import auto_add_patient_to_reports
-
-            patient_id = getattr(appointment, 'patient_id', f"online-{appointment.id}")
-            logger.info(f"Adding to reports: patient_id={patient_id}, patient_name={appointment.patient_name}")
-
-            result = await auto_add_patient_to_reports(
-                patient_id=patient_id,
-                clinic_id=clinic_id,
-                patient_name=appointment.patient_name,
-                patient_email=appointment.patient_email,
-                patient_phone=appointment.patient_phone,
-                db=db
-            )
-            logger.info(f"Auto-add to reports result: {result}")
-        except Exception as e:
-            logger.error(f"Failed to auto-add patient to reports: {e}", exc_info=True)
-
     return {
         "message": "Patient marked as served and moved to history",
         "completed": {
@@ -995,7 +1070,6 @@ async def push_patient_to_next_slot(
 ):
     """
     Push an unserved patient from their current slot to the end of the next available slot's queue.
-    Sends email notification to the patient.
     If already in the last slot, auto-finishes with outcome='not_served' instead.
     For walkin/QR patients, always auto-finish with 'not_served' (no slot pushing).
     """
@@ -1151,16 +1225,6 @@ async def push_patient_to_next_slot(
         await db.commit()
         await publish_queue_event(clinic_id, "queue_updated", {"slot_id": getattr(completed, "slot_id", None)})
 
-        # Send not-served email for last slot
-        patient_email_last_slot = getattr(appointment, 'patient_email', '').strip()
-        if patient_email_last_slot:
-            from app.services.email_service import send_not_served_email
-            clinic_result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
-            clinic = clinic_result.scalar_one_or_none()
-            clinic_name = clinic.clinic_name if clinic else clinic_id
-            slot_name_info = slots[current_slot_index].get('slot_name', f'Slot {current_slot_index + 1}') if current_slot_index < len(slots) else None
-            send_not_served_email(patient_email_last_slot, appointment.patient_name, clinic_name, slot_name_info)
-
         return {
             "message": "Patient was in last slot - auto-finished with not_served outcome",
             "action": "auto_finished",
@@ -1217,16 +1281,6 @@ async def push_patient_to_next_slot(
         await db.delete(appointment)
         await db.commit()
         await publish_queue_event(clinic_id, "queue_updated", {"slot_id": getattr(completed, "slot_id", None)})
-
-        # Send not-served email if patient has email
-        patient_email_for_not_served = getattr(appointment, 'patient_email', '').strip()
-        if patient_email_for_not_served:
-            from app.services.email_service import send_not_served_email
-            clinic_result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
-            clinic = clinic_result.scalar_one_or_none()
-            clinic_name = clinic.clinic_name if clinic else clinic_id
-            slot_name_info = slots[current_slot_index].get('slot_name', f'Slot {current_slot_id}') if current_slot_index < len(slots) else None
-            send_not_served_email(patient_email_for_not_served, appointment.patient_name, clinic_name, slot_name_info)
 
         return {
             "message": "No more open slots - auto-finished with not_served outcome",
@@ -1305,10 +1359,7 @@ async def push_patient_to_next_slot(
     new_queue_position = max_queue_position + 1
 
     # Update the appointment with new slot and token
-    old_slot_name = slots[current_slot_index].get("slot_name", f"Slot {current_slot_id}")
     new_slot_name = slots[next_slot_index].get("slot_name", f"Slot {next_slot_id}")
-    new_time_range = slots[next_slot_index].get("time_range", [])
-    new_time_str = f"{int(new_time_range[0])}:00 - {int(new_time_range[1])}:00" if len(new_time_range) >= 2 else f"Slot {next_slot_id}"
     new_slot_delay = await _slot_delay_label(db, clinic_id, next_slot_id)
 
     appointment.slot_id = next_slot_id
@@ -1321,25 +1372,6 @@ async def push_patient_to_next_slot(
     # Increment push_count
     current_push_count = getattr(appointment, 'push_count', 0)
     appointment.push_count = current_push_count + 1
-
-    # Send email notification with new token number
-    patient_email = getattr(appointment, 'patient_email', '').strip()
-    if patient_email:
-        from app.services.email_service import send_slot_push_email
-        clinic_result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
-        clinic = clinic_result.scalar_one_or_none()
-        clinic_name = clinic.clinic_name if clinic else clinic_id
-
-        email_sent = send_slot_push_email(
-            patient_email,
-            appointment.patient_name,
-            clinic_name,
-            old_slot_name,
-            new_slot_name,
-            new_token_label  # Pass the new token number
-        )
-        if not email_sent:
-            logger.warning(f"Failed to send push email to {patient_email}")
 
     await db.commit()
     await db.refresh(appointment)
@@ -1371,7 +1403,6 @@ async def push_patient_to_next_slot(
         "consultation_window": metrics["consultation_window"],
         "estimated_window_text": metrics["estimated_window_text"],
         "estimated_wait_minutes": metrics["estimated_wait_minutes"],
-        "email_sent": patient_email is not None
     }
 
 @router.post("/doctor/announce-delay/{clinic_id}/{delay}")
@@ -1382,7 +1413,7 @@ async def announce_delay(
     slot_id: Optional[int] = Query(None, description="Optional legacy slot ID"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Store a doctor delay and email the clinic a queue summary."""
+    """Store a doctor delay for a clinic/session without sending email notifications."""
     clean_delay = (delay or "").strip()
     if not clean_delay:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Delay is required")
@@ -1474,6 +1505,10 @@ async def announce_delay(
                     delay_minutes = _delay_minutes(clean_delay)
                     slots[slot_index]["delay_minutes"] = delay_minutes
                     slots[slot_index]["status_override"] = "delayed"
+                    slots[slot_index]["delay_started_at"] = datetime.now(timezone.utc).isoformat()
+                    slots[slot_index]["delay_ends_at"] = _slot_decimal_to_datetime(today, slot_end).astimezone(timezone.utc).isoformat()
+                    slots[slot_index]["delay_original_start_time"] = _slot_time_label(float(time_range[0] if len(time_range) > 0 else current_time_decimal))
+                    slots[slot_index]["delay_updated_start_time"] = _slot_time_label(float(time_range[0] if len(time_range) > 0 else current_time_decimal) + delay_minutes / 60.0)
                     while len(slot_delays) <= slot_index:
                         slot_delays.append(0)
                     slot_delays[slot_index] = delay_minutes
@@ -1482,31 +1517,15 @@ async def announce_delay(
 
         await db.commit()
 
-        clinic_email = (getattr(clinic, "email", None) or "").strip()
-        email_sent = False
-        if clinic_email:
-            email_sent = send_delay_alert(
-                to_email=clinic_email,
-                delay=clean_delay,
-                appointments=queue_summary,
-                clinic_name=clinic.clinic_name or clinic.clinic_id,
-                doctor_name=getattr(clinic, "doctor_name", None),
-            )
-        else:
-            logger.warning("Delay email skipped for clinic %s: missing clinic email", clinic_id)
-
         return {
             "success": True,
-            "message": "Delay announced successfully" if email_sent else "Delay saved; clinic email was not sent",
+            "message": "Delay saved successfully",
             "clinic_id": clinic_id,
             "delay": clean_delay,
+            "delay_minutes": _delay_minutes(clean_delay),
             "session_id": target_slot_id,
             "slot_id": target_slot_id,
             "updated_count": len(appointments),
-            "clinic_email": clinic_email,
-            "email_sent": email_sent,
-            "clinic_notified_count": 1 if email_sent else 0,
-            "notified_count": 1 if email_sent else 0,
             "queue": queue_summary,
         }
     except HTTPException:
@@ -1520,9 +1539,6 @@ async def announce_delay(
             "clinic_id": clinic_id,
             "delay": clean_delay,
             "updated_count": 0,
-            "email_sent": False,
-            "clinic_notified_count": 0,
-            "notified_count": 0,
             "error": str(exc),
         }
 
@@ -1946,7 +1962,8 @@ async def join_queue(
         qr_count = len(result.scalars().all())
 
     total_appointments = online_count + qr_count
-    slot_delay = await _slot_delay_label(db, payload.clinic_id, slot_id)
+    slot_delay_meta = await _slot_delay_meta(db, payload.clinic_id, slot_id)
+    slot_delay = slot_delay_meta.get("doctor_delay")
 
     # Create the QR walk-in appointment row in separate table
     walkin = QRAppointment(
@@ -2001,6 +2018,7 @@ async def join_queue(
         "queue_adjusted_time": metrics["queue_adjusted_time"],
         "queue_position": metrics["queue_position"],
         "session_status": metrics["session_status"],
+        **slot_delay_meta,
     }
 
 # ─────────────────────────────────────────────────────────────────────────────

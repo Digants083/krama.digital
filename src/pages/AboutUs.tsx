@@ -67,13 +67,13 @@ const AboutUs = () => {
         <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm sm:rounded-2xl sm:border-primary/15 sm:bg-primary sm:shadow-[0_24px_70px_-36px_rgba(18,80,70,0.75)]">
           <div className="grid gap-0 lg:grid-cols-[1.18fr_0.82fr]">
             <div className="p-5 text-foreground sm:p-8 sm:text-primary-foreground lg:p-10">
-              <span className="inline-flex rounded-full border border-border bg-secondary px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:border-white/20 sm:bg-white/10 sm:text-white/75">
+              <span className="inline-flex rounded-full border border-border bg-secondary px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:border-white/20 sm:bg-white/10 sm:text-white">
               About Krama
               </span>
               <h1 className="mt-4 max-w-2xl font-display text-2xl font-bold leading-tight sm:mt-5 sm:text-5xl">
                 A calmer clinic visit, from booking to consultation.
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:mt-5 sm:text-base sm:text-white/78">
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:mt-5 sm:text-base sm:text-white">
                 Krama transforms the healthcare experience by reducing wait times and streamlining patient flow through digital queue management. Quality healthcare starts with a smooth, stress-free journey from home to consultation.
               </p>
               <div className="mt-5 flex flex-col gap-3 sm:mt-7 sm:flex-row">
@@ -94,10 +94,10 @@ const AboutUs = () => {
                 <CheckCircle className="h-5 w-5" />
               </div>
               <h2 className="font-display text-xl font-bold text-foreground sm:mt-5 sm:text-2xl sm:text-primary-foreground">Our Mission</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-white/75">
+              <p className="mt-2 text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-white">
                 Build a queue experience where patients know when to arrive and clinics can keep movement predictable.
               </p>
-              <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground sm:mt-6 sm:space-y-3 sm:border-white/10 sm:pt-5 sm:text-white/78">
+              <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground sm:mt-6 sm:space-y-3 sm:border-white/10 sm:pt-5 sm:text-white">
                 <div className="flex gap-3">
                   <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
                   <span>Clearer appointment and queue status for patients.</span>

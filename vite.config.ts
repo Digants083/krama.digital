@@ -7,6 +7,7 @@ export default defineConfig(() => ({
   server: {
     host: "::",
     port: 8080,
+    strictPort: true,
     hmr: {
       overlay: false,
     },
@@ -16,6 +17,11 @@ export default defineConfig(() => ({
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    host: "::",
+    port: 8080,
+    strictPort: true,
   },
   plugins: [react()],
   resolve: {

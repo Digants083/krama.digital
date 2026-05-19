@@ -392,19 +392,18 @@ async def _session_timing_state(db, clinic_id, date, slot_id):
             if 0 <= slot_index < len(slots):
                 slot = slots[slot_index] or {}
                 time_range = slot.get("time_range") or []
+                slot_end = _time_decimal_to_datetime(date, time_range[1]) if len(time_range) > 1 else None
                 if time_range:
                     session_start = _time_decimal_to_datetime(date, time_range[0])
                     if session_start and session_start > base_time:
                         base_time = session_start
 
-                slot_delay_minutes = _delay_minutes(slot_delays[slot_index] if slot_index < len(slot_delays) else slot.get("delay_minutes"))
-                delay_ends_at = _parse_dt(slot.get("delay_ends_at"))
-                is_delay_active = slot_delay_minutes > 0 and (not delay_ends_at or delay_ends_at > now)
+                listed_delay_minutes = _delay_minutes(slot_delays[slot_index] if slot_index < len(slot_delays) else 0)
+                slot_delay_minutes = _delay_minutes(slot.get("delay_minutes")) or listed_delay_minutes
+                is_delay_active = slot_delay_minutes > 0 and (not slot_end or now < slot_end)
                 if is_delay_active:
                     active_delay_minutes = max(active_delay_minutes, slot_delay_minutes)
                     session_status = "delayed"
-                if delay_ends_at and delay_ends_at > base_time:
-                    base_time = delay_ends_at
                 elif slot.get("status_override"):
                     session_status = str(slot.get("status_override")).lower()
 
@@ -425,18 +424,16 @@ async def _session_timing_state(db, clinic_id, date, slot_id):
         session_row = session_result.mappings().first()
         if session_row:
             session_delay_minutes = _delay_minutes(session_row.get("delay_minutes"))
-            delay_ends_at = _parse_dt(session_row.get("delay_ends_at"))
-            is_delay_active = session_delay_minutes > 0 and (not delay_ends_at or delay_ends_at > now)
+            session_delay_ends_at = _parse_dt(session_row.get("delay_ends_at"))
+            is_delay_active = session_delay_minutes > 0 and (not session_delay_ends_at or now < session_delay_ends_at)
             if is_delay_active:
                 active_delay_minutes = max(active_delay_minutes, session_delay_minutes)
                 session_status = "delayed"
             elif session_row.get("status"):
                 session_status = str(session_row.get("status")).lower()
-            if delay_ends_at and delay_ends_at > base_time:
-                base_time = delay_ends_at
 
-    if active_delay_minutes > 0 and base_time <= now:
-        base_time = now + timedelta(minutes=active_delay_minutes)
+    if active_delay_minutes > 0:
+        base_time = max(base_time, now) + timedelta(minutes=active_delay_minutes)
 
     return {
         "base_time": base_time,

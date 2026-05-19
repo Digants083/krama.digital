@@ -2,7 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Phone, Star, Clock, ThumbsUp, ThumbsDown, ChevronLeft, ChevronRight, X, CheckCircle2, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatCountdown, formatDelayedStartTime, formatDelayedTimeRange, formatDelayLabel, formatTimeRange, secondsUntil } from "@/lib/timeFormat";
+import { formatDelayedStartTime, formatDelayLabel, formatTimeRange } from "@/lib/timeFormat";
 import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 
 interface Review {
@@ -73,7 +73,6 @@ const ClinicDetails = () => {
   const [selectedDate, setSelectedDate] = useState("");
   const [booking, setBooking] = useState(false);
   const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
   const [timeSlots, setTimeSlots] = useState<DisplayClinicSlot[]>([]);
   const [userReactions, setUserReactions] = useState<{[key: number]: string}>({});
   const [patientId, setPatientId] = useState<string>("");
@@ -105,11 +104,6 @@ const ClinicDetails = () => {
       return () => clearTimeout(timer);
     }
   }, [message]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     const fetchClinicData = async () => {
@@ -289,7 +283,7 @@ const ClinicDetails = () => {
       return;
     }
 
-    const timeString = `${slot.slot_name} ${formatDelayedTimeRange(slot.time_range, slot.delay_minutes)}`;
+    const timeString = `${slot.slot_name} ${formatTimeRange(slot.time_range)}`;
     setSelectedTime(timeString);
     setSelectedSlotId(slot.slot_id ?? slotIndex + 1);
   };
@@ -682,8 +676,8 @@ const ClinicDetails = () => {
                   const isSelected = selectedSlotId === slotId;
                   const isUnavailable = slot.is_expired || !slot.is_open;
                   const delayLabel = formatDelayLabel(slot.delay_minutes);
-                  const delayRemaining = secondsUntil(slot.delay_ends_at);
-
+                  const originalSlotRange = formatTimeRange(slot.time_range);
+                  const delayedStartTime = formatDelayedStartTime(slot.time_range, slot.delay_minutes);
                   return (
                     <button
                       key={slotId}
@@ -717,21 +711,14 @@ const ClinicDetails = () => {
                                 ? "text-white/85"
                                 : "text-muted-foreground"
                           }`}>
-                            {delayLabel && slot.delay_original_start_time && slot.delay_updated_start_time ? (
-                              <>
-                                <span className="line-through decoration-red-500/70 decoration-2">{slot.delay_original_start_time}</span>
-                                {" -> "}
-                                {slot.delay_updated_start_time}
-                              </>
-                            ) : formatTimeRange(slot.time_range)}
+                            {originalSlotRange}
                           </p>
                           {delayLabel && !slot.is_expired && (
                             <div className={`mt-2 rounded-lg px-3 py-2 text-xs font-semibold ${
                               isSelected ? "bg-white/15 text-white" : "bg-orange-50 text-orange-700"
-                            }`} data-tick={nowTick}>
+                            }`}>
                               <p>Delay: {delayLabel}</p>
-                              <p>New time: {slot.delay_updated_start_time || formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</p>
-                              {delayRemaining > 0 && <p>Opening in {formatCountdown(delayRemaining)}</p>}
+                              <p>{delayedStartTime}</p>
                             </div>
                           )}
                         </div>

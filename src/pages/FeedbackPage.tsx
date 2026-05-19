@@ -137,10 +137,10 @@ const FeedbackPage = () => {
             <MessageSquare className="h-5 w-5" />
           </div>
           <h2 className="mt-4 font-display text-2xl font-bold leading-tight sm:mt-5 sm:text-3xl">Help Krama grow.</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-white/76">
+          <p className="mt-2 text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-white">
             Tell us what felt good, confusing, or slow. Short feedback is enough.
           </p>
-          <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground sm:mt-6 sm:space-y-3 sm:border-white/10 sm:pt-5 sm:text-white/78">
+          <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground sm:mt-6 sm:space-y-3 sm:border-white/10 sm:pt-5 sm:text-white">
             <div className="flex gap-3">
               <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
               <span>Issues, suggestions, and rough ideas help.</span>
@@ -154,11 +154,11 @@ const FeedbackPage = () => {
           <div className="hidden grid-cols-2 border-t border-white/10 bg-white/[0.07] text-primary-foreground sm:grid">
             <div className="border-r border-white/10 p-5">
               <p className="text-2xl font-bold">10 AM</p>
-              <p className="mt-1 text-xs text-white/68">Support starts</p>
+              <p className="mt-1 text-xs text-white">Support starts</p>
             </div>
             <div className="p-5">
               <p className="text-2xl font-bold">4 PM</p>
-              <p className="mt-1 text-xs text-white/68">Daily help window</p>
+              <p className="mt-1 text-xs text-white">Daily help window</p>
             </div>
           </div>
         </section>

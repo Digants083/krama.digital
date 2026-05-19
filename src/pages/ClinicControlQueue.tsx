@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight } from "lucide-react";
-import { formatCountdown, formatDelayedStartTime, formatDelayLabel, formatIsoClock, formatTimeRange, secondsUntil } from "@/lib/timeFormat";
+import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight, FileText } from "lucide-react";
+import { formatDelayedStartTime, formatDelayLabel, formatIsoClock, formatTimeRange } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
 interface TimeSlot {
@@ -56,18 +56,13 @@ const ClinicControlQueue = () => {
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [pushingToken, setPushingToken] = useState<string | null>(null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [reportingToken, setReportingToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (!message) return;
     const timer = setTimeout(() => setMessage(null), 5000);
     return () => clearTimeout(timer);
   }, [message]);
-
-  useEffect(() => {
-    const timer = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     const clinicStr = localStorage.getItem("clinic_id");
@@ -424,7 +419,7 @@ const ClinicControlQueue = () => {
   };
 
   const pushPatientToNextSlot = async (appointmentId: number, token: string, source: string) => {
-    if (!window.confirm(`Push patient ${token} to the next available slot? They will be added to the end of the queue and receive an email notification.`)) {
+    if (!window.confirm(`Push patient ${token} to the next available slot? They will be added to the end of the queue.`)) {
       return;
     }
 
@@ -461,6 +456,54 @@ const ClinicControlQueue = () => {
       setMessage({ text: "Network error while pushing patient", type: "error" });
     } finally {
       setPushingToken(null);
+    }
+  };
+
+  const giveReportForCurrentPatient = async () => {
+    if (!currentServing) return;
+
+    const targetClinicId = currentServing.clinicId || clinicId;
+    if (!targetClinicId) {
+      setMessage({ text: "Clinic details missing for report request.", type: "error" });
+      return;
+    }
+
+    const fallbackPatientId = currentServing.appointmentId
+      ? `${currentServing.source || "online"}-${currentServing.appointmentId}`
+      : currentServing.token;
+
+    setReportingToken(currentServing.token);
+    setMessage(null);
+
+    try {
+      const response = await fetch("/api/clinic/reports/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clinic_id: targetClinicId,
+          patient_id: currentServing.patient_id || fallbackPatientId,
+          patient_name: currentServing.patientName,
+          patient_email: currentServing.patient_email || "",
+          patient_phone: currentServing.phone || "",
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to add patient to pending reports.");
+      }
+
+      setMessage({
+        text: data.added ? "Patient added to pending reports." : "Report already pending for this patient.",
+        type: "success",
+      });
+    } catch (error) {
+      setMessage({
+        text: error instanceof Error ? error.message : "Failed to add patient to pending reports.",
+        type: "error",
+      });
+    } finally {
+      setReportingToken(null);
     }
   };
 
@@ -601,7 +644,6 @@ const ClinicControlQueue = () => {
                     const isSlotClosed = slotStatus[originalIndex] === "close";
                     const isExpired = isSlotExpired(slot);
                     const delayLabel = formatDelayLabel(slot.delay_minutes);
-                    const delayRemaining = secondsUntil(slot.delay_ends_at);
                     return (
                       <button
                         type="button"
@@ -631,10 +673,9 @@ const ClinicControlQueue = () => {
                               ) : formatTimeRange(slot.time_range)}
                             </p>
                             {delayLabel && !isExpired && (
-                              <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700 transition-all duration-300" data-tick={nowTick}>
+                              <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700 transition-all duration-300">
                                 <p>Delay: {delayLabel}</p>
                                 <p>New time: {slot.delay_updated_start_time || formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</p>
-                                {delayRemaining > 0 && <p>Opening in {formatCountdown(delayRemaining)}</p>}
                               </div>
                             )}
                           </div>
@@ -751,6 +792,17 @@ const ClinicControlQueue = () => {
               <ArrowRightCircle className="mr-1.5 h-4 w-4" />
               {currentServing ? "Completed" : "Next Patient"}
             </Button>
+            {currentServing && (
+              <Button
+                variant="outline"
+                className="h-10 flex-1 rounded-xl border-[#00555A]/30 px-3 text-sm font-semibold text-[#00555A] transition-all duration-200 hover:bg-[#00555A]/10"
+                onClick={giveReportForCurrentPatient}
+                disabled={reportingToken === currentServing.token}
+              >
+                <FileText className="mr-1.5 h-4 w-4" />
+                {reportingToken === currentServing.token ? "Adding..." : "Give Report"}
+              </Button>
+            )}
               <Button
                 variant="outline"
                 className="h-10 flex-1 rounded-xl border-slate-300 px-3 text-sm font-semibold text-slate-600 transition-all duration-200 hover:bg-slate-100"

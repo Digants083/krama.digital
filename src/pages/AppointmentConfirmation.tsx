@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
 import { CalendarDays, MapPin, Stethoscope, type LucideIcon } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
-import { formatIsoClock } from "@/lib/timeFormat";
+import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 
 interface ConfirmationState {
   clinic: string;
@@ -28,6 +28,11 @@ interface ConfirmationState {
   estimated_window_text?: string | null;
   estimated_wait_minutes?: number | null;
   active_delay_minutes?: number | null;
+  doctor_delay?: string | null;
+  delay_minutes?: number | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
   queue_position?: number | null;
   session_status?: string | null;
 }
@@ -57,6 +62,11 @@ interface AppointmentDetails {
   estimated_window_text?: string | null;
   estimated_wait_minutes?: number | null;
   active_delay_minutes?: number | null;
+  doctor_delay?: string | null;
+  delay_minutes?: number | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
   queue_position?: number | null;
   session_status?: string | null;
 }
@@ -77,11 +87,15 @@ interface QueuePosition {
   consultation_window?: string | null;
   estimated_window_text?: string | null;
   active_delay_minutes?: number | null;
+  delay_minutes?: number | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
   queue_position?: number | null;
   session_status?: string | null;
 }
 
-const LIVE_REFRESH_MS = 5000;
+const LIVE_REFRESH_MS = 5 * 60 * 1000;
 
 const AppointmentConfirmation = () => {
   const { state } = useLocation() as { state: ConfirmationState | null };
@@ -183,8 +197,11 @@ const AppointmentConfirmation = () => {
     null
   );
   const nowServing = queuePosition?.now_serving_token || token;
-  const activeDelayMinutes = queuePosition?.active_delay_minutes ?? state?.active_delay_minutes ?? appointmentDetails?.active_delay_minutes ?? 0;
-  const delayNotice = queuePosition?.doctor_delay || state?.delay || (activeDelayMinutes > 0 ? `${activeDelayMinutes} min` : null);
+  const activeDelayMinutes = queuePosition?.active_delay_minutes ?? queuePosition?.delay_minutes ?? state?.active_delay_minutes ?? state?.delay_minutes ?? appointmentDetails?.active_delay_minutes ?? appointmentDetails?.delay_minutes ?? 0;
+  const delayNotice = queuePosition?.doctor_delay || state?.doctor_delay || appointmentDetails?.doctor_delay || state?.delay || (activeDelayMinutes > 0 ? formatDurationMinutes(activeDelayMinutes) : null);
+  const sessionStatusText = queuePosition?.session_status || appointmentDetails?.session_status || state?.session_status || "";
+  const hasActiveDelay = Boolean(delayNotice || activeDelayMinutes > 0 || sessionStatusText.toLowerCase() === "delayed");
+  const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : delayNotice || "Delayed";
 
   useEffect(() => {
     if (!token || !clinicName || !doctorName || !dateText || !timeText) return;
@@ -248,7 +265,7 @@ const AppointmentConfirmation = () => {
             </div>
             <div className="rounded-[24px] bg-white/10 p-5">
               <p className="text-sm text-white/70">Estimated wait</p>
-              <p className="mt-3 text-3xl font-bold">{estimatedWait} min</p>
+              <p className="mt-3 text-3xl font-bold">{formatDurationMinutes(estimatedWait)}</p>
             </div>
           </div>
 
@@ -260,15 +277,15 @@ const AppointmentConfirmation = () => {
             )}
           </div>
 
-          <div className={`mt-4 grid gap-4 ${delayNotice ? "grid-cols-2" : "grid-cols-1"}`}>
+          <div className={`mt-4 grid gap-4 ${hasActiveDelay ? "grid-cols-2" : "grid-cols-1"}`}>
             <div className="rounded-[24px] bg-white/10 p-5">
               <p className="text-sm text-white/70">Patients ahead</p>
               <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
             </div>
-            {delayNotice && (
+            {hasActiveDelay && (
               <div className="rounded-[24px] bg-white/10 p-5">
-                <p className="text-sm text-white/70">Delay</p>
-                <p className="mt-3 text-3xl font-bold">{delayNotice}</p>
+                <p className="text-sm text-white/70">Delay update</p>
+                <p className="mt-3 text-3xl font-bold">{delayAmountText}</p>
               </div>
             )}
           </div>
@@ -293,8 +310,7 @@ const AppointmentConfirmation = () => {
             </div>
             <div className="rounded-[20px] bg-secondary/60 p-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Queue Status</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{queuePosition?.session_status || appointmentDetails?.session_status || "Active"}</p>
-              {activeDelayMinutes > 0 && <p className="text-sm font-semibold text-orange-700">Doctor delay active: {activeDelayMinutes} min</p>}
+              <p className="mt-1 text-lg font-bold text-foreground">{sessionStatusText || "Active"}</p>
             </div>
             <div className="rounded-[20px] bg-primary/5 p-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>

@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
-import { formatCountdown, formatDelayedStartTime, formatDelayLabel, formatIsoClock, formatTimeRange as formatSlotTimeRange, secondsUntil } from "@/lib/timeFormat";
+import { formatDelayedStartTime, formatDelayLabel, formatDurationMinutes, formatIsoClock, formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
 import { ArrowRight, MapPinned, Search, Ticket } from "lucide-react";
 import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
@@ -79,7 +79,6 @@ const JoinQueue = () => {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
   const [quickBookChecking, setQuickBookChecking] = useState(false);
-  const [nowTick, setNowTick] = useState(() => Date.now());
 
   const formatTimeRange = (start: number, end: number) => {
     return formatSlotTimeRange([start, end]);
@@ -94,14 +93,14 @@ const JoinQueue = () => {
     estimated_window_text?: string | null;
     estimated_wait_minutes?: number | null;
     active_delay_minutes?: number | null;
+    doctor_delay?: string | null;
+    delay_minutes?: number | null;
+    delay_ends_at?: string | null;
+    delay_original_start_time?: string | null;
+    delay_updated_start_time?: string | null;
     session_status?: string | null;
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const refreshTokenResult = useCallback(async () => {
     if (!tokenResult || !phone) return;
@@ -119,6 +118,11 @@ const JoinQueue = () => {
         estimated_window_text: updated.estimated_window_text,
         estimated_wait_minutes: updated.estimated_wait_minutes,
         active_delay_minutes: updated.active_delay_minutes,
+        doctor_delay: updated.doctor_delay,
+        delay_minutes: updated.delay_minutes,
+        delay_ends_at: updated.delay_ends_at,
+        delay_original_start_time: updated.delay_original_start_time,
+        delay_updated_start_time: updated.delay_updated_start_time,
         session_status: updated.session_status,
       } : prev);
     } catch (error) {
@@ -323,6 +327,11 @@ const JoinQueue = () => {
         estimated_window_text: data.estimated_window_text,
         estimated_wait_minutes: data.estimated_wait_minutes,
         active_delay_minutes: data.active_delay_minutes,
+        doctor_delay: data.doctor_delay,
+        delay_minutes: data.delay_minutes,
+        delay_ends_at: data.delay_ends_at,
+        delay_original_start_time: data.delay_original_start_time,
+        delay_updated_start_time: data.delay_updated_start_time,
         session_status: data.session_status,
       });
       setStep("success");
@@ -415,6 +424,9 @@ const JoinQueue = () => {
 
   // Success screen
   if (step === "success" && tokenResult) {
+    const activeDelayMinutes = tokenResult.active_delay_minutes || tokenResult.delay_minutes || 0;
+    const hasActiveDelay = Boolean(tokenResult.doctor_delay || activeDelayMinutes > 0);
+    const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : tokenResult.doctor_delay;
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
         <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
@@ -452,12 +464,24 @@ const JoinQueue = () => {
               <p className="mt-1 text-xs font-semibold text-primary">Predicted Consultation Time: {formatIsoClock(tokenResult.predicted_eta)}</p>
             )}
             {tokenResult.estimated_wait_minutes != null && (
-              <p className="mt-1 text-xs text-muted-foreground">Estimated wait {tokenResult.estimated_wait_minutes} min</p>
+              <p className="mt-1 text-xs text-muted-foreground">Estimated wait {formatDurationMinutes(tokenResult.estimated_wait_minutes)}</p>
             )}
-            {tokenResult.active_delay_minutes ? (
-              <p className="mt-1 text-xs font-semibold text-orange-700">Doctor delay active: {tokenResult.active_delay_minutes} min</p>
-            ) : null}
           </div>
+
+          {hasActiveDelay && (
+            <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 px-4 py-4 text-left">
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Delay update</p>
+              <p className="mt-1 text-lg font-bold text-orange-900">Slot delayed by {delayAmountText}</p>
+              {tokenResult.delay_original_start_time && tokenResult.delay_updated_start_time && (
+                <p className="mt-1 text-sm text-orange-800">
+                  Original {tokenResult.delay_original_start_time} - New {tokenResult.delay_updated_start_time}
+                </p>
+              )}
+              <p className="mt-1 text-sm text-orange-800">
+                New ETA: {formatIsoClock(tokenResult.predicted_eta) || tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}
+              </p>
+            </div>
+          )}
 
           <p className="mb-4 text-xs text-muted-foreground">
             Please wait for your token to be called.
@@ -604,7 +628,6 @@ const JoinQueue = () => {
                   const isUnavailable = !slot.is_open || slot.is_expired;
                   const isSelected = selectedSlotId === slotNum;
                   const delayLabel = formatDelayLabel(slot.delay_minutes);
-                  const delayRemaining = secondsUntil(slot.delay_ends_at);
                   const statusBadgeClass = slot.display_status === "Expired"
                     ? "bg-red-100 text-red-700"
                     : slot.display_status === "Delayed"
@@ -636,7 +659,7 @@ const JoinQueue = () => {
                           {slot.time_label || formatTimeRange(slot.time_range[0], slot.time_range[1])}
                         </span>
                         {delayLabel && !slot.is_expired && (
-                          <span className={isSelected ? "mt-2 block rounded-lg bg-white/15 px-3 py-2 text-xs font-semibold text-white" : "mt-2 block rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700"} data-tick={nowTick}>
+                          <span className={isSelected ? "mt-2 block rounded-lg bg-white/15 px-3 py-2 text-xs font-semibold text-white" : "mt-2 block rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700"}>
                             Delay: {delayLabel}
                             <br />
                             {slot.delay_original_start_time && slot.delay_updated_start_time ? (
@@ -646,12 +669,6 @@ const JoinQueue = () => {
                                 {slot.delay_updated_start_time}
                               </>
                             ) : <>New time: {formatDelayedStartTime(slot.time_range, slot.delay_minutes)}</>}
-                            {delayRemaining > 0 && (
-                              <>
-                                <br />
-                                Opening in {formatCountdown(delayRemaining)}
-                              </>
-                            )}
                           </span>
                         )}
                       </span>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MapPin, Clock, Building2, UserCheck, Users, Timer } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
-import { formatIsoClock } from "@/lib/timeFormat";
+import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 
 interface QueuePosition {
   patients_ahead: number;
@@ -82,7 +82,7 @@ const TrackQueue = () => {
 
   useEffect(() => {
     void fetchQueuePosition();
-    const interval = setInterval(() => void fetchQueuePosition(), 30000);
+    const interval = setInterval(() => void fetchQueuePosition(), 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [fetchQueuePosition]);
 
@@ -134,9 +134,9 @@ const TrackQueue = () => {
         <div className="mb-6 space-y-3 text-sm">
           <MetricRow icon={Users} label="Now Serving:" value={nowServing} highlight />
           <MetricRow icon={Users} label="Patients ahead:" value={String(patientsAhead)} />
-          <MetricRow icon={Timer} label="Estimated wait:" value={`${estimatedWait} mins`} />
+          <MetricRow icon={Timer} label="Estimated wait:" value={formatDurationMinutes(estimatedWait)} />
           {activeDelayMinutes > 0 && (
-            <MetricRow icon={Clock} label="Doctor delay:" value={`${activeDelayMinutes} mins`} />
+            <MetricRow icon={Clock} label="Doctor delay:" value={formatDurationMinutes(activeDelayMinutes)} />
           )}
 
           <div className="rounded-xl border border-[#00555A]/10 bg-[#00555A]/5 p-4">

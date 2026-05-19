@@ -18,6 +18,10 @@ interface ClinicTimeSlot {
   status: string;
   queue_count?: number;
   delay_minutes?: number;
+  doctor_delay?: string | null;
+  delay_ends_at?: string | null;
+  delay_original_start_time?: string | null;
+  delay_updated_start_time?: string | null;
   is_open: boolean;
 }
 
@@ -98,19 +102,32 @@ const BookAppointment = () => {
     predicted_eta?: string | null;
     latest_eta?: string | null;
     active_delay_minutes?: number | null;
+    doctor_delay?: string | null;
+    delay_minutes?: number | null;
+    delay_ends_at?: string | null;
+    delay_original_start_time?: string | null;
+    delay_updated_start_time?: string | null;
     queue_position?: number | null;
     session_status?: string | null;
   }) => {
-    const delayLabel = formatDelayLabel(selectedTimeSlot?.delay_minutes);
+    const delayMinutes = booking.delay_minutes ?? selectedTimeSlot?.delay_minutes ?? null;
+    const delayLabel = booking.doctor_delay || formatDelayLabel(delayMinutes);
+    const displayTime = selectedTimeSlot ? formatDelayedTimeRange(selectedTimeSlot.time_range, delayMinutes) : "";
+    const displayStartTime = selectedTimeSlot ? formatDelayedStartTime(selectedTimeSlot.time_range, delayMinutes) : "";
     navigate("/confirmation", {
       state: {
         clinic: clinic.name,
         doctor: selectedDoctor?.name,
         date: dates.find((d) => d.value === selectedDate)?.label,
-        time: selectedTimeSlot ? formatDelayedTimeRange(selectedTimeSlot.time_range, selectedTimeSlot.delay_minutes) : "",
+        time: displayTime,
         sessionName: selectedTimeSlot?.session_name || selectedTimeSlot?.slot_name,
-        sessionTime: selectedTimeSlot ? formatDelayedStartTime(selectedTimeSlot.time_range, selectedTimeSlot.delay_minutes) : "",
+        sessionTime: displayStartTime,
         delay: delayLabel,
+        doctor_delay: booking.doctor_delay || delayLabel,
+        delay_minutes: delayMinutes,
+        delay_ends_at: booking.delay_ends_at || selectedTimeSlot?.delay_ends_at,
+        delay_original_start_time: booking.delay_original_start_time || selectedTimeSlot?.delay_original_start_time,
+        delay_updated_start_time: booking.delay_updated_start_time || selectedTimeSlot?.delay_updated_start_time,
         originalSessionTime: selectedTimeSlot ? formatTimeRange(selectedTimeSlot.time_range) : "",
         sessionId: selectedTimeSlot?.session_id,
         address: clinic.address,
@@ -182,6 +199,11 @@ const BookAppointment = () => {
           predicted_eta: booking.predicted_eta,
           latest_eta: booking.latest_eta,
           active_delay_minutes: booking.active_delay_minutes,
+          doctor_delay: booking.doctor_delay,
+          delay_minutes: booking.delay_minutes,
+          delay_ends_at: booking.delay_ends_at,
+          delay_original_start_time: booking.delay_original_start_time,
+          delay_updated_start_time: booking.delay_updated_start_time,
           queue_position: booking.queue_position,
           session_status: booking.session_status,
         });

@@ -227,21 +227,6 @@ async def scheduled_auto_finish_unserved():
                             await db.delete(appointment)
                             await db.commit()
 
-                            # Auto-add to reports table for every clinic.
-                            try:
-                                from app.routers.patient_reports import auto_add_patient_to_reports
-                                result = await auto_add_patient_to_reports(
-                                    patient_id=getattr(appointment, 'patient_id', f"auto-{appointment.id}"),
-                                    clinic_id=clinic_id,
-                                    patient_name=appointment.patient_name,
-                                    patient_email=getattr(appointment, 'patient_email', ""),
-                                    patient_phone=appointment.patient_phone,
-                                    db=db
-                                )
-                                logger.info(f"Auto-add to reports result for auto-finished patient: {result}")
-                            except Exception as e:
-                                logger.error(f"Failed to auto-add auto-finished patient to reports: {e}", exc_info=True)
-
                             auto_finished += 1
                             logger.info(
                                 "Auto-finished unserved patient %s (token %s) for clinic %s",

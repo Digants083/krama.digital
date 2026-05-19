@@ -8,6 +8,7 @@ import {
   User,
 } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
+import { formatDurationMinutes } from "@/lib/timeFormat";
 
 type Appointment = {
   id: number;
@@ -86,7 +87,7 @@ const PatientDashboard = () => {
 
   useEffect(() => {
     if (!patientEmail) return;
-    const timer = window.setInterval(() => void fetchAppointments(patientEmail), 30000);
+    const timer = window.setInterval(() => void fetchAppointments(patientEmail), 5 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [fetchAppointments, patientEmail]);
 
@@ -183,7 +184,7 @@ const PatientDashboard = () => {
                 )}
                 {appointments[0].active_delay_minutes ? (
                   <p className="mt-1 text-[11px] font-semibold leading-tight text-[#ffd999]">
-                    Delay {appointments[0].active_delay_minutes} min
+                    Delay {formatDurationMinutes(appointments[0].active_delay_minutes)}
                   </p>
                 ) : null}
               </Link>

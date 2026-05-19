@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
-import { formatIsoClock } from "@/lib/timeFormat";
+import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 
 // Types
 interface ClinicInfo {
@@ -33,6 +33,11 @@ const WalkinQueue = () => {
     estimated_window_text?: string | null;
     estimated_wait_minutes?: number | null;
     active_delay_minutes?: number | null;
+    doctor_delay?: string | null;
+    delay_minutes?: number | null;
+    delay_ends_at?: string | null;
+    delay_original_start_time?: string | null;
+    delay_updated_start_time?: string | null;
     session_status?: string | null;
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -75,6 +80,11 @@ const WalkinQueue = () => {
         estimated_window_text: updated.estimated_window_text,
         estimated_wait_minutes: updated.estimated_wait_minutes,
         active_delay_minutes: updated.active_delay_minutes,
+        doctor_delay: updated.doctor_delay,
+        delay_minutes: updated.delay_minutes,
+        delay_ends_at: updated.delay_ends_at,
+        delay_original_start_time: updated.delay_original_start_time,
+        delay_updated_start_time: updated.delay_updated_start_time,
         session_status: updated.session_status,
       } : prev);
     } catch (error) {
@@ -123,6 +133,11 @@ const WalkinQueue = () => {
         estimated_window_text: data.estimated_window_text,
         estimated_wait_minutes: data.estimated_wait_minutes,
         active_delay_minutes: data.active_delay_minutes,
+        doctor_delay: data.doctor_delay,
+        delay_minutes: data.delay_minutes,
+        delay_ends_at: data.delay_ends_at,
+        delay_original_start_time: data.delay_original_start_time,
+        delay_updated_start_time: data.delay_updated_start_time,
         session_status: data.session_status,
       });
       setStep("success");
@@ -167,6 +182,9 @@ const WalkinQueue = () => {
 
   // Success screen
   if (step === "success" && tokenResult) {
+    const activeDelayMinutes = tokenResult.active_delay_minutes || tokenResult.delay_minutes || 0;
+    const hasActiveDelay = Boolean(tokenResult.doctor_delay || activeDelayMinutes > 0);
+    const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : tokenResult.doctor_delay;
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
         <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
@@ -204,12 +222,24 @@ const WalkinQueue = () => {
               <p className="mt-1 text-xs font-semibold text-[#00555A]">Predicted Consultation Time: {formatIsoClock(tokenResult.predicted_eta)}</p>
             )}
             {tokenResult.estimated_wait_minutes != null && (
-              <p className="mt-1 text-xs text-gray-500">Estimated wait {tokenResult.estimated_wait_minutes} min</p>
+              <p className="mt-1 text-xs text-gray-500">Estimated wait {formatDurationMinutes(tokenResult.estimated_wait_minutes)}</p>
             )}
-            {tokenResult.active_delay_minutes ? (
-              <p className="mt-1 text-xs font-semibold text-orange-700">Doctor delay active: {tokenResult.active_delay_minutes} min</p>
-            ) : null}
           </div>
+
+          {hasActiveDelay && (
+            <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 px-4 py-4 text-left">
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Delay update</p>
+              <p className="mt-1 text-lg font-bold text-orange-900">Slot delayed by {delayAmountText}</p>
+              {tokenResult.delay_original_start_time && tokenResult.delay_updated_start_time && (
+                <p className="mt-1 text-sm text-orange-800">
+                  Original {tokenResult.delay_original_start_time} - New {tokenResult.delay_updated_start_time}
+                </p>
+              )}
+              <p className="mt-1 text-sm text-orange-800">
+                New ETA: {formatIsoClock(tokenResult.predicted_eta) || tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}
+              </p>
+            </div>
+          )}
 
           <p className="text-xs text-gray-400 mb-4">
             Please wait for your token to be called.
