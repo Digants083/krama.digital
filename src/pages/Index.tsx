@@ -21,9 +21,9 @@ import {
 } from "lucide-react";
 
 const heroStats = [
-  { value: "Live", label: "Queue movement" },
-  { value: "1 tap", label: "Digital token" },
-  { value: "18m", label: "Sample visible wait" },
+  { value: "10+", label: "Clinics onboarding" },
+  { value: "500+", label: "Expected patients" },
+  { value: "18m", label: "Average visible wait" },
 ];
 
 const patientFeatures = [
@@ -117,26 +117,25 @@ const solutionGroups = [
 
 const Index = () => {
   return (
-    <div className="min-h-screen overflow-hidden bg-[linear-gradient(180deg,hsl(var(--secondary))_0%,hsl(var(--background))_28%,hsl(var(--background))_100%)]">
-      <section className="section-container px-4 pb-10 pt-5 md:px-8 md:pb-20 md:pt-14">
-        <div className="overflow-hidden rounded-2xl border border-border bg-[linear-gradient(135deg,hsl(var(--card))_0%,hsl(var(--secondary))_100%)] shadow-[0_28px_80px_-48px_rgba(90,70,42,0.55)]">
-          <div className="grid lg:grid-cols-[1.02fr_0.98fr]">
-            <div className="p-4 text-foreground sm:p-8 lg:p-12">
-              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:px-4 sm:py-2 sm:text-sm">
+    <div className="min-h-screen overflow-hidden bg-[#fbfaf7]">
+      <section className="section-container px-4 pb-14 pt-10 md:px-8 md:pb-24 md:pt-16">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.04fr_0.96fr] lg:gap-16">
+            <div className="text-foreground">
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#e6ded3] bg-white px-4 py-2 text-sm text-[#40514b] shadow-sm">
                 <Sparkles className="h-4 w-4 text-accent" />
-                Digital queue management for clinics
+                Minimal clinic queueing for patients
               </div>
 
-              <h1 className="mt-4 max-w-3xl font-display text-3xl font-bold leading-tight sm:mt-6 sm:text-5xl lg:text-6xl">
-                Stop waiting rooms from becoming waiting problems.
+              <h1 className="mt-7 max-w-3xl font-display text-5xl font-bold leading-[1.08] tracking-tight text-[#142620] sm:text-6xl lg:text-7xl">
+                Make clinic visits feel calm, clear, and on time.
               </h1>
 
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:mt-5 md:text-lg">
-                Krama lets patients book, join, and track their turn while clinics manage live queues, doctors, and walk-ins from one clean flow.
+              <p className="mt-7 max-w-2xl text-xl leading-8 text-[#40514b]">
+                Krama keeps your existing flow intact while giving the website a cleaner face for patients and clinics. Join digitally, track turns live, and reduce crowded waiting rooms.
               </p>
 
-              <div className="mt-5 grid grid-cols-2 gap-2 sm:mt-8 sm:flex sm:gap-3">
-                <Button asChild size="lg" className="h-10 px-3 text-xs sm:h-11 sm:px-6 sm:text-sm">
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button asChild size="lg" className="h-12 rounded-full bg-[#1f6657] px-8 text-sm font-semibold text-white shadow-[0_18px_35px_-22px_rgba(31,102,87,0.9)] hover:bg-[#185449]">
                   <Link to="/patient/login">
                     Patient Login
                     <ArrowRight className="h-4 w-4" />
@@ -146,63 +145,63 @@ const Index = () => {
                   asChild
                   size="lg"
                   variant="outline"
-                  className="h-10 px-3 text-xs sm:h-11 sm:px-6 sm:text-sm"
+                  className="h-12 rounded-full border-[#e0d7ca] bg-white px-8 text-sm font-semibold text-[#142620] hover:bg-[#f3efe8]"
                 >
                   <Link to="/clinic/login">Clinic Login</Link>
                 </Button>
               </div>
 
-              <div className="mt-5 grid max-w-2xl grid-cols-3 gap-2 sm:mt-10 sm:gap-3">
+              <div className="mt-10 grid max-w-2xl grid-cols-3 gap-4">
                 {heroStats.map((item) => (
-                  <div key={item.label} className="rounded-lg border border-border bg-card/75 p-2.5 shadow-sm sm:p-4">
-                    <p className="font-display text-lg font-bold text-primary sm:text-2xl">{item.value}</p>
-                    <p className="mt-1 text-[10px] leading-tight text-muted-foreground sm:text-xs">{item.label}</p>
+                  <div key={item.label} className="rounded-2xl border border-[#e6ded3] bg-white p-5 shadow-sm">
+                    <p className="font-display text-3xl font-bold text-[#1f6657]">{item.value}</p>
+                    <p className="mt-2 text-sm leading-tight text-[#60736d]">{item.label}</p>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="border-t border-border/70 bg-background/45 p-3 sm:p-5 lg:border-l lg:border-t-0 lg:p-8">
-              <div className="rounded-xl border border-border bg-card/95 p-3 shadow-[0_24px_70px_-44px_rgba(70,54,34,0.5)] sm:rounded-2xl sm:p-5">
-                <div className="flex items-center justify-between rounded-lg border border-border bg-background/80 px-3 py-2.5 sm:px-4 sm:py-3">
+            <div className="mx-auto w-full max-w-[532px]">
+              <div className="rounded-[32px] bg-white p-8 shadow-[0_32px_90px_-58px_rgba(28,38,34,0.8)]">
+                <div className="flex items-center justify-between rounded-[32px] border border-[#e6ded3] bg-[#fbfaf7] px-5 py-4">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:text-xs">Live queue</p>
-                    <p className="mt-1 text-sm font-semibold text-foreground sm:text-lg">CityCare Clinic</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#60736d]">Live queue</p>
+                    <p className="mt-2 text-lg font-bold text-[#142620]">CityCare Clinic</p>
                   </div>
-                  <div className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary sm:px-3 sm:text-sm">Active</div>
+                  <div className="rounded-full bg-[#dfe9e4] px-4 py-2 text-sm font-semibold text-[#1f6657]">Active</div>
                 </div>
 
-                <div className="mt-3 grid gap-3 md:grid-cols-[1fr_0.88fr] lg:mt-4 lg:gap-4">
-                  <div className="rounded-xl border border-primary/15 bg-[linear-gradient(135deg,hsl(var(--primary)/0.08)_0%,hsl(var(--secondary))_100%)] px-4 py-5 text-foreground sm:px-5 sm:py-7">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:text-xs">Your token</p>
-                    <p className="mt-2 font-display text-4xl font-bold text-primary sm:mt-3 sm:text-6xl">A-17</p>
+                <div className="mt-6 grid gap-4 md:grid-cols-[1fr_0.88fr]">
+                  <div className="rounded-[28px] bg-[#1f6657] px-6 py-8 text-white">
+                    <p className="text-sm font-semibold uppercase tracking-[0.28em] text-white/72">Your token</p>
+                    <p className="mt-4 font-display text-6xl font-bold">A-17</p>
 
-                    <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-7 sm:gap-3">
-                      <div className="rounded-lg border border-border bg-card/75 p-3 sm:p-4">
-                        <p className="text-[10px] text-muted-foreground sm:text-xs">Now serving</p>
-                        <p className="mt-1 text-lg font-semibold text-foreground sm:mt-2 sm:text-2xl">A-12</p>
+                    <div className="mt-9 grid grid-cols-2 gap-3">
+                      <div className="rounded-[22px] bg-white/14 p-4">
+                        <p className="text-xs font-medium text-white/70">Now serving</p>
+                        <p className="mt-5 text-2xl font-bold">A-12</p>
                       </div>
-                      <div className="rounded-lg border border-border bg-card/75 p-3 sm:p-4">
-                        <p className="text-[10px] text-muted-foreground sm:text-xs">Estimated wait</p>
-                        <p className="mt-1 text-lg font-semibold text-foreground sm:mt-2 sm:text-2xl">18 min</p>
+                      <div className="rounded-[22px] bg-white/14 p-4">
+                        <p className="text-xs font-medium text-white/70">Estimated wait</p>
+                        <p className="mt-5 text-2xl font-bold">18 min</p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid gap-2 sm:gap-3 md:block md:space-y-3">
+                  <div className="grid gap-3">
                     {[
                       { icon: CalendarClock, label: "Booked digitally", value: "Today, 10:30 AM" },
                       { icon: Bell, label: "Arrival reminder", value: "Notify 10 minutes before" },
                       { icon: ShieldCheck, label: "Less crowding", value: "Arrive only when needed" },
                     ].map(({ icon: Icon, label, value }) => (
-                      <div key={label} className="rounded-lg border border-border bg-background/75 p-3 sm:p-4">
-                        <div className="flex items-start gap-2.5 sm:gap-3">
-                          <div className="rounded-lg bg-secondary p-2.5 sm:p-3">
-                            <Icon className="h-4 w-4 text-primary sm:h-5 sm:w-5" />
+                      <div key={label} className="rounded-[22px] border border-[#e6ded3] bg-white p-4 shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <div className="rounded-2xl bg-[#f3efe8] p-3">
+                            <Icon className="h-5 w-5 text-[#1f6657]" />
                           </div>
                           <div>
-                            <p className="text-xs text-muted-foreground sm:text-sm">{label}</p>
-                            <p className="mt-1 text-sm font-medium text-foreground sm:text-base">{value}</p>
+                            <p className="text-sm text-[#60736d]">{label}</p>
+                            <p className="mt-1 text-base font-medium text-[#142620]">{value}</p>
                           </div>
                         </div>
                       </div>
@@ -210,21 +209,20 @@ const Index = () => {
                   </div>
                 </div>
 
-                <div className="mt-3 rounded-lg border border-dashed border-primary/25 bg-primary/5 p-3 sm:mt-4 sm:p-4">
-                  <div className="flex items-center justify-between gap-2 sm:gap-3">
-                    <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                      <div className="shrink-0 rounded-full bg-accent/18 px-2.5 py-1 text-xs font-medium text-foreground sm:px-3 sm:text-sm">
+                <div className="mt-6 rounded-[20px] border border-dashed border-[#e0d7ca] bg-[#fbfaf7] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="shrink-0 rounded-full bg-[#f6d8c4] px-4 py-2 text-sm font-medium text-[#142620]">
                         5 patients ahead
                       </div>
-                      <p className="min-w-0 text-xs text-muted-foreground sm:text-sm">Track updates without calling reception.</p>
+                      <p className="min-w-0 text-sm text-[#60736d]">Track every update without calling reception.</p>
                     </div>
-                    <BarChart3 className="h-4 w-4 shrink-0 text-primary sm:h-5 sm:w-5" />
+                    <BarChart3 className="h-5 w-5 shrink-0 text-[#1f6657]" />
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
       </section>
 
       <section className="section-container px-4 py-12 md:px-8 md:py-16">
