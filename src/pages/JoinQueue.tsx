@@ -1,8 +1,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { useQueue } from "@/context/QueueContext";
 import { formatDelayedStartTime, formatDelayLabel, formatDurationMinutes, formatIsoClock, formatTimeRange as formatSlotTimeRange } from "@/lib/timeFormat";
-import { ArrowRight, MapPinned, Search, Ticket } from "lucide-react";
+import { ArrowRight, CheckCircle2, MapPinned, Search, Stethoscope, Ticket } from "lucide-react";
 import { getPatientSlotStatus, isSlotManuallyOpen } from "@/lib/slotStatus";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
@@ -47,6 +46,7 @@ type SessionSlot = {
 // Types
 interface Doctor {
   id: string;
+  doctor_id?: string;
   name: string;
   specialization?: string;
 }
@@ -59,7 +59,7 @@ interface ClinicInfo {
   isActive?: boolean;
 }
 
-type Step = "options" | "form" | "loading" | "success" | "error";
+type Step = "form" | "loading" | "success" | "error";
 
 // Component
 const JoinQueue = () => {
@@ -68,9 +68,7 @@ const JoinQueue = () => {
   const qrClinicId = searchParams.get("clinic_id") || "";
   const navigate = useNavigate();
 
-  const { addWalkinToQueue } = useQueue();
-
-  const [step, setStep] = useState<Step>("options");
+  const [step, setStep] = useState<Step>("form");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [selectedDoctorId, setSelectedDoctorId] = useState("");
@@ -78,13 +76,12 @@ const JoinQueue = () => {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfo | null>(null);
-  const [quickBookChecking, setQuickBookChecking] = useState(false);
 
   const formatTimeRange = (start: number, end: number) => {
     return formatSlotTimeRange([start, end]);
   };
 
-  const [clinicLoading, setClinicLoading] = useState(false);
+  const [clinicLoading, setClinicLoading] = useState(Boolean(qrClinicId));
   const [tokenResult, setTokenResult] = useState<{
     token_label: string;
     position: number;
@@ -101,6 +98,11 @@ const JoinQueue = () => {
     session_status?: string | null;
   } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+
+  const getDoctorValue = (doctor: Doctor) => String(doctor.doctor_id || doctor.id || "");
+  const selectedDoctor = clinicInfo?.doctors.find((doctor) => getDoctorValue(doctor) === selectedDoctorId);
+  const requiresDoctorSelection = Boolean(clinicInfo && clinicInfo.doctors.length > 1);
+  const canShowSlots = !requiresDoctorSelection || Boolean(selectedDoctorId);
 
   const refreshTokenResult = useCallback(async () => {
     if (!tokenResult || !phone) return;
@@ -139,13 +141,15 @@ const JoinQueue = () => {
     fetch(`/api/auth/clinic/data?clinic_id=${qrClinicId}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((data) => {
+        const doctors = data.doctors || [];
         setClinicInfo({
           id: data.clinic_id || qrClinicId,
           name: data.clinic_name || "Clinic",
           address: data.address,
-          doctors: data.doctors || [],
+          doctors,
           isActive: Boolean(data.is_active && data.available !== false),
         });
+        setSelectedDoctorId((current) => current || (doctors.length === 1 ? getDoctorValue(doctors[0]) : ""));
       })
       .catch(() => {
         setClinicInfo({ id: qrClinicId, name: "Clinic", doctors: [], isActive: false });
@@ -155,7 +159,12 @@ const JoinQueue = () => {
 
   // Fetch time slots from the same session status source used by clinic dashboards
   useEffect(() => {
-    if (!qrClinicId) return;
+    if (!qrClinicId || !clinicInfo) return;
+    if (requiresDoctorSelection && !selectedDoctorId) {
+      setTimeSlots([]);
+      setSelectedSlotId("");
+      return;
+    }
 
     const toDisplayName = (slot: Pick<TimeSlot, "session_name" | "slot_name" | "session_id" | "slot_id">) => {
       const rawName = slot.session_name || slot.slot_name || `Session ${slot.session_id || slot.slot_id || ""}`;
@@ -202,7 +211,8 @@ const JoinQueue = () => {
     const fetchSlots = async () => {
       setSlotsLoading(true);
       try {
-        const sessionsResponse = await fetch(`/api/sessions/today/${encodeURIComponent(qrClinicId)}`);
+        const doctorQuery = selectedDoctorId ? `?doctor_id=${encodeURIComponent(selectedDoctorId)}` : "";
+        const sessionsResponse = await fetch(`/api/sessions/today/${encodeURIComponent(qrClinicId)}${doctorQuery}`);
         if (sessionsResponse.ok) {
           const data = await sessionsResponse.json();
           const sessions = (data.sessions || []).map(mapSessionSlot).sort(sortSlots);
@@ -212,7 +222,9 @@ const JoinQueue = () => {
           }
         }
 
-        const legacyResponse = await fetch(`/api/auth/clinic/time-slots?clinic_id=${encodeURIComponent(qrClinicId)}`);
+        const params = new URLSearchParams({ clinic_id: qrClinicId });
+        if (selectedDoctorId) params.set("doctor_id", selectedDoctorId);
+        const legacyResponse = await fetch(`/api/auth/clinic/time-slots?${params.toString()}`);
         const legacyData = await legacyResponse.json();
         const slotArray = legacyData.slot || [];
         const slotDelays = legacyData.slot_delays || [];
@@ -227,49 +239,10 @@ const JoinQueue = () => {
     };
 
     void fetchSlots();
-  }, [qrClinicId]);
-  // Handle sign up option
-  const handleSignUp = () => {
-    navigate("/patient/signup", { state: { fromJoinQueue: true, clinic_id: qrClinicId } });
-  };
-
-  // Handle quick book option
-  const handleQuickBook = async () => {
-    setErrorMsg("");
-    setQuickBookChecking(true);
-
-    try {
-      const response = await fetch(`/api/auth/clinic/data?clinic_id=${qrClinicId}`);
-      if (!response.ok) {
-        throw new Error("Clinic not found");
-      }
-
-      const data = await response.json();
-      const isActive = Boolean(data.is_active && data.available !== false);
-      setClinicInfo({
-        id: data.clinic_id || qrClinicId,
-        name: data.clinic_name || "Clinic",
-        address: data.address,
-        doctors: data.doctors || [],
-        isActive,
-      });
-
-      if (!isActive) {
-        setErrorMsg("Clinic isn't opened yet.");
-        return;
-      }
-
-      setStep("form");
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Unable to check clinic status.");
-    } finally {
-      setQuickBookChecking(false);
-    }
-  };
-
+  }, [clinicInfo, qrClinicId, requiresDoctorSelection, selectedDoctorId]);
   const handleSlotSelect = (slot: TimeSlot, slotNum: number) => {
     if (!slot.is_open) {
-      setErrorMsg("Clinic isn't opened yet.");
+      setErrorMsg("This slot is not available.");
       return;
     }
 
@@ -282,12 +255,19 @@ const JoinQueue = () => {
     setSelectedSlotId(slotNum);
   };
 
+  const handleDoctorSelect = (doctorId: string) => {
+    setSelectedDoctorId(doctorId);
+    setSelectedSlotId("");
+    setErrorMsg("");
+  };
+
   // Validation
   const phoneRegex = /^[6-9]\d{9}$/;
   const selectedSlot = timeSlots.find((slot) => (slot.slot_id || slot.session_id) === selectedSlotId);
   const isValid =
     name.trim().length >= 2 &&
     phoneRegex.test(phone.trim()) &&
+    canShowSlots &&
     selectedSlotId !== "" &&
     clinicInfo?.isActive !== false &&
     Boolean(selectedSlot?.is_open) &&
@@ -369,54 +349,6 @@ const JoinQueue = () => {
         <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
           <div className="mx-auto mb-2 h-6 w-32 animate-pulse rounded bg-primary/10" />
           <div className="mx-auto h-4 w-24 animate-pulse rounded bg-primary/10" />
-        </div>
-      </div>
-    );
-  }
-
-  // Options screen - choose between Sign up or Quick book
-  if (step === "options") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary font-display text-2xl font-bold text-primary-foreground">
-            K
-          </div>
-          <h2 className="mb-2 text-xl font-semibold text-[#0F172A]">Join Queue</h2>
-          {clinicInfo && (
-            <p className="mb-6 text-sm font-medium text-primary">{clinicInfo.name}</p>
-          )}
-
-          {errorMsg && (
-            <div className="mb-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm text-destructive">
-              {errorMsg}
-            </div>
-          )}
-
-          <p className="mb-6 text-sm text-muted-foreground">
-            Would you like to sign up for the full experience or continue with a quick booking?
-          </p>
-
-          {/* Sign up option */}
-          <button
-            onClick={handleSignUp}
-            className="mb-3 w-full rounded-xl bg-primary px-4 py-4 text-sm font-medium text-primary-foreground shadow-[0_14px_28px_-18px_rgba(31,92,84,0.9)] transition-all duration-200 hover:bg-primary/90"
-          >
-            <span className="block font-semibold">Sign Up for Full Experience</span>
-            <span className="block text-xs text-white/70 mt-1">Live queue tracking, appointment history & more</span>
-          </button>
-
-          {/* Quick book option */}
-          <button
-            onClick={handleQuickBook}
-            disabled={quickBookChecking}
-            className="w-full rounded-xl border border-primary/25 bg-primary/5 px-4 py-4 text-sm font-medium text-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/10"
-          >
-            <span className="block font-semibold text-primary">
-              {quickBookChecking ? "Checking clinic..." : "Quick Book"}
-            </span>
-            <span className="mt-1 block text-xs text-muted-foreground">Just book a slot - no account needed</span>
-          </button>
         </div>
       </div>
     );
@@ -613,13 +545,57 @@ const JoinQueue = () => {
             )}
           </div>
 
+          {/* Doctor selector - shown only if clinic has multiple doctors */}
+          {clinicInfo && clinicInfo.doctors.length > 1 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-primary">Select doctor</label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {clinicInfo.doctors.map((doc) => (
+                  <button
+                    key={getDoctorValue(doc)}
+                    type="button"
+                    onClick={() => handleDoctorSelect(getDoctorValue(doc))}
+                    className={[
+                      "group flex min-h-[92px] w-full items-center gap-3 rounded-xl border p-3 text-left transition-all duration-200",
+                      selectedDoctorId === getDoctorValue(doc)
+                        ? "border-primary bg-primary text-primary-foreground shadow-[0_14px_30px_-22px_rgba(31,92,84,0.9)]"
+                        : "border-primary/15 bg-white text-foreground hover:border-primary/35 hover:bg-primary/5"
+                    ].join(" ")}
+                  >
+                    <span className={selectedDoctorId === getDoctorValue(doc) ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white" : "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"}>
+                      <Stethoscope className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold">{doc.name}</span>
+                      <span className={selectedDoctorId === getDoctorValue(doc) ? "mt-0.5 block truncate text-xs text-white/75" : "mt-0.5 block truncate text-xs text-muted-foreground"}>
+                        {doc.specialization || "General Practice"}
+                      </span>
+                    </span>
+                    {selectedDoctorId === getDoctorValue(doc) && <CheckCircle2 className="h-5 w-5 shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Slot selector */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-primary">Select time slot</label>
-            {slotsLoading ? (
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <label className="block text-xs font-medium text-primary">Select time slot</label>
+              {selectedDoctor && (
+                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+                  {selectedDoctor.name}
+                </span>
+              )}
+            </div>
+            {!canShowSlots ? (
+              <p className="rounded-xl border border-primary/10 bg-primary/5 px-4 py-3 text-xs text-muted-foreground">
+                Choose a doctor to see that doctor's available, delayed, expired, and closed slots.
+              </p>
+            ) : slotsLoading ? (
               <div className="space-y-2">
-                <div className="h-14 animate-pulse rounded-xl bg-primary/10" />
-                <div className="h-14 animate-pulse rounded-xl bg-primary/10" />
+                <div className="h-16 animate-pulse rounded-xl bg-primary/10" />
+                <div className="h-16 animate-pulse rounded-xl bg-primary/10" />
               </div>
             ) : timeSlots.length > 0 ? (
               <div className="space-y-2">
@@ -628,6 +604,9 @@ const JoinQueue = () => {
                   const isUnavailable = !slot.is_open || slot.is_expired;
                   const isSelected = selectedSlotId === slotNum;
                   const delayLabel = formatDelayLabel(slot.delay_minutes);
+                  const displayStatus = slot.display_status === "Available" || slot.display_status === "Ongoing"
+                    ? "Open"
+                    : slot.display_status;
                   const statusBadgeClass = slot.display_status === "Expired"
                     ? "bg-red-100 text-red-700"
                     : slot.display_status === "Delayed"
@@ -642,7 +621,7 @@ const JoinQueue = () => {
                       type="button"
                       onClick={() => handleSlotSelect(slot, slotNum)}
                       className={[
-                        "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-all duration-200",
+                        "flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition-all duration-200",
                         isSelected
                           ? "border-primary bg-primary text-primary-foreground shadow-[0_14px_30px_-22px_rgba(31,92,84,0.9)]"
                           : "border-primary/15 bg-white text-foreground hover:border-primary/35 hover:bg-primary/5",
@@ -651,7 +630,7 @@ const JoinQueue = () => {
                           : ""
                       ].join(" ")}
                     >
-                      <span>
+                      <span className="min-w-0">
                         <span className="block text-sm font-semibold">
                           {slot.slot_name || `Session ${slotNum}`}
                         </span>
@@ -674,39 +653,22 @@ const JoinQueue = () => {
                       </span>
                       <span
                         className={[
-                          "rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                          "shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold",
                           isSelected ? "bg-white/15 text-white" : statusBadgeClass
                         ].join(" ")}
                       >
-                        {slot.display_status}
+                        {displayStatus}
                       </span>
                     </button>
                   );
                 })}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">No slots configured for this clinic</p>
+              <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-muted-foreground">
+                No slots configured for {selectedDoctor?.name || "this clinic"}.
+              </p>
             )}
           </div>
-
-          {/* Doctor selector - shown only if clinic has multiple doctors */}
-          {clinicInfo && clinicInfo.doctors.length > 1 && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-primary">Select doctor</label>
-              <select
-                value={selectedDoctorId}
-                onChange={(e) => setSelectedDoctorId(e.target.value)}
-                className="w-full rounded-lg border border-primary/20 bg-white px-4 py-3 text-sm text-foreground transition-all duration-200 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-              >
-                <option value="">Any available doctor</option>
-                {clinicInfo.doctors.map((doc) => (
-                  <option key={doc.id} value={doc.id}>
-                    {doc.name}{doc.specialization ? ` - ${doc.specialization}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
         </div>
 
         <button
@@ -720,19 +682,11 @@ const JoinQueue = () => {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
-              Getting your token...
+              Confirming booking...
             </span>
           ) : (
-            "Get Token & Join Queue"
+            "Confirm Booking"
           )}
-        </button>
-
-        {/* Back to options */}
-        <button
-          onClick={() => setStep("options")}
-          className="mt-3 w-full text-xs text-muted-foreground hover:text-primary"
-        >
-          Back to options
         </button>
       </div>
     </div>

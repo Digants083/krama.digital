@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight, FileText } from "lucide-react";
+import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight, FileText, Stethoscope, CheckCircle2 } from "lucide-react";
 import { formatDelayedStartTime, formatDelayLabel, formatIsoClock, formatTimeRange } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
@@ -14,6 +14,14 @@ interface TimeSlot {
   delay_ends_at?: string | null;
   delay_original_start_time?: string | null;
   delay_updated_start_time?: string | null;
+  slot_id?: number;
+  doctor_id?: string;
+}
+
+interface DoctorOption {
+  doctor_id: string;
+  name: string;
+  specialization?: string;
 }
 
 const SERVE_UNLOCK_LEAD_MINUTES = 5;
@@ -57,6 +65,8 @@ const ClinicControlQueue = () => {
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [pushingToken, setPushingToken] = useState<string | null>(null);
   const [reportingToken, setReportingToken] = useState<string | null>(null);
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [selectedDoctorId, setSelectedDoctorId] = useState("");
 
   useEffect(() => {
     if (!message) return;
@@ -68,19 +78,19 @@ const ClinicControlQueue = () => {
     const clinicStr = localStorage.getItem("clinic_id");
     if (clinicStr) {
       setClinicId(clinicStr);
-      fetchQueueForClinic(clinicStr, selectedSlotId, currentServing?.startTime);
+      fetchQueueForClinic(clinicStr, selectedSlotId, currentServing?.startTime, selectedDoctorId || undefined);
     }
-  }, [fetchQueueForClinic, selectedSlotId, currentServing?.startTime]);
+  }, [fetchQueueForClinic, selectedSlotId, currentServing?.startTime, selectedDoctorId]);
 
   useEffect(() => {
     if (!clinicId) return;
 
     const interval = setInterval(() => {
-      fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
+      fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime, selectedDoctorId || undefined);
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [clinicId, fetchQueueForClinic, selectedSlotId, currentServing?.startTime]);
+  }, [clinicId, fetchQueueForClinic, selectedSlotId, currentServing?.startTime, selectedDoctorId]);
 
   useEffect(() => {
     if (currentServing?.startTime) {
@@ -97,7 +107,7 @@ const ClinicControlQueue = () => {
   }, [currentServing]);
 
   const handleRefreshQueue = () => {
-    if (clinicId) fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
+    if (clinicId) fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime, selectedDoctorId || undefined);
   };
 
   const formatTime = (seconds: number) => {
@@ -125,9 +135,17 @@ const ClinicControlQueue = () => {
 
   useEffect(() => {
     if (clinicId) {
+      fetchDoctors();
       fetchTimeSlots();
     }
   }, [clinicId]);
+
+  useEffect(() => {
+    if (!clinicId || !selectedDoctorId) return;
+    setSelectedSlotId(null);
+    fetchTimeSlots();
+    fetchQueueForClinic(clinicId, null, currentServing?.startTime, selectedDoctorId);
+  }, [selectedDoctorId]);
 
   useEffect(() => {
     if (viewingSlotId !== null && selectedSlotId === null) {
@@ -148,14 +166,29 @@ const ClinicControlQueue = () => {
   useQueueRealtime(clinicId, () => {
     fetchTimeSlots();
     if (clinicId) {
-      fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
+      fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime, selectedDoctorId || undefined);
     }
   });
+
+  const fetchDoctors = async () => {
+    try {
+      const response = await fetch(`/api/auth/clinic/doctors?clinic_id=${encodeURIComponent(clinicId)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const nextDoctors = data.doctors || [];
+      setDoctors(nextDoctors);
+      setSelectedDoctorId((current) => current || nextDoctors[0]?.doctor_id || "");
+    } catch (error) {
+      console.error("Error fetching doctors:", error);
+    }
+  };
 
   const fetchTimeSlots = async () => {
     setLoadingSlots(true);
     try {
-      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${clinicId}`);
+      const params = new URLSearchParams({ clinic_id: clinicId });
+      if (selectedDoctorId) params.set("doctor_id", selectedDoctorId);
+      const response = await fetch(`/api/auth/clinic/time-slots?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         const slotDelays = data.slot_delays || [];
@@ -377,14 +410,18 @@ const ClinicControlQueue = () => {
     return timelineNow >= unlockTime && timelineNow < endHour;
   };
 
+  const getSlotById = (slotId: number) =>
+    timeSlots.find((slot) => (slot.slot_id || timeSlots.indexOf(slot) + 1) === slotId);
+
   // Check if the currently viewed slot can serve patients now.
   const canServeInCurrentSlot = () => {
     if (timeSlots.length === 0) return false;
 
     const slotId = selectedSlotId ?? viewingSlotId ?? activeSlotId;
     if (typeof slotId === "number") {
-      const slot = timeSlots[slotId - 1];
-      if (!slot || !isSlotAvailable(slot, slotId - 1)) return false;
+      const slot = getSlotById(slotId);
+      const slotIndex = timeSlots.indexOf(slot as TimeSlot);
+      if (!slot || !isSlotAvailable(slot, slotIndex)) return false;
       return isTimeInsideSlot(slot);
     }
 
@@ -408,13 +445,14 @@ const ClinicControlQueue = () => {
     (selectedSlotId ?? viewingSlotId) === activeSlotId;
 
   const currentSlotLabelId = selectedSlotId ?? viewingSlotId;
-  const selectedSlot = typeof currentSlotLabelId === "number" ? timeSlots[currentSlotLabelId - 1] : undefined;
+  const selectedSlot = typeof currentSlotLabelId === "number" ? getSlotById(currentSlotLabelId) : undefined;
   const isSelectedSlotExpired = selectedSlot ? isSlotExpired(selectedSlot) : false;
+  const selectedDoctor = doctors.find((doctor) => doctor.doctor_id === selectedDoctorId);
 
   const handleSlotSelect = (slotId: number) => {
     setSelectedSlotId(slotId);
     if (clinicId) {
-      fetchQueueForClinic(clinicId, slotId, currentServing?.startTime);
+      fetchQueueForClinic(clinicId, slotId, currentServing?.startTime, selectedDoctorId || undefined);
     }
   };
 
@@ -446,7 +484,7 @@ const ClinicControlQueue = () => {
         });
         // Refresh the queue
         if (clinicId) {
-          fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime);
+          fetchQueueForClinic(clinicId, selectedSlotId, currentServing?.startTime, selectedDoctorId || undefined);
         }
       } else {
         setMessage({ text: data.detail || "Failed to push patient", type: "error" });
@@ -568,7 +606,7 @@ const ClinicControlQueue = () => {
 
       <main className="mx-auto max-w-4xl px-4 py-8">
         {/* Clinic Status Card */}
-        <div className={`rounded-2xl p-5 mb-6 flex items-center justify-between shadow-lg border-2 transition-all ${
+        <div className={`sticky top-20 z-40 mb-6 flex flex-col gap-4 rounded-2xl border-2 p-5 shadow-lg backdrop-blur transition-all sm:flex-row sm:items-center sm:justify-between ${
             isClinicActive 
               ? "bg-gradient-to-r from-green-50 to-white border-green-200" 
               : "bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] border-[#e6ded3]"
@@ -593,7 +631,7 @@ const ClinicControlQueue = () => {
                 onClick={handleActivate}
                 disabled={Boolean(startDisabledReason)}
                 title={startDisabledReason || "Start clinic"}
-                className={`px-6 py-2.5 rounded-lg font-medium shadow-md transition-all ${
+                className={`min-w-28 flex-1 rounded-lg px-6 py-2.5 font-medium shadow-md transition-all sm:flex-none ${
                   startDisabledReason
                     ? "bg-slate-200 text-slate-500 hover:bg-slate-200 hover:translate-y-0 shadow-none"
                     : "bg-green-500 hover:bg-green-600 text-white hover:shadow-lg"
@@ -606,13 +644,71 @@ const ClinicControlQueue = () => {
                 onClick={() => handleDeactivate(true)}
                 disabled={activating || !isClinicActive}
                 variant="outline"
-                className="border-red-300 text-red-500 hover:bg-red-50 px-6 py-2.5 rounded-lg font-medium transition-all"
+                className="min-w-28 flex-1 rounded-lg border-red-300 px-6 py-2.5 font-medium text-red-500 transition-all hover:bg-red-50 sm:flex-none"
               >
                 <Square className="h-4 w-4 mr-2" />
                 Stop
               </Button>
             </div>
           </div>
+
+          {doctors.length > 0 && (
+            <div className="mb-6 overflow-hidden rounded-2xl border border-[#d9eadf] bg-[#fbfaf7] shadow-sm">
+              <div className="flex items-start justify-between gap-3 border-b border-[#e6ded3] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] px-4 py-4 sm:px-5">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#dff4ea] text-[#00555A]">
+                    <Users className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="font-bold text-slate-900">Doctor Queue</h2>
+                    <p className="mt-1 max-w-[210px] text-xs leading-5 text-slate-500 sm:max-w-none">Control one doctor's queue at a time.</p>
+                  </div>
+                </div>
+                {selectedDoctor && (
+                  <span className="inline-flex max-w-[38%] shrink-0 items-center gap-1.5 rounded-full bg-[#00555A]/10 px-2.5 py-1.5 text-xs font-bold text-[#00555A] sm:max-w-none sm:px-3">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span className="truncate">{selectedDoctor.name}</span>
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 p-3 sm:gap-3 sm:p-4 lg:grid-cols-3">
+                {doctors.map((doctor) => (
+                  <button
+                    key={doctor.doctor_id}
+                    type="button"
+                    onClick={() => setSelectedDoctorId(doctor.doctor_id)}
+                    className={`group flex min-h-[132px] flex-col items-start justify-between rounded-xl border p-3 text-left transition-all sm:min-h-[112px] ${
+                      selectedDoctorId === doctor.doctor_id
+                        ? "border-[#00555A] bg-[#00555A] text-white shadow-[0_16px_34px_-24px_rgba(0,85,90,0.9)]"
+                        : "border-[#d8d1c6] bg-white text-slate-800 hover:border-[#00555A]/60 hover:bg-[#f4fbf8]"
+                    }`}
+                  >
+                    <div className="flex w-full items-start justify-between gap-2">
+                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full sm:h-11 sm:w-11 ${
+                        selectedDoctorId === doctor.doctor_id ? "bg-white/18 text-white" : "bg-[#e1f5ee] text-[#00555A]"
+                      }`}>
+                        <Stethoscope className="h-5 w-5 sm:h-5 sm:w-5" />
+                      </div>
+                      {selectedDoctorId === doctor.doctor_id && <CheckCircle2 className="h-4 w-4 shrink-0 text-white/90" />}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="block max-w-full truncate text-sm font-bold">{doctor.name}</span>
+                      <span className={`mt-1 block truncate text-xs font-medium ${
+                        selectedDoctorId === doctor.doctor_id ? "text-white/80" : "text-slate-500"
+                      }`}>
+                        {doctor.specialization || "General Practice"}
+                      </span>
+                      <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold leading-4 ${
+                        selectedDoctorId === doctor.doctor_id ? "bg-white/18 text-white" : "bg-[#00555A]/8 text-[#00555A] group-hover:bg-[#00555A]/12"
+                      }`}>
+                        {selectedDoctorId === doctor.doctor_id ? "Active queue" : "Open queue"}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Time Slots Card */}
           <div className="mb-6 overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-lg">
@@ -639,7 +735,7 @@ const ClinicControlQueue = () => {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {sortedTimeSlots.map(({ slot, originalIndex }) => {
-                    const slotId = originalIndex + 1;
+                    const slotId = slot.slot_id || originalIndex + 1;
                     const isCurrentlyAvailable = isSlotCurrentlyAvailable(slot, originalIndex);
                     const isSlotClosed = slotStatus[originalIndex] === "close";
                     const isExpired = isSlotExpired(slot);

@@ -29,6 +29,14 @@ interface ClinicData {
   longitude?: string | number | null;
   is_active?: boolean;
   available?: boolean;
+  doctors?: DoctorOption[];
+}
+
+interface DoctorOption {
+  doctor_id?: string;
+  name: string;
+  specialization?: string;
+  experience?: string;
 }
 
 interface ClinicSlot {
@@ -52,11 +60,13 @@ interface DisplayClinicSlot extends Omit<ClinicSlot, "is_open" | "is_expired" | 
 
 interface AppointmentSummary {
   clinic_id?: string;
+  doctor_id?: string;
   status?: string;
   date?: string;
   time?: string;
   appointment_token?: string;
   patient_name?: string;
+  patient_email?: string;
   patient_phone?: string;
 }
 
@@ -78,6 +88,7 @@ const ClinicDetails = () => {
   const [patientId, setPatientId] = useState<string>("");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [slotQueueCounts, setSlotQueueCounts] = useState<{[key: number]: number}>({});
+  const [selectedDoctor, setSelectedDoctor] = useState<DoctorOption | null>(null);
   const clinicAddress = [
     clinic?.street_address,
     clinic?.road,
@@ -112,6 +123,7 @@ const ClinicDetails = () => {
         if (response.ok) {
           const data = await response.json();
           setClinic(data);
+          setSelectedDoctor((data.doctors || [])[0] || null);
         } else {
           setMessage({text: "Failed to fetch clinic data", type: "error"});
         }
@@ -206,7 +218,9 @@ const ClinicDetails = () => {
 
   const fetchTimeSlots = async () => {
     try {
-      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${id}`);
+      const params = new URLSearchParams({ clinic_id: id || "" });
+      if (selectedDoctor?.doctor_id) params.set("doctor_id", selectedDoctor.doctor_id);
+      const response = await fetch(`/api/auth/clinic/time-slots?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         // Use slot array from database to determine open/close status
@@ -221,7 +235,7 @@ const ClinicDetails = () => {
 
           return {
             ...slot,
-            slot_id: idx + 1,
+            slot_id: slot.slot_id ?? idx + 1,
             delay_minutes: delayMinutes,
             is_open: slotStatus.is_open,
             is_expired: slotStatus.is_expired,
@@ -245,7 +259,9 @@ const ClinicDetails = () => {
 
   const fetchSlotQueueCounts = async () => {
     try {
-      const response = await fetch(`/api/auth/clinic/slot-queue-counts?clinic_id=${id}`);
+      const params = new URLSearchParams({ clinic_id: id || "" });
+      if (selectedDoctor?.doctor_id) params.set("doctor_id", selectedDoctor.doctor_id);
+      const response = await fetch(`/api/auth/clinic/slot-queue-counts?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         setSlotQueueCounts(data.slot_counts || {});
@@ -324,6 +340,7 @@ const ClinicDetails = () => {
           const appointmentsData = await appointmentsResponse.json();
           const activeBooking = appointmentsData.appointments?.find((apt: AppointmentSummary) =>
             apt.clinic_id === clinicId &&
+            (!selectedDoctor?.doctor_id || apt.doctor_id === selectedDoctor.doctor_id) &&
             apt.status !== "served" &&
             apt.status !== "completed" &&
             apt.status !== "cancelled"
@@ -335,7 +352,7 @@ const ClinicDetails = () => {
             navigate("/confirmation", {
               state: {
                 clinic: clinic.clinic_name,
-                doctor: clinic.doctor_name || "Available Doctor",
+                doctor: selectedDoctor?.name || clinic.doctor_name || "Available Doctor",
                 date: activeBooking.date,
                 time: activeBooking.time,
                 address: clinic.address,
@@ -387,7 +404,8 @@ const ClinicDetails = () => {
         patient_email: user.email || "",
         patient_phone: patientPhone || "",
         clinic_id: clinicId,
-        doctor_name: clinic.doctor_name || "General",
+        doctor_id: selectedDoctor?.doctor_id,
+        doctor_name: selectedDoctor?.name || clinic.doctor_name || "General",
         date: bookingDate,
         time: selectedTime,
         slot_id: selectedSlotId
@@ -407,7 +425,7 @@ const ClinicDetails = () => {
         navigate("/confirmation", {
           state: {
             clinic: clinic.clinic_name,
-            doctor: clinic.doctor_name || "Available Doctor",
+            doctor: selectedDoctor?.name || clinic.doctor_name || "Available Doctor",
             date: bookingDate,
             time: selectedTime,
             address: clinic.address,
@@ -555,29 +573,64 @@ const ClinicDetails = () => {
             )}
 
             <div className="mt-6">
-              <h2 className="text-lg font-semibold text-foreground">Doctor</h2>
-              <div className="mt-3 rounded-xl border border-border bg-card p-4 shadow-sm">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-                    <Stethoscope className="h-6 w-6 text-blue-700" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-foreground">{clinic.doctor_name || "Available Doctor"}</h3>
-                    <p className="text-sm text-muted-foreground">General Practice</p>
-                    <p className={`text-xs ${clinicAcceptingBookings ? "text-green-600" : "text-muted-foreground"}`}>
-                      {clinicAcceptingBookings ? "Available Today" : "Not accepting bookings right now"}
-                    </p>
-                  </div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Doctors</h2>
+                  <p className="text-xs text-muted-foreground">Pick a doctor to see their appointment slots.</p>
                 </div>
-                <div className="mt-4">
-                  <Button
-                    onClick={handleBookClick}
-                    className="w-full bg-[#00555A] hover:bg-[#004455] text-white disabled:opacity-60"
-                  >
-                    <Clock className="h-4 w-4 mr-2" />
-                    {clinicAcceptingBookings ? "Book Appointment" : "Not Available Now"}
-                  </Button>
-                </div>
+                {selectedDoctor && (
+                  <span className="hidden rounded-full bg-[#00555A]/10 px-3 py-1 text-xs font-bold text-[#00555A] sm:inline-flex">
+                    {selectedDoctor.name}
+                  </span>
+                )}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(clinic.doctors?.length ? clinic.doctors : [{ name: clinic.doctor_name || "Available Doctor", specialization: "General Practice" }]).map((doctor) => {
+                  const isSelected = selectedDoctor?.doctor_id
+                    ? selectedDoctor.doctor_id === doctor.doctor_id
+                    : selectedDoctor?.name === doctor.name;
+                  return (
+                    <button
+                      type="button"
+                      key={doctor.doctor_id || doctor.name}
+                      onClick={() => setSelectedDoctor(doctor)}
+                      className={`group min-h-[118px] w-full rounded-xl border p-4 text-left shadow-sm transition-all ${
+                        isSelected ? "border-[#00555A] bg-[#00555A] text-white shadow-[0_16px_34px_-24px_rgba(0,85,90,0.9)]" : "border-border bg-card hover:border-[#00555A]/50 hover:bg-[#f4fbf8]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${
+                          isSelected ? "bg-white/18 text-white" : "bg-[#e1f5ee] text-[#00555A]"
+                        }`}>
+                          <Stethoscope className="h-6 w-6" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className={`truncate font-bold ${isSelected ? "text-white" : "text-foreground"}`}>{doctor.name}</h3>
+                          <p className={`truncate text-sm ${isSelected ? "text-white/75" : "text-muted-foreground"}`}>{doctor.specialization || "General Practice"}</p>
+                          <p className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                            isSelected
+                              ? "bg-white/18 text-white"
+                              : clinicAcceptingBookings
+                                ? "bg-green-100 text-green-700"
+                                : "bg-slate-100 text-muted-foreground"
+                          }`}>
+                            {clinicAcceptingBookings ? "Available Today" : "Not accepting bookings right now"}
+                          </p>
+                        </div>
+                        {isSelected && <CheckCircle2 className="h-5 w-5 shrink-0 text-white" />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-4">
+                <Button
+                  onClick={handleBookClick}
+                  className="w-full bg-[#00555A] hover:bg-[#004455] text-white disabled:opacity-60"
+                >
+                  <Clock className="h-4 w-4 mr-2" />
+                  {clinicAcceptingBookings ? "Book Appointment" : "Not Available Now"}
+                </Button>
               </div>
             </div>
 
@@ -665,7 +718,7 @@ const ClinicDetails = () => {
 
             <div className="mb-6">
               <h3 className="font-semibold text-foreground">{clinic.clinic_name}</h3>
-              <p className="text-sm text-muted-foreground">{clinic.doctor_name || "Available Doctor"}</p>
+              <p className="text-sm text-muted-foreground">{selectedDoctor?.name || clinic.doctor_name || "Available Doctor"}</p>
             </div>
 
             {timeSlots.length > 0 ? (

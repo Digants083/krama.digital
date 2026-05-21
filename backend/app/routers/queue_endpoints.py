@@ -20,6 +20,12 @@ router = APIRouter(prefix="/auth", tags=["queue"])
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 SERVE_UNLOCK_LEAD_MINUTES = 5
 logger = logging.getLogger(__name__)
+DELAY_STATE_KEYS = (
+    "delay_started_at",
+    "delay_ends_at",
+    "delay_original_start_time",
+    "delay_updated_start_time",
+)
 
 
 def _clinic_now() -> datetime:
@@ -82,6 +88,43 @@ def _delay_label(minutes: int) -> Optional[str]:
     return f"{minutes} min"
 
 
+def _delay_clinic_date(slot: dict) -> Optional[str]:
+    for key in ("delay_started_at", "delay_ends_at"):
+        parsed = parse_dt(slot.get(key))
+        if parsed:
+            return parsed.astimezone(CLINIC_TIMEZONE).date().isoformat()
+    return None
+
+
+def _clear_slot_delay_state(slot: dict) -> None:
+    slot["delay_minutes"] = 0
+    for key in DELAY_STATE_KEYS:
+        slot.pop(key, None)
+    if slot.get("status_override") == "delayed":
+        slot.pop("status_override", None)
+
+
+def _delay_for_date(appointment_date: Optional[str], stored_delay: Optional[str], fallback_delay: Optional[str] = None) -> Optional[str]:
+    if appointment_date != _clinic_today_str():
+        return None
+    return stored_delay or fallback_delay
+
+
+def _slot_matches_doctor(slot: dict, doctor_id: Optional[str]) -> bool:
+    if not doctor_id:
+        return True
+    return str(slot.get("doctor_id") or "") == str(doctor_id)
+
+
+def _decorate_slots_with_ids(slots: list[dict], doctor_id: Optional[str] = None) -> list[dict]:
+    decorated = []
+    for index, slot in enumerate(slots or []):
+        if not isinstance(slot, dict) or not _slot_matches_doctor(slot, doctor_id):
+            continue
+        decorated.append({**slot, "slot_id": index + 1, "session_id": index + 1})
+    return decorated
+
+
 def _slot_time_label(value: float) -> str:
     total_minutes = int(round(value * 60)) % (24 * 60)
     hour24 = total_minutes // 60
@@ -134,16 +177,17 @@ async def _clear_stale_slot_delays(record: ClinicTimeSlot, db: AsyncSession) -> 
     for index, delay_minutes in enumerate(slot_delays):
         if index >= len(slots):
             continue
+        delay_date = _delay_clinic_date(slots[index])
+        is_previous_day_delay = delay_minutes > 0 and (
+            (delay_date is not None and delay_date != today)
+            or (delay_date is None and last_change_date is not None and last_change_date != today)
+        )
         time_range = slots[index].get("time_range", [0, 0])
         slot_end = float(time_range[1] if len(time_range) > 1 else 0)
         delay_ends_at = parse_dt(slots[index].get("delay_ends_at"))
-        if delay_minutes > 0 and (should_clear_all or current_decimal >= slot_end):
+        if delay_minutes > 0 and (is_previous_day_delay or should_clear_all or current_decimal >= slot_end):
             slot_delays[index] = 0
-            slots[index]["delay_minutes"] = 0
-            for key in ("delay_started_at", "delay_ends_at", "delay_original_start_time", "delay_updated_start_time"):
-                slots[index].pop(key, None)
-            if slots[index].get("status_override") == "delayed":
-                slots[index].pop("status_override", None)
+            _clear_slot_delay_state(slots[index])
             changed = True
         else:
             slots[index]["delay_minutes"] = delay_minutes
@@ -245,7 +289,7 @@ async def _sync_slot_live_status(clinic_id: str, db: AsyncSession, is_active: bo
     if not record:
         return
 
-    slots = _load_slots(record.slots)
+    slots, _slot_delays = await _clear_stale_slot_delays(record, db)
     slot_status = _load_slot_status(record.slot)
     while len(slot_status) < len(slots):
         slot_status.append("close")
@@ -1383,6 +1427,7 @@ async def push_patient_to_next_slot(
         appointment.id,
         appointment.appointment_token,
         appointment.slot_id,
+        getattr(appointment, "doctor_id", None),
     )
     await publish_queue_event(clinic_id, "queue_updated", {"old_slot_id": current_slot_id, "new_slot_id": next_slot_id})
 
@@ -1587,6 +1632,7 @@ async def get_completed_appointments(
 async def get_queue_history_stats(
     clinic_id: str = Query(..., description="Clinic ID"),
     slot_id: int = Query(None, description="Filter by specific slot ID"),
+    doctor_id: Optional[str] = Query(None, description="Filter by doctor ID"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1606,6 +1652,8 @@ async def get_queue_history_stats(
         # Add slot_id filter if provided
         if slot_id is not None:
             completed_conditions.append(CompletedAppointment.slot_id == slot_id)
+        if doctor_id:
+            completed_conditions.append(CompletedAppointment.doctor_id == doctor_id)
 
         # Every row in completed_appointments is a patient who was already served.
         result = await db.execute(
@@ -1631,6 +1679,9 @@ async def get_queue_history_stats(
         if slot_id is not None:
             skipped_online_conditions.append(Appointment.slot_id == slot_id)
             skipped_walkin_conditions.append(QRAppointment.slot_id == slot_id)
+        if doctor_id:
+            skipped_online_conditions.append(Appointment.doctor_id == doctor_id)
+            skipped_walkin_conditions.append(QRAppointment.doctor_id == doctor_id)
 
         # Skipped patients stay in the active tables with status="skipped".
         result = await db.execute(
@@ -1718,6 +1769,7 @@ async def get_patient_dashboard(
             apt.id,
             apt.appointment_token,
             getattr(apt, "slot_id", None),
+            getattr(apt, "doctor_id", None),
         )
 
         return {
@@ -1827,7 +1879,7 @@ async def join_queue(
     if slot_id is None:
         current_time_decimal = now.hour + now.minute / 60.0
         for idx, slot in enumerate(slots):
-            if _is_slot_available(slot, slot_status, idx):
+            if _is_slot_available(slot, slot_status, idx) and _slot_matches_doctor(slot, payload.doctor_id):
                 start, end = slot.get("time_range", [0, 0])
                 if start <= current_time_decimal < end and not _slot_booking_cutoff_passed(slot, now):
                     slot_id = idx + 1
@@ -1835,7 +1887,7 @@ async def join_queue(
 
         if slot_id is None:
             for idx, slot in enumerate(slots):
-                if _is_slot_available(slot, slot_status, idx) and not _slot_booking_cutoff_passed(slot, now):
+                if _is_slot_available(slot, slot_status, idx) and _slot_matches_doctor(slot, payload.doctor_id) and not _slot_booking_cutoff_passed(slot, now):
                     slot_id = idx + 1
                     break
 
@@ -1853,6 +1905,11 @@ async def join_queue(
         )
 
     selected_slot = slots[slot_index]
+    if not _slot_matches_doctor(selected_slot, payload.doctor_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected slot does not belong to this doctor."
+        )
     if not _is_slot_available(selected_slot, slot_status, slot_index):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1874,7 +1931,8 @@ async def join_queue(
             select(Appointment).where(
                 Appointment.clinic_id == payload.clinic_id,
                 Appointment.date == today,
-                Appointment.slot_id == slot_id
+                Appointment.slot_id == slot_id,
+                Appointment.doctor_id == payload.doctor_id,
             )
         )
         for apt in result.scalars().all():
@@ -1891,7 +1949,8 @@ async def join_queue(
             select(QRAppointment).where(
                 QRAppointment.clinic_id == payload.clinic_id,
                 QRAppointment.date == today,
-                QRAppointment.slot_id == slot_id
+                QRAppointment.slot_id == slot_id,
+                QRAppointment.doctor_id == payload.doctor_id,
             )
         )
         for apt in result.scalars().all():
@@ -1909,6 +1968,7 @@ async def join_queue(
                 CompletedAppointment.clinic_id == payload.clinic_id,
                 CompletedAppointment.date == today,
                 CompletedAppointment.slot_id == slot_id,
+                CompletedAppointment.doctor_id == payload.doctor_id,
             )
         )
         for apt in result.scalars().all():
@@ -1930,7 +1990,8 @@ async def join_queue(
             select(Appointment).where(
                 Appointment.clinic_id == payload.clinic_id,
                 Appointment.date == today,
-                Appointment.slot_id == slot_id
+                Appointment.slot_id == slot_id,
+                Appointment.doctor_id == payload.doctor_id,
             )
         )
         online_count = len(result.scalars().all())
@@ -1939,7 +2000,8 @@ async def join_queue(
             select(QRAppointment).where(
                 QRAppointment.clinic_id == payload.clinic_id,
                 QRAppointment.date == today,
-                QRAppointment.slot_id == slot_id
+                QRAppointment.slot_id == slot_id,
+                QRAppointment.doctor_id == payload.doctor_id,
             )
         )
         qr_count = len(result.scalars().all())
@@ -1972,6 +2034,7 @@ async def join_queue(
         patient_name=payload.patient_name,
         patient_phone=payload.phone,
         doctor_name=payload.doctor_id,
+        doctor_id=payload.doctor_id,
         date=today,
         status="booked",
         slot_id=slot_id,
@@ -1993,6 +2056,7 @@ async def join_queue(
         walkin.id,
         walkin.appointment_token,
         walkin.slot_id,
+        getattr(walkin, "doctor_id", None),
     )
     await publish_queue_event(payload.clinic_id, "queue_updated", {"slot_id": slot_id})
 
@@ -2335,8 +2399,16 @@ async def _lookup_by_phone_impl(phone, db):
         source = item["source"]
         clinic_info = await get_clinic_info(apt.clinic_id)
         slot_name = await get_slot_name(apt.clinic_id, apt.slot_id)
-        doctor_delay = getattr(apt, "doctor_delay", None) or await get_slot_delay(apt.clinic_id, apt.slot_id)
-        delay_meta = await get_slot_delay_meta(apt.clinic_id, apt.slot_id)
+        doctor_delay = _delay_for_date(
+            apt.date,
+            getattr(apt, "doctor_delay", None),
+            await get_slot_delay(apt.clinic_id, apt.slot_id),
+        )
+        delay_meta = (
+            await get_slot_delay_meta(apt.clinic_id, apt.slot_id)
+            if apt.date == _clinic_today_str()
+            else {}
+        )
         metrics = await get_live_queue_metrics(
             db,
             apt.clinic_id,
@@ -2345,6 +2417,7 @@ async def _lookup_by_phone_impl(phone, db):
             apt.id,
             apt.appointment_token,
             apt.slot_id,
+            getattr(apt, "doctor_id", None),
         )
         if not metrics["found"]:
             logger.warning(
@@ -2402,6 +2475,7 @@ async def _lookup_by_phone_impl(phone, db):
 @router.get("/clinic/time-slots")
 async def get_time_slots(
     clinic_id: str = Query(..., description="Clinic ID"),
+    doctor_id: Optional[str] = Query(None, description="Doctor ID"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -2415,7 +2489,7 @@ async def get_time_slots(
 
     if not record:
         # Return empty slots array if no record exists
-        return {"clinic_id": clinic_id, "slots": [], "slot": [], "slot_delays": [], "last_slot_change_date": None}
+        return {"clinic_id": clinic_id, "doctor_id": doctor_id, "slots": [], "slot": [], "slot_delays": [], "last_slot_change_date": None}
 
     slots, slot_delays = await _clear_stale_slot_delays(record, db)
 
@@ -2424,17 +2498,29 @@ async def get_time_slots(
     if isinstance(slot_array, str):
         slot_array = json.loads(slot_array) if slot_array else []
 
+    filtered_slots = _decorate_slots_with_ids(slots or [], doctor_id)
+    filtered_slot_status = [
+        slot_array[(slot.get("slot_id") or 1) - 1] if (slot.get("slot_id") or 1) - 1 < len(slot_array) else "close"
+        for slot in filtered_slots
+    ]
+    filtered_slot_delays = [
+        slot_delays[(slot.get("slot_id") or 1) - 1] if (slot.get("slot_id") or 1) - 1 < len(slot_delays) else 0
+        for slot in filtered_slots
+    ]
+
     return {
         "clinic_id": clinic_id,
-        "slots": slots or [],
-        "slot": slot_array or [],
-        "slot_delays": slot_delays,
+        "doctor_id": doctor_id,
+        "slots": filtered_slots,
+        "slot": filtered_slot_status,
+        "slot_delays": filtered_slot_delays,
         "last_slot_change_date": record.last_slot_change_date.isoformat() if record.last_slot_change_date else None
     }
 
 @router.get("/clinic/slot-queue-counts")
 async def get_slot_queue_counts(
     clinic_id: str = Query(..., description="Clinic ID"),
+    doctor_id: Optional[str] = Query(None, description="Doctor ID"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -2451,7 +2537,8 @@ async def get_slot_queue_counts(
     )
     slot_record = slot_result.scalar_one_or_none()
     slots = _load_slots(slot_record.slots) if slot_record else []
-    slot_counts = {index + 1: 0 for index in range(len(slots))}
+    visible_slot_ids = [slot["slot_id"] for slot in _decorate_slots_with_ids(slots, doctor_id)]
+    slot_counts = {slot_id: 0 for slot_id in visible_slot_ids}
 
     online_result = await db.execute(
         select(Appointment.slot_id, func.count(Appointment.id))
@@ -2460,6 +2547,7 @@ async def get_slot_queue_counts(
             Appointment.date == today,
             Appointment.slot_id.isnot(None),
             Appointment.status.in_(active_statuses),
+            *([Appointment.doctor_id == doctor_id] if doctor_id else []),
         )
         .group_by(Appointment.slot_id)
     )
@@ -2474,6 +2562,7 @@ async def get_slot_queue_counts(
             QRAppointment.date == today,
             QRAppointment.slot_id.isnot(None),
             QRAppointment.status.in_(active_statuses),
+            *([QRAppointment.doctor_id == doctor_id] if doctor_id else []),
         )
         .group_by(QRAppointment.slot_id)
     )
@@ -2483,6 +2572,7 @@ async def get_slot_queue_counts(
 
     return {
         "clinic_id": clinic_id,
+        "doctor_id": doctor_id,
         "date": today,
         "slot_counts": slot_counts,
         "total": sum(slot_counts.values()),
@@ -2499,6 +2589,7 @@ async def add_time_slot(
     Request: {clinic_id, slot_name, time_range: [start, end]}
     """
     clinic_id = request.get("clinic_id")
+    doctor_id = request.get("doctor_id")
     slot_name = request.get("slot_name")
     time_range = request.get("time_range")  # [start_hour, end_hour] e.g., [8, 11]
 
@@ -2516,6 +2607,7 @@ async def add_time_slot(
 
     new_slot = {
         "slot_name": slot_name,
+        "doctor_id": doctor_id,
         "time_range": time_range,
         "is_open": True,
         "delay_minutes": 0
@@ -2538,10 +2630,11 @@ async def add_time_slot(
         if isinstance(current_slots, str):
             current_slots = json.loads(current_slots)
         current_slots = list(current_slots or [])
-        if len(current_slots) >= 3:
+        doctor_slot_count = sum(1 for slot in current_slots if _slot_matches_doctor(slot, doctor_id))
+        if doctor_slot_count >= 3:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Maximum 3 time slots allowed"
+                detail="Maximum 3 time slots allowed per doctor"
             )
         current_slots.append(new_slot)
         record.slots = current_slots
@@ -2568,6 +2661,7 @@ async def add_time_slot(
     return {
         "message": "Time slot added successfully",
         "clinic_id": clinic_id,
+        "doctor_id": doctor_id,
         "slots": record.slots,
         "slot": record.slot,
         "slot_delays": record.slot_delays,
@@ -2654,6 +2748,9 @@ async def update_time_slot(
             slots[slot_index]["is_open"] = new_value.lower() == "true"
         else:
             slots[slot_index]["is_open"] = bool(new_value)
+
+    if "doctor_id" in request:
+        slots[slot_index]["doctor_id"] = request.get("doctor_id")
 
     if "delay_minutes" in request:
         delay_minutes = _delay_minutes(request["delay_minutes"])

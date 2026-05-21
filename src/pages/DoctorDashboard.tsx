@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRightCircle, Clock, Megaphone, RefreshCw, Users } from "lucide-react";
+import { ArrowLeft, ArrowRightCircle, CheckCircle2, Clock, Megaphone, RefreshCw, Stethoscope, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueue } from "@/context/QueueContext";
 import { apiUrl } from "@/lib/api";
@@ -73,6 +73,12 @@ interface DoctorSessionSlot {
 interface SessionsResponse {
   sessions: DoctorSessionSlot[];
   active_session_id: number | null;
+}
+
+interface DoctorOption {
+  doctor_id: string;
+  name: string;
+  specialization?: string;
 }
 
 interface QueueDisplayState {
@@ -302,6 +308,9 @@ export default function KramaDoctorDashboard() {
   } = useQueue();
 
   const [clinicId, setClinicId] = useState("");
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [selectedDoctorId, setSelectedDoctorId] = useState("");
+  const [hasChosenDoctor, setHasChosenDoctor] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [selectedToken, setSelectedToken] = useState<string | null>(null);
   const [isSendingDelay, setIsSendingDelay] = useState(false);
@@ -328,7 +337,20 @@ export default function KramaDoctorDashboard() {
     setClinicId(storedClinicId);
   }, []);
 
-  const fetchTodaySessions = useCallback(async (clinic: string, keepSelection = true, showLoading = true) => {
+  const fetchDoctors = useCallback(async (clinic: string) => {
+    if (!clinic) return;
+    try {
+      const response = await fetch(apiUrl(`/api/auth/clinic/doctors?clinic_id=${encodeURIComponent(clinic)}`));
+      if (!response.ok) return;
+      const data = await response.json();
+      const nextDoctors = data.doctors || [];
+      setDoctors(nextDoctors);
+    } catch {
+      setDoctors([]);
+    }
+  }, []);
+
+  const fetchTodaySessions = useCallback(async (clinic: string, keepSelection = true, showLoading = true, doctorId?: string) => {
     if (!clinic) return;
 
     sessionsAbortRef.current?.abort();
@@ -338,7 +360,8 @@ export default function KramaDoctorDashboard() {
     try {
       if (showLoading) setSessionsLoading(true);
       setSessionsError(null);
-      const response = await fetch(apiUrl(`/api/sessions/today/${encodeURIComponent(clinic)}`), { signal: controller.signal });
+      const suffix = doctorId ? `?doctor_id=${encodeURIComponent(doctorId)}` : "";
+      const response = await fetch(apiUrl(`/api/sessions/today/${encodeURIComponent(clinic)}${suffix}`), { signal: controller.signal });
       if (!response.ok) throw new Error("Failed to load sessions");
       const data: SessionsResponse = await response.json();
       const nextSessions = data.sessions || [];
@@ -357,9 +380,15 @@ export default function KramaDoctorDashboard() {
 
   useEffect(() => {
     if (clinicId) {
-      fetchTodaySessions(clinicId);
+      fetchDoctors(clinicId);
     }
-  }, [clinicId, fetchTodaySessions]);
+  }, [clinicId, fetchDoctors]);
+
+  useEffect(() => {
+    if (clinicId && hasChosenDoctor && selectedDoctorId) {
+      fetchTodaySessions(clinicId, false, true, selectedDoctorId);
+    }
+  }, [clinicId, hasChosenDoctor, selectedDoctorId, fetchTodaySessions]);
 
   const activeSessionId = selectedSessionId ?? viewingSlotId ?? sessions.find((session) => session.is_active)?.session_id ?? sessions[0]?.session_id ?? null;
   const activeSession = sessions.find((session) => session.session_id === activeSessionId) || null;
@@ -373,7 +402,7 @@ export default function KramaDoctorDashboard() {
     if (showOverlay) setIsSessionSwitching(true);
 
     try {
-      const snapshot = await fetchQueueForClinic(clinicId, sessionId);
+      const snapshot = await fetchQueueForClinic(clinicId, sessionId, undefined, selectedDoctorId || undefined);
       if (requestId !== queueRequestRef.current) return;
 
       if (snapshot) {
@@ -400,7 +429,7 @@ export default function KramaDoctorDashboard() {
         setIsSessionSwitching(false);
       }
     }
-  }, [clinicId, fetchQueueForClinic]);
+  }, [clinicId, fetchQueueForClinic, selectedDoctorId]);
 
   useEffect(() => {
     if (!isSessionSwitching) return;
@@ -436,25 +465,25 @@ export default function KramaDoctorDashboard() {
   }, [activeSessionId, completedCount, currentServing, isSessionSwitching, queue, skippedCount, viewingSlotId]);
 
   useEffect(() => {
-    if (!clinicId) return;
+    if (!clinicId || !hasChosenDoctor || !selectedDoctorId) return;
 
     const interval = window.setInterval(() => {
-      fetchTodaySessions(clinicId, true, false);
+      fetchTodaySessions(clinicId, true, false, selectedDoctorId);
       if (activeSessionId != null) {
         loadSessionQueue(activeSessionId, false);
       }
     }, 10000);
 
     return () => window.clearInterval(interval);
-  }, [clinicId, activeSessionId, fetchTodaySessions, loadSessionQueue]);
+  }, [clinicId, activeSessionId, fetchTodaySessions, hasChosenDoctor, loadSessionQueue, selectedDoctorId]);
 
   useQueueRealtime(clinicId, useCallback(() => {
-    if (!clinicId) return;
-    fetchTodaySessions(clinicId, true, false);
+    if (!clinicId || !hasChosenDoctor || !selectedDoctorId) return;
+    fetchTodaySessions(clinicId, true, false, selectedDoctorId);
     if (activeSessionId != null) {
       loadSessionQueue(activeSessionId, false);
     }
-  }, [activeSessionId, clinicId, fetchTodaySessions, loadSessionQueue]));
+  }, [activeSessionId, clinicId, fetchTodaySessions, hasChosenDoctor, loadSessionQueue, selectedDoctorId]));
 
   const displayQueue = displayQueueState?.queue ?? queue;
   const displayCurrentServing = displayQueueState?.currentServing ?? currentServing;
@@ -600,7 +629,7 @@ export default function KramaDoctorDashboard() {
 
   const refreshQueue = useCallback(() => {
     if (clinicId) {
-      fetchTodaySessions(clinicId, true, false);
+      fetchTodaySessions(clinicId, true, false, selectedDoctorId);
       if (activeSessionId != null) loadSessionQueue(activeSessionId, false);
     }
   }, [activeSessionId, clinicId, fetchTodaySessions, loadSessionQueue]);
@@ -634,7 +663,7 @@ export default function KramaDoctorDashboard() {
       await finishCurrentPatient();
       setMessage({ text: "Patient marked as served.", type: "success" });
       setSelectedToken(null);
-      await fetchTodaySessions(clinicId, true, false);
+      await fetchTodaySessions(clinicId, true, false, selectedDoctorId);
       if (activeSessionId != null) {
         await loadSessionQueue(activeSessionId, false);
       }
@@ -750,16 +779,98 @@ export default function KramaDoctorDashboard() {
       });
       if (!response.ok) throw new Error("Failed to cancel delay");
       setMessage({ text: "Delay cancelled and queue restored.", type: "success" });
-      await fetchTodaySessions(clinicId, true, false);
+      await fetchTodaySessions(clinicId, true, false, selectedDoctorId);
       refreshQueue();
     } catch (error) {
       setMessage({ text: error instanceof Error ? error.message : "Failed to cancel delay", type: "error" });
-      fetchTodaySessions(clinicId, true, false);
+      fetchTodaySessions(clinicId, true, false, selectedDoctorId);
     } finally {
       setIsSessionSwitching(false);
       setIsSendingDelay(false);
     }
   };
+
+  const selectedDoctor = doctors.find((doctor) => doctor.doctor_id === selectedDoctorId) || null;
+  const chooseDoctor = (doctor: DoctorOption) => {
+    setSelectedToken(null);
+    setSelectedSessionId(null);
+    setSessions([]);
+    setDisplayQueueState(null);
+    queueCacheRef.current = {};
+    setSelectedDoctorId(doctor.doctor_id);
+    setHasChosenDoctor(true);
+  };
+
+  if (!hasChosenDoctor) {
+    return (
+      <div className="min-h-screen bg-[#f5f3ee] text-[#1f2522]">
+        {message && (
+          <div className={`fixed right-5 top-5 z-50 rounded-full px-4 py-2 text-sm shadow-lg ${message.type === "success" ? "bg-[#1a5c4a] text-white" : "bg-red-600 text-white"}`}>
+            {message.text}
+          </div>
+        )}
+
+        <header className="border-b border-[#e6ded3] bg-[#fbfaf7]">
+          <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-4 md:px-8">
+            <Link to="/clinic" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7]" aria-label="Back to clinic dashboard">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <div className="min-w-0">
+              <p className="truncate text-lg font-semibold text-[#202825]">Doctor Dashboard</p>
+              <p className="mt-1 truncate text-xs text-[#77756f]">{clinicId || "No clinic selected"}</p>
+            </div>
+          </div>
+        </header>
+
+        <main className="mx-auto max-w-4xl px-4 py-8 md:px-8">
+          <div className="overflow-hidden rounded-2xl border border-[#d9eadf] bg-[#fbfaf7] shadow-sm">
+            <div className="border-b border-[#e6ded3] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] p-5 md:p-7">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#dff4ea] text-[#1a5c4a]">
+                  <Stethoscope className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-[#202825]">Who are you?</p>
+                  <p className="mt-2 text-sm text-[#77756f]">Choose your doctor profile to open only your sessions and queue.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 md:p-7">
+              {doctors.length === 0 ? (
+                <div className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">
+                  Loading doctors...
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  {doctors.map((doctor) => (
+                    <button
+                      key={doctor.doctor_id}
+                      type="button"
+                      onClick={() => chooseDoctor(doctor)}
+                      className="group flex min-h-[132px] flex-col items-start justify-between rounded-xl border border-[#d8d1c6] bg-white p-3 text-left transition-all hover:border-[#1a5c4a] hover:bg-[#f4fbf8] hover:shadow-[0_18px_36px_-28px_rgba(26,92,74,0.75)] sm:min-h-[116px] sm:p-4"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#e1f5ee] text-[#1a5c4a] sm:h-12 sm:w-12">
+                        <Stethoscope className="h-5 w-5 sm:h-6 sm:w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-[#202825] sm:text-base">{doctor.name}</p>
+                        <p className="mt-1 truncate text-xs text-[#58645f] sm:text-sm">{doctor.specialization || "General Practice"}</p>
+                        <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#1a5c4a]/10 px-2 py-1 text-[11px] font-bold text-[#1a5c4a] sm:mt-3 sm:gap-1.5 sm:px-2.5 sm:text-xs">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span>Open</span>
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f5f3ee] text-[#1f2522]">
@@ -777,7 +888,7 @@ export default function KramaDoctorDashboard() {
             </Link>
             <div className="min-w-0">
               <p className="truncate text-base font-semibold text-[#202825] sm:text-lg">Doctor Dashboard</p>
-              <p className="mt-0.5 truncate text-xs text-[#77756f] sm:mt-1">{clinicId || "No clinic selected"}{activeSession ? ` - ${activeSession.session_name}` : ""}</p>
+              <p className="mt-0.5 truncate text-xs text-[#77756f] sm:mt-1">{selectedDoctor?.name || clinicId || "No clinic selected"}{activeSession ? ` - ${activeSession.session_name}` : ""}</p>
             </div>
           </div>
 

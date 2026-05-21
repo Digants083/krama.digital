@@ -38,8 +38,8 @@ const AdminLogin = () => {
       return;
     }
 
-    if (username !== "admin1" && username !== "admin2") {
-      setError("Invalid username. Use admin1 or admin2");
+    if (username !== "admin1") {
+      setError("Invalid username. Use admin1");
       return;
     }
 
@@ -161,12 +161,12 @@ const AdminLogin = () => {
                 <Input
                   id="username"
                   type="text"
-                  placeholder="Enter admin1 or admin2"
+                  placeholder="Enter admin1"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
                 />
-                <p className="text-xs text-muted-foreground">Available usernames: admin1, admin2</p>
+                <p className="text-xs text-muted-foreground">Available username: admin1</p>
               </div>
 
               <Button type="submit" className="w-full" disabled={sendingOtp}>

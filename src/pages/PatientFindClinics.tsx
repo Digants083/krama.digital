@@ -25,7 +25,7 @@ type ClinicApiResponse = {
   city: string;
   pincode?: string | null;
   phone: string;
-  doctors?: { name: string }[];
+  doctors?: { doctor_id?: string; name: string; specialization?: string }[];
   specializations?: string[];
   is_active?: boolean;
   available?: boolean;

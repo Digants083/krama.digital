@@ -26,7 +26,7 @@ from app.database.db import get_db
 
 from app.database.models import (
 
-    Clinic, Patient, OTPVerification, Appointment, CompletedAppointment,
+    Clinic, Patient, OTPVerification, Appointment, CompletedAppointment, Doctor,
 
     Review, ReviewReaction, ClinicImage, QRAppointment, PendingClinicRegistration,
 
@@ -127,6 +127,93 @@ def _delay_label(minutes: int) -> Optional[str]:
     return f"{minutes} min"
 
 
+def _delay_clinic_date(slot: dict) -> Optional[str]:
+    for key in ("delay_started_at", "delay_ends_at"):
+        parsed = parse_dt(slot.get(key))
+        if parsed:
+            return parsed.astimezone(CLINIC_TIMEZONE).date().isoformat()
+    return None
+
+
+def _delay_for_date(appointment_date: Optional[str], stored_delay: Optional[str], fallback_delay: Optional[str] = None) -> Optional[str]:
+    if appointment_date != _clinic_today_str():
+        return None
+    return stored_delay or fallback_delay
+
+
+def _make_doctor_id(clinic_id: str) -> str:
+    return f"{clinic_id}-D{uuid.uuid4().hex[:8].upper()}"
+
+
+def _doctor_payload(doctor: Doctor) -> dict:
+    return {
+        "id": doctor.id,
+        "doctor_id": doctor.doctor_id,
+        "clinic_id": doctor.clinic_id,
+        "name": doctor.name,
+        "specialization": doctor.specialization or "",
+        "experience": doctor.experience or "",
+        "qualifications": doctor.qualifications or "",
+        "available": doctor.available,
+    }
+
+
+def _normalize_doctor_payloads(raw_doctors, fallback: Optional[dict] = None) -> list[dict]:
+    doctors = []
+    for raw in raw_doctors or []:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("doctor_name") or "").strip()
+        if not name:
+            continue
+        doctors.append({
+            "name": name,
+            "specialization": str(raw.get("specialization") or "").strip(),
+            "experience": str(raw.get("experience") or "").strip(),
+            "qualifications": str(raw.get("qualifications") or "").strip(),
+        })
+
+    if not doctors and fallback:
+        name = str(fallback.get("doctor_name") or fallback.get("name") or "").strip()
+        if name:
+            doctors.append({
+                "name": name,
+                "specialization": str(fallback.get("specialization") or "").strip(),
+                "experience": str(fallback.get("experience") or "").strip(),
+                "qualifications": str(fallback.get("qualifications") or "").strip(),
+            })
+    return doctors
+
+
+def _slot_matches_doctor(slot: dict, doctor_id: Optional[str]) -> bool:
+    if not doctor_id:
+        return True
+    return str(slot.get("doctor_id") or "") == str(doctor_id)
+
+
+async def _ensure_default_doctor(db: AsyncSession, clinic: Clinic) -> Doctor:
+    result = await db.execute(
+        select(Doctor).where(Doctor.clinic_id == clinic.clinic_id).order_by(Doctor.id)
+    )
+    doctor = result.scalars().first()
+    if doctor:
+        return doctor
+
+    doctor = Doctor(
+        doctor_id=_make_doctor_id(clinic.clinic_id),
+        clinic_id=clinic.clinic_id,
+        name=clinic.doctor_name or "Available Doctor",
+        specialization=clinic.specialization or "",
+        experience=clinic.experience or "",
+        qualifications=clinic.qualifications or "",
+        available=True,
+    )
+    db.add(doctor)
+    await db.commit()
+    await db.refresh(doctor)
+    return doctor
+
+
 def _format_hour_decimal(value: float) -> str:
     total_minutes = int(round(value * 60)) % (24 * 60)
     hour24 = total_minutes // 60
@@ -136,8 +223,10 @@ def _format_hour_decimal(value: float) -> str:
     return f"{hour12}:{minute:02d} {suffix}"
 
 
-async def _slot_delay_info(db: AsyncSession, clinic_id: str, slot_id: Optional[int]) -> dict:
+async def _slot_delay_info(db: AsyncSession, clinic_id: str, slot_id: Optional[int], booking_date: Optional[str] = None) -> dict:
     if not slot_id:
+        return {"minutes": 0, "label": None, "delayed_start_time": None}
+    if booking_date and booking_date != _clinic_today_str():
         return {"minutes": 0, "label": None, "delayed_start_time": None}
     try:
         slot_result = await db.execute(select(ClinicTimeSlot).where(ClinicTimeSlot.clinic_id == clinic_id))
@@ -153,6 +242,17 @@ async def _slot_delay_info(db: AsyncSession, clinic_id: str, slot_id: Optional[i
         slot_delays = _load_slot_delays(getattr(slot_record, "slot_delays", []), slots)
         slot = slots[slot_index]
         minutes = slot_delays[slot_index] if slot_index < len(slot_delays) else 0
+        delay_date = _delay_clinic_date(slot)
+        last_change = getattr(slot_record, "last_slot_change_date", None)
+        if last_change and last_change.tzinfo is None:
+            last_change = last_change.replace(tzinfo=timezone.utc)
+        last_change_date = last_change.astimezone(CLINIC_TIMEZONE).date().isoformat() if last_change else None
+        today = _clinic_today_str()
+        if minutes > 0 and (
+            (delay_date is not None and delay_date != today)
+            or (delay_date is None and last_change_date is not None and last_change_date != today)
+        ):
+            minutes = 0
         time_range = slot.get("time_range", [])
         if minutes > 0 and isinstance(time_range, list) and len(time_range) > 1:
             now = datetime.now(CLINIC_TIMEZONE)
@@ -524,6 +624,15 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
 
 
         # Create pending registration with all address components and doctor details
+        doctors = _normalize_doctor_payloads(
+            clinic_data.doctors,
+            {
+                "doctor_name": clinic_data.doctor_name,
+                "specialization": clinic_data.specialization,
+                "experience": clinic_data.experience,
+                "qualifications": clinic_data.qualifications,
+            },
+        )
 
         new_pending_registration = PendingClinicRegistration(
 
@@ -568,6 +677,7 @@ async def clinic_signup(clinic_data: ClinicSignup, db: AsyncSession = Depends(ge
             experience=clinic_data.experience,
 
             qualifications=clinic_data.qualifications,
+            doctors=doctors,
 
             status="pending"
 
@@ -666,6 +776,7 @@ class ClinicSignupOTPRequest(BaseModel):
     experience: Optional[str] = None
 
     qualifications: Optional[str] = None
+    doctors: Optional[list[dict]] = None
 
     latitude: Optional[str] = None
 
@@ -712,6 +823,7 @@ class ClinicVerifySignupRequest(BaseModel):
     experience: Optional[str] = None
 
     qualifications: Optional[str] = None
+    doctors: Optional[list[dict]] = None
 
     latitude: Optional[str] = None
 
@@ -1054,6 +1166,15 @@ async def clinic_verify_signup(
 
 
         # Create pending registration
+        doctors = _normalize_doctor_payloads(
+            request.doctors,
+            {
+                "doctor_name": request.doctor_name,
+                "specialization": request.specialization,
+                "experience": request.experience,
+                "qualifications": request.qualifications,
+            },
+        )
 
         new_pending_registration = PendingClinicRegistration(
 
@@ -1096,6 +1217,7 @@ async def clinic_verify_signup(
             experience=request.experience,
 
             qualifications=request.qualifications,
+            doctors=doctors,
 
             status="pending"
 
@@ -1547,6 +1669,14 @@ async def get_clinic_data(
 
         )
 
+    default_doctor = await _ensure_default_doctor(db, clinic)
+    doctors_result = await db.execute(
+        select(Doctor).where(Doctor.clinic_id == clinic_id).order_by(Doctor.id)
+    )
+    doctors = [_doctor_payload(doctor) for doctor in doctors_result.scalars().all()]
+    if not doctors:
+        doctors = [_doctor_payload(default_doctor)]
+
 
 
     # Return clinic data (excluding password)
@@ -1592,6 +1722,7 @@ async def get_clinic_data(
         "image_urls": clinic.image_urls or [],
 
         "doctor_name": clinic.doctor_name,
+        "doctors": doctors,
 
         "is_active": clinic.is_active,
 
@@ -1616,6 +1747,65 @@ async def get_clinic_data(
         ])) or clinic.address or ""
 
     }
+
+
+@router.get("/clinic/doctors")
+async def get_clinic_doctors(
+    clinic_id: str = Query(..., description="Clinic ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+    await _ensure_default_doctor(db, clinic)
+    doctors_result = await db.execute(select(Doctor).where(Doctor.clinic_id == clinic_id).order_by(Doctor.id))
+    return {"clinic_id": clinic_id, "doctors": [_doctor_payload(doctor) for doctor in doctors_result.scalars().all()]}
+
+
+@router.post("/clinic/doctors")
+async def add_clinic_doctor(request: dict, db: AsyncSession = Depends(get_db)):
+    clinic_id = request.get("clinic_id")
+    name = str(request.get("name") or request.get("doctor_name") or "").strip()
+    if not clinic_id or not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="clinic_id and doctor name are required")
+
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+
+    doctor = Doctor(
+        doctor_id=_make_doctor_id(clinic_id),
+        clinic_id=clinic_id,
+        name=name,
+        specialization=str(request.get("specialization") or "").strip(),
+        experience=str(request.get("experience") or "").strip(),
+        qualifications=str(request.get("qualifications") or "").strip(),
+        available=bool(request.get("available", True)),
+    )
+    db.add(doctor)
+    await db.commit()
+    await db.refresh(doctor)
+    return {"message": "Doctor added", "doctor": _doctor_payload(doctor)}
+
+
+@router.put("/clinic/doctors/{doctor_id}")
+async def update_clinic_doctor(doctor_id: str, request: dict, db: AsyncSession = Depends(get_db)):
+    clinic_id = request.get("clinic_id")
+    result = await db.execute(select(Doctor).where(Doctor.doctor_id == doctor_id))
+    doctor = result.scalar_one_or_none()
+    if not doctor or (clinic_id and doctor.clinic_id != clinic_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
+
+    for key in ("name", "specialization", "experience", "qualifications"):
+        if key in request:
+            setattr(doctor, key, str(request.get(key) or "").strip())
+    if "available" in request:
+        doctor.available = bool(request.get("available"))
+    await db.commit()
+    await db.refresh(doctor)
+    return {"message": "Doctor updated", "doctor": _doctor_payload(doctor)}
 
 
 
@@ -1688,21 +1878,11 @@ async def list_clinics(db: AsyncSession = Depends(get_db)):
 
 
 
-        # Build doctors array from actual doctor_name
-
-        doctors = []
-
-        if clinic.doctor_name:
-
-            doctors.append({
-
-                "name": clinic.doctor_name,
-
-                "specialization": clinic.specialization or "",
-
-                "experience": clinic.experience or ""
-
-            })
+        await _ensure_default_doctor(db, clinic)
+        doctors_result = await db.execute(
+            select(Doctor).where(Doctor.clinic_id == clinic.clinic_id).order_by(Doctor.id)
+        )
+        doctors = [_doctor_payload(doctor) for doctor in doctors_result.scalars().all()]
 
 
 
@@ -3737,6 +3917,8 @@ async def create_appointment(
 
         patient_phone = request.get("patient_phone", "")
 
+        doctor_id = request.get("doctor_id")
+
         doctor_name = request.get("doctor_name", "")
 
         date = request.get("date")
@@ -3778,6 +3960,17 @@ async def create_appointment(
                 detail="Clinic not found"
 
             )
+
+        if not doctor_id:
+            default_doctor = await _ensure_default_doctor(db, clinic)
+            doctor_id = default_doctor.doctor_id
+            doctor_name = doctor_name or default_doctor.name
+        elif not doctor_name:
+            doctor_result = await db.execute(
+                select(Doctor).where(Doctor.clinic_id == clinic_id, Doctor.doctor_id == doctor_id)
+            )
+            doctor = doctor_result.scalar_one_or_none()
+            doctor_name = doctor.name if doctor else doctor_id
 
         if not clinic.is_active or clinic.available is False:
 
@@ -3830,6 +4023,11 @@ async def create_appointment(
                 )
 
             selected_slot = slots[slot_index]
+            if not _slot_matches_doctor(selected_slot, doctor_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected slot does not belong to this doctor"
+                )
 
             if not _is_slot_available(selected_slot, slot_status, slot_index):
 
@@ -3895,7 +4093,9 @@ async def create_appointment(
 
                 Appointment.patient_email == patient_email,
 
-                Appointment.date == date
+                Appointment.date == date,
+
+                Appointment.doctor_id == doctor_id
 
             )
 
@@ -3911,7 +4111,7 @@ async def create_appointment(
 
                 status_code=status.HTTP_400_BAD_REQUEST,
 
-                detail="You already have an appointment booked for this clinic on this date"
+                detail="You already have an appointment booked for this doctor on this date"
 
             )
 
@@ -3930,6 +4130,9 @@ async def create_appointment(
         if slot_id is not None:
             active_filters.append(Appointment.slot_id == slot_id)
             walkin_filters.append(QRAppointment.slot_id == slot_id)
+        if doctor_id:
+            active_filters.append(Appointment.doctor_id == doctor_id)
+            walkin_filters.append(QRAppointment.doctor_id == doctor_id)
 
         result = await db.execute(select(Appointment).where(*active_filters))
         active_online = len(result.scalars().all())
@@ -3953,7 +4156,9 @@ async def create_appointment(
 
                 Appointment.date == date,
 
-                Appointment.slot_id == slot_id
+                Appointment.slot_id == slot_id,
+
+                Appointment.doctor_id == doctor_id
 
             )
 
@@ -3985,7 +4190,9 @@ async def create_appointment(
 
                 QRAppointment.date == date,
 
-                QRAppointment.slot_id == slot_id
+                QRAppointment.slot_id == slot_id,
+
+                QRAppointment.doctor_id == doctor_id
 
             )
 
@@ -4019,6 +4226,8 @@ async def create_appointment(
 
                 CompletedAppointment.slot_id == slot_id,
 
+                CompletedAppointment.doctor_id == doctor_id,
+
             )
 
         )
@@ -4050,7 +4259,7 @@ async def create_appointment(
         # Calculate queue position
 
         queue_position = active_online + active_walkin + 1
-        slot_delay = await _slot_delay_info(db, clinic_id, slot_id)
+        slot_delay = await _slot_delay_info(db, clinic_id, slot_id, date)
 
 
 
@@ -4069,6 +4278,8 @@ async def create_appointment(
             patient_phone=patient_phone or "Not provided",
 
             doctor_name=doctor_name,
+
+            doctor_id=doctor_id,
 
             date=date,
 
@@ -4102,6 +4313,7 @@ async def create_appointment(
             new_appointment.id,
             new_appointment.appointment_token,
             new_appointment.slot_id,
+            new_appointment.doctor_id,
         )
 
         await publish_queue_event(clinic_id, "queue_updated", {"slot_id": new_appointment.slot_id})
@@ -4226,8 +4438,9 @@ async def get_clinic_appointments(
             "patient_email": apt.patient_email,
             "patient_phone": apt.patient_phone,
             "blood_group": patient.blood_group if patient and patient.blood_group else "N/A",
-            "doctor_delay": apt.doctor_delay,
+            "doctor_delay": _delay_for_date(apt.date, apt.doctor_delay),
             "doctor_name": apt.doctor_name,
+            "doctor_id": getattr(apt, "doctor_id", None),
             "date": apt.date,
             "time": apt.time,
             "status": apt.status,
@@ -4369,7 +4582,7 @@ async def get_patient_appointments_by_email(
                         session_time = str(time_range)
 
             metrics = None
-            slot_delay = await _slot_delay_info(db, apt.clinic_id, getattr(apt, "slot_id", None))
+            slot_delay = await _slot_delay_info(db, apt.clinic_id, getattr(apt, "slot_id", None), getattr(apt, "date", None))
             if apt.date == _clinic_today_str() and apt.status in ["booked", "pending", "serving"]:
                 metrics = await get_live_queue_metrics(
                     db,
@@ -4379,6 +4592,7 @@ async def get_patient_appointments_by_email(
                     apt.id,
                     apt.appointment_token,
                     getattr(apt, "slot_id", None),
+                    getattr(apt, "doctor_id", None),
                 )
 
             appointment_list.append({
@@ -4410,6 +4624,7 @@ async def get_patient_appointments_by_email(
                 "patient_phone": apt.patient_phone,
 
                 "doctor_name": apt.doctor_name,
+                "doctor_id": getattr(apt, "doctor_id", None),
 
                 "date": apt.date,
 
@@ -4439,7 +4654,7 @@ async def get_patient_appointments_by_email(
 
                 "doctor_delay_minutes": metrics["doctor_delay_minutes"] if metrics and metrics["found"] else 0,
 
-                "doctor_delay": apt.doctor_delay or slot_delay["label"],
+                "doctor_delay": _delay_for_date(apt.date, apt.doctor_delay, slot_delay["label"]),
 
                 "delay_minutes": slot_delay["minutes"],
 
@@ -4498,6 +4713,7 @@ async def get_clinic_appointments(
             "blood_group": patient.blood_group if patient and patient.blood_group else "N/A",
             "doctor_delay": apt.doctor_delay,
             "doctor_name": apt.doctor_name,
+            "doctor_id": getattr(apt, "doctor_id", None),
             "date": apt.date,
             "time": apt.time,
             "status": apt.status,
@@ -4512,6 +4728,8 @@ async def get_today_appointments(
     clinic_id: str = Query(..., description="Clinic ID"),
 
     slot_id: Optional[int] = Query(None, description="Optional slot ID to view"),
+
+    doctor_id: Optional[str] = Query(None, description="Optional doctor ID to view"),
 
     db: AsyncSession = Depends(get_db)
 
@@ -4569,7 +4787,7 @@ async def get_today_appointments(
 
         for idx, slot in enumerate(slots or []):
 
-            if not slot.get("is_open"):
+            if not slot.get("is_open") or not _slot_matches_doctor(slot, doctor_id):
 
                 continue
 
@@ -4591,7 +4809,7 @@ async def get_today_appointments(
 
         for idx, slot in enumerate(slots or []):
 
-            if not slot.get("is_open"):
+            if not slot.get("is_open") or not _slot_matches_doctor(slot, doctor_id):
 
                 continue
 
@@ -4627,7 +4845,9 @@ async def get_today_appointments(
 
                 Appointment.date == today,
 
-                Appointment.slot_id.isnot(None)
+                Appointment.slot_id.isnot(None),
+
+                *([Appointment.doctor_id == doctor_id] if doctor_id else [])
 
             )
 
@@ -4643,7 +4863,9 @@ async def get_today_appointments(
 
                 QRAppointment.date == today,
 
-                QRAppointment.slot_id.isnot(None)
+                QRAppointment.slot_id.isnot(None),
+
+                *([QRAppointment.doctor_id == doctor_id] if doctor_id else [])
 
             )
 
@@ -4657,7 +4879,7 @@ async def get_today_appointments(
 
             slot_id_for_index = idx + 1
 
-            if slot_id_for_index not in active_slot_ids or not slot.get("is_open"):
+            if slot_id_for_index not in active_slot_ids or not slot.get("is_open") or not _slot_matches_doctor(slot, doctor_id):
 
                 continue
 
@@ -4762,7 +4984,9 @@ async def get_today_appointments(
 
             Appointment.date == today,
 
-            Appointment.slot_id == viewing_slot_id
+            Appointment.slot_id == viewing_slot_id,
+
+            *([Appointment.doctor_id == doctor_id] if doctor_id else [])
 
         ).order_by(Appointment.queue_position)
 
@@ -4782,7 +5006,9 @@ async def get_today_appointments(
 
             QRAppointment.date == today,
 
-            QRAppointment.slot_id == viewing_slot_id
+            QRAppointment.slot_id == viewing_slot_id,
+
+            *([QRAppointment.doctor_id == doctor_id] if doctor_id else [])
 
         ).order_by(QRAppointment.queue_position)
 
@@ -4833,6 +5059,7 @@ async def get_today_appointments(
             "doctor_delay": apt.doctor_delay,
 
             "doctor_name": apt.doctor_name,
+            "doctor_id": getattr(apt, "doctor_id", None),
 
             "date": apt.date,
 
@@ -4932,6 +5159,7 @@ async def get_today_appointments(
             item.get("id"),
             item.get("token"),
             viewing_slot_id,
+            doctor_id,
         )
         item["estimated_wait_minutes"] = metrics["estimated_wait_minutes"]
         item["latest_estimated_wait_minutes"] = metrics["latest_estimated_wait_minutes"]
@@ -5130,6 +5358,7 @@ async def get_queue_position(
         current_appointment.id,
         current_appointment.appointment_token,
         current_appointment.slot_id,
+        getattr(current_appointment, "doctor_id", None),
     )
 
     if not metrics["found"]:
@@ -5142,8 +5371,12 @@ async def get_queue_position(
 
         )
 
-    slot_delay = await _slot_delay_info(db, clinic_id, getattr(current_appointment, "slot_id", None))
-    doctor_delay = getattr(current_appointment, "doctor_delay", None) or slot_delay["label"]
+    slot_delay = await _slot_delay_info(db, clinic_id, getattr(current_appointment, "slot_id", None), getattr(current_appointment, "date", None))
+    doctor_delay = _delay_for_date(
+        getattr(current_appointment, "date", None),
+        getattr(current_appointment, "doctor_delay", None),
+        slot_delay["label"],
+    )
 
     return {
 
@@ -6145,6 +6378,7 @@ async def create_token(
         new_appointment.id,
         new_appointment.appointment_token,
         new_appointment.slot_id,
+        getattr(new_appointment, "doctor_id", None),
     )
 
     await publish_queue_event(clinic_id, "queue_updated", {"slot_id": new_appointment.slot_id})

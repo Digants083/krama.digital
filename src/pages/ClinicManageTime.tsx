@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 
-import { ArrowLeft, Clock, Save, Plus, Trash2, Users } from "lucide-react";
+import { ArrowLeft, Clock, Save, Plus, Trash2, Stethoscope, CheckCircle2 } from "lucide-react";
 import { formatTimeRange } from "@/lib/timeFormat";
 
 
@@ -16,7 +16,15 @@ interface Slot {
   time_range: number[];  // [start_hour, end_hour] e.g., [8, 11]
 
   is_open: boolean;
+  slot_id?: number;
+  doctor_id?: string;
 
+}
+
+interface DoctorOption {
+  doctor_id: string;
+  name: string;
+  specialization?: string;
 }
 
 
@@ -45,6 +53,10 @@ const ClinicManageTime = () => {
   const [saved, setSaved] = useState(false);
 
   const [showAddForm, setShowAddForm] = useState(false);
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [selectedDoctorId, setSelectedDoctorId] = useState("");
+  const [hasChosenDoctor, setHasChosenDoctor] = useState(false);
+  const [loadingDoctors, setLoadingDoctors] = useState(true);
 
   
 
@@ -63,6 +75,24 @@ const ClinicManageTime = () => {
 
   const clinicId = localStorage.getItem("clinic_id");
 
+  const fetchDoctors = async () => {
+    if (!clinicId) {
+      setLoadingDoctors(false);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/auth/clinic/doctors?clinic_id=${encodeURIComponent(clinicId)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const nextDoctors = data.doctors || [];
+      setDoctors(nextDoctors);
+    } catch (error) {
+      console.error("Error fetching doctors:", error);
+    } finally {
+      setLoadingDoctors(false);
+    }
+  };
+
   const sortedSlots = slots
     .map((slot, originalIndex) => ({ slot, originalIndex }))
     .sort((a, b) => {
@@ -75,13 +105,16 @@ const ClinicManageTime = () => {
 
   const fetchTimeSlots = async () => {
 
-    if (!clinicId) return;
+    if (!clinicId || !selectedDoctorId) return;
 
     
 
     try {
+      setLoading(true);
 
-      const response = await fetch(`/api/auth/clinic/time-slots?clinic_id=${clinicId}`);
+      const params = new URLSearchParams({ clinic_id: clinicId });
+      if (selectedDoctorId) params.set("doctor_id", selectedDoctorId);
+      const response = await fetch(`/api/auth/clinic/time-slots?${params.toString()}`);
 
       if (response.ok) {
 
@@ -116,9 +149,15 @@ const ClinicManageTime = () => {
 
   useEffect(() => {
 
-    fetchTimeSlots();
+    fetchDoctors();
 
   }, [clinicId]);
+
+  useEffect(() => {
+    if (hasChosenDoctor && selectedDoctorId) {
+      fetchTimeSlots();
+    }
+  }, [hasChosenDoctor, selectedDoctorId]);
 
 
 
@@ -129,7 +168,7 @@ const ClinicManageTime = () => {
 
   const addTimeSlot = async () => {
 
-    if (!clinicId) return;
+    if (!clinicId || !selectedDoctorId) return;
 
     if (slots.length >= MAX_SLOTS) return;
 
@@ -167,6 +206,7 @@ const ClinicManageTime = () => {
         body: JSON.stringify({
 
           clinic_id: clinicId,
+          doctor_id: selectedDoctorId,
 
           slot_name: newSlot.slot_name,
 
@@ -208,6 +248,8 @@ const ClinicManageTime = () => {
 
   const deleteTimeSlot = async (slotIndex: number) => {
 
+    if (!clinicId || !selectedDoctorId) return;
+
     if (!confirm("Are you sure you want to delete this time slot?")) return;
 
     
@@ -240,6 +282,8 @@ const ClinicManageTime = () => {
 
   const toggleSlotStatus = async (slotIndex: number, isOpen: boolean) => {
 
+    if (!clinicId || !selectedDoctorId) return;
+
     try {
 
       console.log(`Setting slot ${slotIndex} to ${isOpen ? 'open' : 'close'}`);
@@ -253,6 +297,7 @@ const ClinicManageTime = () => {
         body: JSON.stringify({ 
 
           clinic_id: clinicId, 
+          doctor_id: selectedDoctorId,
 
           is_open: isOpen,
 
@@ -288,6 +333,85 @@ const ClinicManageTime = () => {
 
 
 
+  const selectedDoctor = doctors.find((doctor) => doctor.doctor_id === selectedDoctorId) || null;
+
+  const chooseDoctor = (doctor: DoctorOption) => {
+    setSelectedDoctorId(doctor.doctor_id);
+    setHasChosenDoctor(true);
+    setSlots([]);
+    setShowAddForm(false);
+    setLoading(true);
+  };
+
+  if (!hasChosenDoctor) {
+    return (
+      <div className="min-h-screen bg-[#f5f3ee] text-[#1f2522]">
+        <header className="border-b border-[#e6ded3] bg-[#fbfaf7]">
+          <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-4 md:px-8">
+            <Link to="/clinic" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7]" aria-label="Back to clinic dashboard">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <div className="min-w-0">
+              <p className="truncate text-lg font-semibold text-[#202825]">Manage Time Slots</p>
+              <p className="mt-1 truncate text-xs text-[#77756f]">{clinicId || "No clinic selected"}</p>
+            </div>
+          </div>
+        </header>
+
+        <main className="mx-auto max-w-4xl px-4 py-8 md:px-8">
+          <div className="overflow-hidden rounded-2xl border border-[#d9eadf] bg-[#fbfaf7] shadow-sm">
+            <div className="border-b border-[#e6ded3] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] p-5 md:p-7">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#dff4ea] text-[#1a5c4a]">
+                  <Clock className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-[#202825]">Who is managing time?</p>
+                  <p className="mt-2 text-sm text-[#77756f]">Choose a doctor profile to add, open, or close only that doctor's slots.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 md:p-7">
+              {loadingDoctors ? (
+                <div className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">
+                  Loading doctors...
+                </div>
+              ) : doctors.length === 0 ? (
+                <div className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">
+                  No doctors found. Add a doctor from clinic profile first.
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  {doctors.map((doctor) => (
+                    <button
+                      key={doctor.doctor_id}
+                      type="button"
+                      onClick={() => chooseDoctor(doctor)}
+                      className="group flex min-h-[132px] flex-col items-start justify-between rounded-xl border border-[#d8d1c6] bg-white p-3 text-left transition-all hover:border-[#1a5c4a] hover:bg-[#f4fbf8] hover:shadow-[0_18px_36px_-28px_rgba(26,92,74,0.75)] sm:min-h-[116px] sm:p-4"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#e1f5ee] text-[#1a5c4a] sm:h-12 sm:w-12">
+                        <Stethoscope className="h-5 w-5 sm:h-6 sm:w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-[#202825] sm:text-base">{doctor.name}</p>
+                        <p className="mt-1 truncate text-xs text-[#58645f] sm:text-sm">{doctor.specialization || "General Practice"}</p>
+                        <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#1a5c4a]/10 px-2 py-1 text-[11px] font-bold text-[#1a5c4a] sm:mt-3 sm:gap-1.5 sm:px-2.5 sm:text-xs">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>Slots</span>
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
 
     <div className="min-h-screen bg-[#f5f3ee]">
@@ -308,7 +432,7 @@ const ClinicManageTime = () => {
 
               <h1 className="text-xl font-bold text-slate-800">Manage Time Slots</h1>
 
-              <p className="text-xs text-slate-500">Set your clinic's operating hours</p>
+              <p className="text-xs text-slate-500">{selectedDoctor?.name || "Selected doctor"} time slots</p>
 
             </div>
 
@@ -318,7 +442,7 @@ const ClinicManageTime = () => {
 
             onClick={() => setShowAddForm(true)}
 
-            disabled={slots.length >= MAX_SLOTS}
+            disabled={slots.length >= MAX_SLOTS || !selectedDoctorId}
 
             className="bg-[#00555A] hover:bg-[#00494F] text-white px-5 py-2 rounded-lg font-medium shadow-md hover:shadow-lg transition-all"
 
@@ -337,6 +461,23 @@ const ClinicManageTime = () => {
 
 
       <main className="mx-auto max-w-4xl px-4 py-8">
+        <div className="mb-6 rounded-2xl border border-[#d9eadf] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e1f5ee] text-[#1a5c4a]">
+                <Stethoscope className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-900">{selectedDoctor?.name || "Selected doctor"}</p>
+                <p className="truncate text-xs text-slate-500">{selectedDoctor?.specialization || "General Practice"}</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#1a5c4a]/10 px-3 py-1.5 text-xs font-bold text-[#1a5c4a]">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Editing slots
+            </span>
+          </div>
+        </div>
 
         {/* Add New Slot Form */}
 
@@ -690,7 +831,7 @@ const ClinicManageTime = () => {
 
                         title={slot.is_open ? 'Close slot' : 'Open slot'}
 
-                        onClick={() => toggleSlotStatus(originalIndex, !slot.is_open)}
+                        onClick={() => toggleSlotStatus((slot.slot_id || originalIndex + 1) - 1, !slot.is_open)}
 
                         className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all shadow-sm hover:shadow-md ${
 
@@ -712,7 +853,7 @@ const ClinicManageTime = () => {
 
                         title="Delete slot"
 
-                        onClick={() => deleteTimeSlot(originalIndex)}
+                        onClick={() => deleteTimeSlot((slot.slot_id || originalIndex + 1) - 1)}
 
                         className="p-2.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
 
