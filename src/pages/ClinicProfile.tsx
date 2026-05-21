@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import { ArrowLeft, Phone, Lock, Trash2, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, MapPinned, CheckCircle, XCircle } from "lucide-react";
+import { ArrowLeft, Phone, Lock, Trash2, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, CheckCircle, XCircle, UserPlus, Stethoscope } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 
 const getPasswordChecks = (password: string) => ({
   length: password.length >= 8,
@@ -50,7 +49,6 @@ const ClinicProfile = () => {
   const [city, setCity] = useState("");
   const [pincode, setPincode] = useState("");
   const [locationCoords, setLocationCoords] = useState<{ latitude: string; longitude: string } | null>(null);
-  const [locating, setLocating] = useState(false);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -68,9 +66,10 @@ const ClinicProfile = () => {
   const [passwordVerified, setPasswordVerified] = useState(false);
   const [pendingAction, setPendingAction] = useState<"phone" | "password" | "password_forgot" | "delete" | "address" | null>(null);
   const [showQrDialog, setShowQrDialog] = useState(false);
-  const [showLocationModal, setShowLocationModal] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotPasswordOtpVerified, setForgotPasswordOtpVerified] = useState(false);
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [newDoctor, setNewDoctor] = useState({ name: "", specialization: "", experience: "", qualifications: "" });
 
   const passwordChecks = getPasswordChecks(newPassword);
   const isNewPasswordStrong = Object.values(passwordChecks).every(Boolean);
@@ -111,10 +110,7 @@ const ClinicProfile = () => {
               : null
           );
           setImageUrls(data.image_urls || []);
-          // Auto-show location modal if coordinates are missing
-          if (!data.latitude || !data.longitude) {
-            setShowLocationModal(true);
-          }
+          setDoctors(data.doctors || []);
         } else {
           setMessage({ text: "Failed to fetch clinic data", type: "error" });
         }
@@ -146,6 +142,31 @@ const ClinicProfile = () => {
         : null
     );
     setImageUrls(data.image_urls || []);
+    setDoctors(data.doctors || []);
+  };
+
+  const addDoctor = async () => {
+    if (!loggedInClinicId || !newDoctor.name.trim()) {
+      setMessage({ text: "Doctor name is required", type: "error" });
+      return;
+    }
+    try {
+      const response = await fetch("/api/auth/clinic/doctors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clinic_id: loggedInClinicId, ...newDoctor }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setMessage({ text: data.detail || "Failed to add doctor", type: "error" });
+        return;
+      }
+      setNewDoctor({ name: "", specialization: "", experience: "", qualifications: "" });
+      setMessage({ text: "Doctor added", type: "success" });
+      await refreshClinicProfile();
+    } catch {
+      setMessage({ text: "Network error. Please try again.", type: "error" });
+    }
   };
 
   const verifyCurrentPassword = async () => {
@@ -370,11 +391,10 @@ const ClinicProfile = () => {
       if (response.ok) {
         if (verifiedOtpCode) {
           setMessage({
-            text: "Address updated. Please pin your clinic on the map again.",
+            text: "Address updated. Set the exact map pin from the clinic dashboard.",
             type: "success"
           });
           setLocationCoords(null);
-          setShowLocationModal(true);
         } else {
           setMessage({ text: "Profile updated successfully!", type: "success" });
         }
@@ -389,74 +409,6 @@ const ClinicProfile = () => {
       setMessage({ text: "Network error. Please try again.", type: "error" });
       return false;
     }
-  };
-
-  const handleSaveLocation = async (lat: string, lng: string, savedAddress: string) => {
-    if (!loggedInClinicId) return;
-
-    try {
-      const response = await fetch("/api/auth/clinic/update-location", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clinic_id: loggedInClinicId,
-          latitude: lat,
-          longitude: lng,
-          address: savedAddress || dbProfile?.address,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMessage({
-          text: "Location coordinates saved successfully!",
-          type: "success"
-        });
-        // Refresh clinic data
-        const dataResponse = await fetch(`/api/auth/clinic/data?clinic_id=${loggedInClinicId}`);
-        if (dataResponse.ok) {
-          const clinicData = await dataResponse.json();
-          setDbProfile(clinicData);
-          setLocationCoords(
-            clinicData.latitude && clinicData.longitude
-              ? { latitude: clinicData.latitude, longitude: clinicData.longitude }
-              : null
-          );
-        }
-      } else {
-        const error = await response.json();
-        setMessage({ text: error.detail || "Failed to save location", type: "error" });
-      }
-    } catch (error) {
-      setMessage({ text: "Network error. Please try again.", type: "error" });
-    }
-  };
-
-  const handleUseCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setMessage({ text: "Geolocation is not supported on this device.", type: "error" });
-      return;
-    }
-
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude.toFixed(7);
-        const lng = position.coords.longitude.toFixed(7);
-        // Directly save the coordinates
-        void handleSaveLocation(lat, lng, dbProfile?.address || "");
-        setLocating(false);
-      },
-      () => {
-        setMessage({ text: "Unable to fetch current location. Please allow location access.", type: "error" });
-        setLocating(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 0,
-      }
-    );
   };
 
   const handleVerifiedAction = async () => {
@@ -778,6 +730,36 @@ const ClinicProfile = () => {
         </section>
 
         <section className="mt-4 grid grid-cols-2 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-12 lg:gap-6">
+          <div className="col-span-2 lg:col-span-12">
+            <ProfileCard icon={UserPlus} title="Doctors" description="Add and manage doctors for this clinic">
+              {doctors.length > 0 && (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {doctors.map((doctor) => (
+                    <div key={doctor.doctor_id || doctor.name} className="rounded-xl border border-[#e6ded3] bg-white/60 p-3">
+                      <div className="flex items-center gap-2">
+                        <Stethoscope className="h-4 w-4 text-primary" />
+                        <p className="font-semibold text-foreground">{doctor.name}</p>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{doctor.specialization || "General"}</p>
+                      {doctor.experience && <p className="mt-1 text-xs text-muted-foreground">{doctor.experience} years experience</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Input placeholder="Doctor name" value={newDoctor.name} onChange={(e) => setNewDoctor({ ...newDoctor, name: e.target.value })} />
+                <Input placeholder="Specialization" value={newDoctor.specialization} onChange={(e) => setNewDoctor({ ...newDoctor, specialization: e.target.value })} />
+                <Input placeholder="Experience" value={newDoctor.experience} onChange={(e) => setNewDoctor({ ...newDoctor, experience: e.target.value })} />
+                <Input placeholder="Qualifications" value={newDoctor.qualifications} onChange={(e) => setNewDoctor({ ...newDoctor, qualifications: e.target.value })} />
+              </div>
+              <Button onClick={() => void addDoctor()} className="w-full sm:w-auto">
+                <UserPlus className="mr-2 h-4 w-4" />
+                Add Doctor
+              </Button>
+            </ProfileCard>
+          </div>
+
           <div className="col-span-2 sm:col-span-1 lg:col-span-4">
             <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
               <div className="flex gap-2">
@@ -1176,12 +1158,6 @@ const ClinicProfile = () => {
         </DialogContent>
       </Dialog>
 
-      <LocationPickerModal
-        isOpen={showLocationModal}
-        onClose={() => setShowLocationModal(false)}
-        onSave={handleSaveLocation}
-        clinicAddress={dbProfile?.full_formatted_address || dbProfile?.address || ""}
-      />
     </div>
   );
 };

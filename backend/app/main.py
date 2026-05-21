@@ -446,6 +446,24 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE otp_verifications ADD COLUMN IF NOT EXISTS user_blood_group VARCHAR")
 
         await safe_exec("""
+            CREATE TABLE IF NOT EXISTS doctors (
+                id SERIAL PRIMARY KEY,
+                doctor_id VARCHAR UNIQUE NOT NULL,
+                clinic_id VARCHAR NOT NULL,
+                name VARCHAR NOT NULL,
+                specialization VARCHAR,
+                experience VARCHAR,
+                qualifications VARCHAR,
+                available BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctors_clinic_id ON doctors(clinic_id)")
+        await safe_exec("CREATE INDEX IF NOT EXISTS idx_doctors_doctor_id ON doctors(doctor_id)")
+        await safe_exec("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS doctor_id VARCHAR")
+        await safe_exec("ALTER TABLE qr_appointments ADD COLUMN IF NOT EXISTS doctor_id VARCHAR")
+
+        await safe_exec("""
             CREATE TABLE IF NOT EXISTS doctor_sessions (
                 id SERIAL PRIMARY KEY,
                 clinic_id VARCHAR NOT NULL,
@@ -527,6 +545,7 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE pending_clinic_registrations ADD COLUMN IF NOT EXISTS specialization VARCHAR")
         await safe_exec("ALTER TABLE pending_clinic_registrations ADD COLUMN IF NOT EXISTS experience VARCHAR")
         await safe_exec("ALTER TABLE pending_clinic_registrations ADD COLUMN IF NOT EXISTS qualifications VARCHAR")
+        await safe_exec("ALTER TABLE pending_clinic_registrations ADD COLUMN IF NOT EXISTS doctors JSON DEFAULT '[]'")
 
         await safe_exec("ALTER TABLE pending_clinic_registrations DROP COLUMN IF EXISTS admin_notes")
         await safe_exec("ALTER TABLE pending_clinic_registrations DROP COLUMN IF EXISTS approved_at")
@@ -545,6 +564,7 @@ async def lifespan(app: FastAPI):
         await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS specialization VARCHAR")
         await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS experience VARCHAR")
         await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS qualifications VARCHAR")
+        await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS doctors JSON DEFAULT '[]'")
         await safe_exec("ALTER TABLE rejected_clinics ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR")
         await safe_exec("ALTER TABLE rejected_clinics DROP COLUMN IF EXISTS rejected_by")
 
@@ -639,7 +659,7 @@ async def lifespan(app: FastAPI):
                         "confirmation_email": admin.confirmation_email,
                     },
                 )
-            logger.info("Created admin accounts: admin1 and admin2")
+            logger.info("Created admin accounts: %s", ", ".join(admin.username for admin in admin_seeds()))
 
         await ensure_required_schema(conn)
 

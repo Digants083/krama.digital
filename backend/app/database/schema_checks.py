@@ -13,6 +13,7 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "last_email_sent_at": "TIMESTAMP",
         "patient_email": "VARCHAR DEFAULT ''",
         "doctor_name": "VARCHAR",
+        "doctor_id": "VARCHAR",
         "source": "VARCHAR DEFAULT 'online'",
         "slot_id": "INTEGER",
         "push_count": "INTEGER DEFAULT 0",
@@ -21,6 +22,7 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
     },
     "qr_appointments": {
         "doctor_name": "VARCHAR",
+        "doctor_id": "VARCHAR",
         "slot_id": "INTEGER",
         "queue_position": "INTEGER",
         "serving_started_at": "TIMESTAMP",
@@ -48,6 +50,16 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "last_toggle_date": "TIMESTAMP",
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    },
+    "doctors": {
+        "doctor_id": "VARCHAR",
+        "clinic_id": "VARCHAR",
+        "name": "VARCHAR",
+        "specialization": "VARCHAR",
+        "experience": "VARCHAR",
+        "qualifications": "VARCHAR",
+        "available": "BOOLEAN DEFAULT TRUE",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     },
     "doctor_sessions": {
         "clinic_id": "VARCHAR",
@@ -91,6 +103,12 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "is_active": "BOOLEAN DEFAULT FALSE",
         "manual_stop_date": "VARCHAR",
     },
+    "pending_clinic_registrations": {
+        "doctors": "JSON DEFAULT '[]'",
+    },
+    "rejected_clinics": {
+        "doctors": "JSON DEFAULT '[]'",
+    },
     "reports": {
         "report_pdf": "VARCHAR",
         "report_pdf_filename": "VARCHAR",
@@ -110,6 +128,7 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
 
 EXPECTED_RELATED_TABLES = [
     "clinics",
+    "doctors",
     "appointments",
     "qr_appointments",
     "completed_appointments",
@@ -133,6 +152,10 @@ REQUIRED_INDEXES: Dict[str, str] = {
         "CREATE INDEX IF NOT EXISTS idx_appointments_session_id "
         "ON appointments(session_id)"
     ),
+    "idx_appointments_doctor_id": (
+        "CREATE INDEX IF NOT EXISTS idx_appointments_doctor_id "
+        "ON appointments(doctor_id)"
+    ),
     "idx_qr_appointments_queue_eta": (
         "CREATE INDEX IF NOT EXISTS idx_qr_appointments_queue_eta "
         "ON qr_appointments(clinic_id, date, slot_id, status, queue_position)"
@@ -144,6 +167,14 @@ REQUIRED_INDEXES: Dict[str, str] = {
     "idx_qr_appointments_session_id": (
         "CREATE INDEX IF NOT EXISTS idx_qr_appointments_session_id "
         "ON qr_appointments(session_id)"
+    ),
+    "idx_qr_appointments_doctor_id": (
+        "CREATE INDEX IF NOT EXISTS idx_qr_appointments_doctor_id "
+        "ON qr_appointments(doctor_id)"
+    ),
+    "idx_doctors_clinic_id": (
+        "CREATE INDEX IF NOT EXISTS idx_doctors_clinic_id "
+        "ON doctors(clinic_id)"
     ),
     "idx_completed_appointments_eta_history": (
         "CREATE INDEX IF NOT EXISTS idx_completed_appointments_eta_history "

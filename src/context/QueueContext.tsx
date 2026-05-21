@@ -21,6 +21,7 @@ type QueueItem = {
   session_status?: string | null;
   source: "online" | "desk" | "walkin" | "skipped";
   clinic_id: string;
+  doctor_id?: string;
   appointment_id?: number;
   queue_position?: number;
   slot_id?: number;
@@ -56,6 +57,7 @@ type CurrentServing = {
   session_status?: string | null;
   appointmentId?: number;
   clinicId?: string;
+  doctor_id?: string;
   source?: "online" | "desk" | "walkin" | "skipped";
 };
 
@@ -81,6 +83,7 @@ type QueueAppointment = {
   session_status?: string | null;
   source?: string;
   clinic_id?: string;
+  doctor_id?: string;
   queue_position?: number;
   slot_id?: number;
   status?: string;
@@ -136,7 +139,7 @@ type QueueContextType = {
   completePatient: () => Promise<void>;
   skipPatient: () => Promise<void>;
   fetchQueueStats: (clinicId: string) => void;
-  fetchQueueForClinic: (clinicId: string, slotId?: number | null, preserveStartTime?: Date) => Promise<QueueSnapshot | null>;
+  fetchQueueForClinic: (clinicId: string, slotId?: number | null, preserveStartTime?: Date, doctorId?: string | null) => Promise<QueueSnapshot | null>;
   addWalkinToQueue: (payload: WalkinPayload) => Promise<WalkinResult>;
   addPatient: (name: string, source: "online" | "desk") => void;
   resetQueue: () => void;
@@ -164,13 +167,16 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
   const [viewingSlotId, setViewingSlotId] = useState<number | null>(null);
   const latestQueueRequest = useRef(0);
 
-  const fetchQueueForClinic = useCallback(async (clinicId: string, slotId?: number | null, preserveStartTime?: Date): Promise<QueueSnapshot | null> => {
+  const fetchQueueForClinic = useCallback(async (clinicId: string, slotId?: number | null, preserveStartTime?: Date, doctorId?: string | null): Promise<QueueSnapshot | null> => {
     const requestId = ++latestQueueRequest.current;
 
     try {
       const params = new URLSearchParams({ clinic_id: clinicId });
       if (typeof slotId === "number") {
         params.set("slot_id", String(slotId));
+      }
+      if (doctorId) {
+        params.set("doctor_id", doctorId);
       }
 
       const response = await fetch(`${API_BASE}/auth/appointments/today?${params.toString()}`);
@@ -205,6 +211,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         session_status: apt.session_status,
         source: apt.source === "walkin" ? "walkin" : "online",
         clinic_id: apt.clinic_id || clinicId,
+        doctor_id: apt.doctor_id,
         appointment_id: apt.id,
         queue_position: apt.queue_position,
         slot_id: apt.slot_id,
@@ -234,6 +241,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             startTime: preserveStartTime || (servingAppointment.serving_started_at ? new Date(servingAppointment.serving_started_at) : null),
             appointmentId: servingAppointment.id,
             clinicId: servingAppointment.clinic_id,
+            doctor_id: servingAppointment.doctor_id,
             source: servingAppointment.source === "walkin" ? "walkin" : "online",
           }
         : null;
@@ -244,7 +252,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
       let nextCompletedCount = 0;
       let nextSkippedCount = 0;
-      const statsResponse = await fetch(`${API_BASE}/auth/queue/history/stats?clinic_id=${clinicId}${typeof slotId === "number" ? `&slot_id=${slotId}` : ""}`);
+      const statsResponse = await fetch(`${API_BASE}/auth/queue/history/stats?clinic_id=${clinicId}${typeof slotId === "number" ? `&slot_id=${slotId}` : ""}${doctorId ? `&doctor_id=${encodeURIComponent(doctorId)}` : ""}`);
       if (statsResponse.ok) {
         const statsData = await statsResponse.json();
         nextCompletedCount = statsData.total_patients_served || 0;
@@ -397,6 +405,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
             startTime: startTimeNow, // Start timer NOW when clicking Next
             appointmentId: patient.appointment_id,
             clinicId: patient.clinic_id,
+            doctor_id: patient.doctor_id,
             source: patient.source,
           });
 
@@ -405,7 +414,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
           // Refresh queue data but preserve the start time we just set
           setTimeout(() => {
-            fetchQueueForClinic(patient.clinic_id, viewingSlotId, startTimeNow);
+            fetchQueueForClinic(patient.clinic_id, viewingSlotId, startTimeNow, patient.doctor_id);
           }, 500);
         }
       } catch (error) {
@@ -428,7 +437,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
-          await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId);
+          await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId, undefined, currentServing.doctor_id);
         }
       } catch (error) {
         console.error("Error completing patient:", error);
@@ -452,7 +461,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (response.ok) {
           // Preserve the current start time when refreshing
-          await fetchQueueForClinic(patient.clinic_id, viewingSlotId, currentServing?.startTime);
+          await fetchQueueForClinic(patient.clinic_id, viewingSlotId, currentServing?.startTime, patient.doctor_id);
         }
       } catch (error) {
         console.error("Error skipping patient:", error);

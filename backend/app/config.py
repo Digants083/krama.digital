@@ -40,13 +40,8 @@ def admin_seeds() -> list[AdminSeed]:
     return [
         AdminSeed(
             username="admin1",
-            email=_env("ADMIN1_EMAIL", _env("FROM_EMAIL")),
-            confirmation_email=_env("ADMIN1_CONFIRMATION_EMAIL", _env("ADMIN1_EMAIL", _env("FROM_EMAIL"))),
-        ),
-        AdminSeed(
-            username="admin2",
-            email=_env("ADMIN2_EMAIL", _env("FROM_EMAIL")),
-            confirmation_email=_env("ADMIN2_CONFIRMATION_EMAIL", _env("ADMIN2_EMAIL", _env("FROM_EMAIL"))),
+            email=_env("ADMIN1_EMAIL", "diganths083@gmail.com"),
+            confirmation_email=_env("ADMIN1_CONFIRMATION_EMAIL", "digitalkrama@gmail.com"),
         ),
     ]
 

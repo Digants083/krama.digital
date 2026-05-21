@@ -3,7 +3,9 @@ from typing import Optional, List
 
 class DoctorInfo(BaseModel):
     name: str
-    specialization: str
+    specialization: Optional[str] = None
+    experience: Optional[str] = None
+    qualifications: Optional[str] = None
 
 class ClinicSignup(BaseModel):
     clinic_name: str
@@ -27,6 +29,7 @@ class ClinicSignup(BaseModel):
     specialization: Optional[str] = ""  # Specialization
     experience: Optional[str] = ""  # Years of experience
     qualifications: Optional[str] = ""  # Qualifications (MBBS, MD, etc.)
+    doctors: Optional[List[DoctorInfo]] = None
 
 class ClinicLogin(BaseModel):
     email: str

@@ -26,6 +26,15 @@ const Requirement = ({ met, label }: { met: boolean; label: string }) => (
   </div>
 );
 
+const readApiMessage = async (response: Response, fallback: string) => {
+  try {
+    const data = await response.json();
+    return data?.detail || data?.message || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 // Clinic categories with icons
 const clinicCategories = [
   { id: "general", name: "General", icon: Building2, description: "General health, fever, cold" },
@@ -71,6 +80,9 @@ const ClinicSignup = () => {
     experience: "",
     qualifications: ""
   });
+  const [doctors, setDoctors] = useState([
+    { name: "", specialization: "", experience: "", qualifications: "" },
+  ]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
@@ -99,7 +111,30 @@ const ClinicSignup = () => {
     setPasswordValid(validatePassword(form.password));
   }, [form.password]);
 
-  const update = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const update = (k: string, v: string) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    if (["doctor_name", "specialization", "experience", "qualifications"].includes(k)) {
+      const mapKey = k === "doctor_name" ? "name" : k;
+      setDoctors((current) => current.map((doctor, index) => index === 0 ? { ...doctor, [mapKey]: v } : doctor));
+    }
+  };
+  const updateDoctor = (index: number, key: string, value: string) => {
+    setDoctors((current) => current.map((doctor, doctorIndex) => doctorIndex === index ? { ...doctor, [key]: value } : doctor));
+    if (index === 0) {
+      const formKey = key === "name" ? "doctor_name" : key;
+      setForm((current) => ({ ...current, [formKey]: value }));
+    }
+  };
+  const addDoctor = () => setDoctors((current) => [...current, { name: "", specialization: "", experience: "", qualifications: "" }]);
+  const removeDoctor = (index: number) => setDoctors((current) => current.filter((_, doctorIndex) => doctorIndex !== index));
+  const cleanDoctors = () => doctors
+    .map((doctor) => ({
+      name: doctor.name.trim(),
+      specialization: doctor.specialization.trim(),
+      experience: doctor.experience.trim(),
+      qualifications: doctor.qualifications.trim(),
+    }))
+    .filter((doctor) => doctor.name);
   const toggleCategory = (categoryId: string) => {
     setForm((f) => {
       const alreadySelected = f.categories.includes(categoryId);
@@ -114,8 +149,9 @@ const ClinicSignup = () => {
 
   // Send OTP to email
   const handleSendOTP = async () => {
-    if (!form.doctor_name) {
-      setError("Please enter doctor name");
+    const doctorPayload = cleanDoctors();
+    if (doctorPayload.length === 0) {
+      setError("Please add at least one doctor");
       return;
     }
 
@@ -143,6 +179,7 @@ const ClinicSignup = () => {
     setError("");
     setOtpLoading(true);
 
+    const email = form.email.trim().toLowerCase();
     const fullAddress = [
       form.address, form.road, form.layout, form.section, form.city, form.pincode
     ].filter(Boolean).join(", ");
@@ -152,7 +189,7 @@ const ClinicSignup = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: form.email,
+          email,
           clinic_name: form.clinic_name,
           password: form.password,
           phone: form.phone,
@@ -167,22 +204,27 @@ const ClinicSignup = () => {
           doctor_name: form.doctor_name,
           specialization: form.specialization,
           experience: form.experience,
-          qualifications: form.qualifications
+          qualifications: form.qualifications,
+          doctors: doctorPayload
         }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        setError(data.detail || "Failed to send OTP");
+        setError(await readApiMessage(response, "Failed to send OTP"));
         return;
       }
 
+      await response.json().catch(() => null);
       setOtpSent(true);
       setShowOTPInput(true);
-      setMessage({ text: "OTP sent to your email!", type: "success" });
+      setForm((current) => ({ ...current, email }));
+      setMessage({ text: "OTP sent to your email. Please check inbox or spam.", type: "success" });
     } catch (err: any) {
-      setError(err.message || "Network error");
+      setError(
+        err?.message?.includes("Failed to fetch")
+          ? "Could not reach the signup server. Please make sure the backend is running and try again."
+          : err?.message || "Network error while sending OTP"
+      );
     } finally {
       setOtpLoading(false);
     }
@@ -198,6 +240,7 @@ const ClinicSignup = () => {
     setLoading(true);
     setError("");
 
+    const email = form.email.trim().toLowerCase();
     const fullAddress = [
       form.address, form.road, form.layout, form.section, form.city, form.pincode
     ].filter(Boolean).join(", ");
@@ -207,7 +250,7 @@ const ClinicSignup = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: form.email,
+          email,
           otp: otp,
           clinic_name: form.clinic_name,
           password: form.password,
@@ -223,17 +266,17 @@ const ClinicSignup = () => {
           doctor_name: form.doctor_name,
           specialization: form.specialization,
           experience: form.experience,
-          qualifications: form.qualifications
+          qualifications: form.qualifications,
+          doctors: cleanDoctors()
         }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        setError(data.detail || "Verification failed");
+        setError(await readApiMessage(response, "Verification failed"));
         return;
       }
 
+      await response.json().catch(() => null);
       navigate("/clinic/register/success", { 
         state: { 
           data: {
@@ -520,61 +563,57 @@ const ClinicSignup = () => {
             ) : (
               <>
                 {/* Step 2: Doctor Details */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="doctor_name">Doctor Name *</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="doctor_name"
-                      placeholder="Dr. John Smith"
-                      value={form.doctor_name}
-                      onChange={(e) => update("doctor_name", e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
+                <div className="space-y-4">
+                  {doctors.map((doctor, index) => (
+                    <div key={index} className="space-y-3 rounded-xl border border-border p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold">Doctor {index + 1}</p>
+                        {index > 0 && (
+                          <button type="button" onClick={() => removeDoctor(index)} className="rounded-full p-1 text-muted-foreground hover:bg-muted" aria-label="Remove doctor">
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="specialization">Specialization</Label>
-                  <div className="relative">
-                    <Stethoscope className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="specialization"
-                      placeholder="Cardiologist, Dermatologist, etc."
-                      value={form.specialization}
-                      onChange={(e) => update("specialization", e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
+                      <div className="space-y-1.5">
+                        <Label>Doctor Name *</Label>
+                        <div className="relative">
+                          <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input placeholder="Dr. John Smith" value={doctor.name} onChange={(e) => updateDoctor(index, "name", e.target.value)} className="pl-9" />
+                        </div>
+                      </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="experience">Years of Experience</Label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="experience"
-                      type="number"
-                      placeholder="5"
-                      value={form.experience}
-                      onChange={(e) => update("experience", e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
+                      <div className="space-y-1.5">
+                        <Label>Specialization</Label>
+                        <div className="relative">
+                          <Stethoscope className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input placeholder="Cardiologist, Dermatologist, etc." value={doctor.specialization} onChange={(e) => updateDoctor(index, "specialization", e.target.value)} className="pl-9" />
+                        </div>
+                      </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="qualifications">Qualifications</Label>
-                  <div className="relative">
-                    <Award className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="qualifications"
-                      placeholder="MBBS, MD, MS, etc."
-                      value={form.qualifications}
-                      onChange={(e) => update("qualifications", e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label>Years of Experience</Label>
+                          <div className="relative">
+                            <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input type="number" placeholder="5" value={doctor.experience} onChange={(e) => updateDoctor(index, "experience", e.target.value)} className="pl-9" />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Qualifications</Label>
+                          <div className="relative">
+                            <Award className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input placeholder="MBBS, MD, MS" value={doctor.qualifications} onChange={(e) => updateDoctor(index, "qualifications", e.target.value)} className="pl-9" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  <Button type="button" variant="outline" onClick={addDoctor} className="w-full">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Doctor
+                  </Button>
                 </div>
 
                 <div className="flex gap-3">

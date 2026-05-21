@@ -101,6 +101,18 @@ def _delay_minutes(value):
     return amount * 60 if "hour" in lowered else amount
 
 
+def _clinic_today_str():
+    return datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
+
+
+def _delay_clinic_date(slot):
+    for key in ("delay_started_at", "delay_ends_at"):
+        parsed = _parse_dt((slot or {}).get(key))
+        if parsed:
+            return parsed.date().isoformat()
+    return None
+
+
 def _time_decimal_to_datetime(date_text, decimal_hour):
     try:
         base_date = datetime.strptime(str(date_text), "%Y-%m-%d").date()
@@ -169,10 +181,10 @@ class QueuePredictionEngine:
     def __init__(self, db):
         self.db = db
 
-    async def predict(self, clinic_id, date, slot_id, queue_items, current_index):
+    async def predict(self, clinic_id, date, slot_id, queue_items, current_index, doctor_id=None):
         min_minutes, max_minutes = await _clinic_consultation_range(self.db, clinic_id)
-        timing_state = await _session_timing_state(self.db, clinic_id, date, slot_id)
-        history_metrics = await self._duration_history_metrics(clinic_id, date, slot_id, min_minutes, max_minutes)
+        timing_state = await _session_timing_state(self.db, clinic_id, date, slot_id, doctor_id)
+        history_metrics = await self._duration_history_metrics(clinic_id, date, slot_id, min_minutes, max_minutes, doctor_id)
         rolling_average = history_metrics["rolling_average_minutes"]
         weighted_average = history_metrics["weighted_average_minutes"]
         predicted_minutes = self._hybrid_prediction_minutes(
@@ -205,8 +217,8 @@ class QueuePredictionEngine:
             **{key: value for key, value in timing_state.items() if key != "base_time"},
         }
 
-    async def _duration_history_metrics(self, clinic_id, date, slot_id, min_minutes, max_minutes):
-        rows = await self._duration_history(clinic_id, date, slot_id)
+    async def _duration_history_metrics(self, clinic_id, date, slot_id, min_minutes, max_minutes, doctor_id=None):
+        rows = await self._duration_history(clinic_id, date, slot_id, doctor_id)
         durations = [seconds / 60 for seconds in rows if seconds and seconds > 0]
         durations = self._remove_outliers(durations)
 
@@ -229,7 +241,7 @@ class QueuePredictionEngine:
             "weighted_average_minutes": self._weighted_average(sample),
         }
 
-    async def _duration_history(self, clinic_id, date, slot_id):
+    async def _duration_history(self, clinic_id, date, slot_id, doctor_id=None):
         params = {
             "clinic_id": clinic_id,
             "date": date,
@@ -239,6 +251,10 @@ class QueuePredictionEngine:
         if slot_id is not None:
             slot_clause = " AND slot_id = :slot_id"
             params["slot_id"] = slot_id
+        doctor_clause = ""
+        if doctor_id:
+            doctor_clause = " AND doctor_id = :doctor_id"
+            params["doctor_id"] = doctor_id
 
         result = await self.db.execute(
             text(
@@ -257,6 +273,7 @@ class QueuePredictionEngine:
                     WHERE clinic_id = :clinic_id
                       AND date = :date
                       {slot_clause}
+                      {doctor_clause}
                       AND (served IS TRUE OR outcome = 'served' OR status IN ('completed', 'served'))
                 ) history
                 WHERE duration_seconds IS NOT NULL
@@ -366,8 +383,9 @@ async def _clinic_consultation_range(db, clinic_id):
     return min_minutes, max_minutes
 
 
-async def _session_timing_state(db, clinic_id, date, slot_id):
+async def _session_timing_state(db, clinic_id, date, slot_id, doctor_id=None):
     now = datetime.now(CLINIC_TIMEZONE)
+    is_requested_day_today = str(date) == _clinic_today_str()
     base_time = now
     active_delay_minutes = 0
     session_status = "active"
@@ -400,32 +418,50 @@ async def _session_timing_state(db, clinic_id, date, slot_id):
 
                 listed_delay_minutes = _delay_minutes(slot_delays[slot_index] if slot_index < len(slot_delays) else 0)
                 slot_delay_minutes = _delay_minutes(slot.get("delay_minutes")) or listed_delay_minutes
-                is_delay_active = slot_delay_minutes > 0 and (not slot_end or now < slot_end)
+                delay_date = _delay_clinic_date(slot)
+                delay_belongs_to_requested_day = delay_date is None or delay_date == str(date)
+                is_delay_active = (
+                    is_requested_day_today
+                    and delay_belongs_to_requested_day
+                    and slot_delay_minutes > 0
+                    and (not slot_end or now < slot_end)
+                )
                 if is_delay_active:
                     active_delay_minutes = max(active_delay_minutes, slot_delay_minutes)
                     session_status = "delayed"
                 elif slot.get("status_override"):
                     session_status = str(slot.get("status_override")).lower()
 
+        doctor_clause = ""
+        params = {"clinic_id": clinic_id, "slot_id": slot_id, "date": date}
+        if doctor_id:
+            doctor_clause = "AND (doctor_id = :doctor_id OR doctor_id IS NULL)"
+            params["doctor_id"] = doctor_id
+
         session_result = await db.execute(
             text(
-                """
+                f"""
                 SELECT delay_minutes, delay_ends_at, status
                 FROM doctor_sessions
                 WHERE clinic_id = :clinic_id
                   AND slot_id = :slot_id
+                  {doctor_clause}
                   AND (session_date = :date OR session_date IS NULL)
                 ORDER BY session_date DESC NULLS LAST, id DESC
                 LIMIT 1
                 """
             ),
-            {"clinic_id": clinic_id, "slot_id": slot_id, "date": date},
+            params,
         )
         session_row = session_result.mappings().first()
         if session_row:
             session_delay_minutes = _delay_minutes(session_row.get("delay_minutes"))
             session_delay_ends_at = _parse_dt(session_row.get("delay_ends_at"))
-            is_delay_active = session_delay_minutes > 0 and (not session_delay_ends_at or now < session_delay_ends_at)
+            is_delay_active = (
+                is_requested_day_today
+                and session_delay_minutes > 0
+                and (not session_delay_ends_at or now < session_delay_ends_at)
+            )
             if is_delay_active:
                 active_delay_minutes = max(active_delay_minutes, session_delay_minutes)
                 session_status = "delayed"
@@ -444,12 +480,16 @@ async def _session_timing_state(db, clinic_id, date, slot_id):
     }
 
 
-async def _fetch_queue_rows(db, table_name, clinic_id, date, source, slot_id):
+async def _fetch_queue_rows(db, table_name, clinic_id, date, source, slot_id, doctor_id=None):
     params = {"clinic_id": clinic_id, "date": date}
     slot_clause = ""
     if slot_id is not None:
         slot_clause = " AND slot_id = :slot_id"
         params["slot_id"] = slot_id
+    doctor_clause = ""
+    if doctor_id:
+        doctor_clause = " AND doctor_id = :doctor_id"
+        params["doctor_id"] = doctor_id
 
     sql = f"""
         SELECT id, appointment_token, status, created_at, queue_position, slot_id, serving_started_at
@@ -458,6 +498,7 @@ async def _fetch_queue_rows(db, table_name, clinic_id, date, source, slot_id):
           AND date = :date
           AND status IN ('booked', 'pending', 'serving')
           {slot_clause}
+          {doctor_clause}
     """
     result = await db.execute(text(sql), params)
 
@@ -476,7 +517,7 @@ async def _fetch_queue_rows(db, table_name, clinic_id, date, source, slot_id):
     return rows
 
 
-async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id, current_token=None, slot_id=None):
+async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id, current_token=None, slot_id=None, doctor_id=None):
     """
     Calculate queue metrics from the live combined online + walk-in queue.
 
@@ -484,8 +525,8 @@ async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id
     queue_position can become stale after walk-ins, skips, or older data repairs.
     """
     queue_items = []
-    queue_items.extend(await _fetch_queue_rows(db, "appointments", clinic_id, date, "online", slot_id))
-    queue_items.extend(await _fetch_queue_rows(db, "qr_appointments", clinic_id, date, "walkin", slot_id))
+    queue_items.extend(await _fetch_queue_rows(db, "appointments", clinic_id, date, "online", slot_id, doctor_id))
+    queue_items.extend(await _fetch_queue_rows(db, "qr_appointments", clinic_id, date, "walkin", slot_id, doctor_id))
 
     serving_token_number = next(
         (_token_number(item["token"]) for item in queue_items if item["status"] == "serving"),
@@ -523,7 +564,7 @@ async def get_live_queue_metrics(db, clinic_id, date, current_source, current_id
     else:
         now_serving_token = current_token_text
 
-    window = await QueuePredictionEngine(db).predict(clinic_id, date, slot_id, queue_items, your_index)
+    window = await QueuePredictionEngine(db).predict(clinic_id, date, slot_id, queue_items, your_index, doctor_id)
 
     return {
         "found": True,

@@ -16,7 +16,7 @@ from sqlalchemy import select, update, func
 from app.config import admin_usernames
 from app.database.db import get_db
 from app.database.models import (
-    PendingClinicRegistration, Clinic, Admin, ClinicImage
+    PendingClinicRegistration, Clinic, Admin, ClinicImage, Doctor
 )
 from app.services.email_service import (
     send_clinic_approval_email,
@@ -39,6 +39,34 @@ def generate_clinic_id():
     digits = ''.join(random.choices(string.digits, k=2))
     more_letters = ''.join(random.choices(string.ascii_uppercase, k=3))
     return f"{letters}{digits}{more_letters}"
+
+
+def generate_doctor_id(clinic_id: str):
+    return f"{clinic_id}-D{secrets.token_hex(4).upper()}"
+
+
+def normalize_pending_doctors(pending_reg: PendingClinicRegistration) -> list[dict]:
+    doctors = []
+    for raw in pending_reg.doctors or []:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("doctor_name") or "").strip()
+        if not name:
+            continue
+        doctors.append({
+            "name": name,
+            "specialization": str(raw.get("specialization") or "").strip(),
+            "experience": str(raw.get("experience") or "").strip(),
+            "qualifications": str(raw.get("qualifications") or "").strip(),
+        })
+    if not doctors and pending_reg.doctor_name:
+        doctors.append({
+            "name": pending_reg.doctor_name,
+            "specialization": pending_reg.specialization or "",
+            "experience": pending_reg.experience or "",
+            "qualifications": pending_reg.qualifications or "",
+        })
+    return doctors
 
 
 def generate_otp():
@@ -562,6 +590,18 @@ async def approve_registration(
  
         db.add(new_clinic)
 
+        approved_doctors = normalize_pending_doctors(pending_reg)
+        for doctor_data in approved_doctors:
+            db.add(Doctor(
+                doctor_id=generate_doctor_id(pending_reg.clinic_id),
+                clinic_id=pending_reg.clinic_id,
+                name=doctor_data["name"],
+                specialization=doctor_data.get("specialization") or "",
+                experience=doctor_data.get("experience") or "",
+                qualifications=doctor_data.get("qualifications") or "",
+                available=True,
+            ))
+
         # Remove from pending table after approval
         await db.delete(pending_reg)
 
@@ -598,6 +638,7 @@ async def approve_registration(
                 "city": new_clinic.city,
                 "doctor_name": new_clinic.doctor_name,
                 "specialization": new_clinic.specialization,
+                "doctors": approved_doctors,
             },
         }
     except HTTPException:
@@ -675,6 +716,7 @@ async def reject_registration(
             specialization=pending_reg.specialization,
             experience=pending_reg.experience,
             qualifications=pending_reg.qualifications,
+            doctors=pending_reg.doctors or [],
             image_urls=pending_reg.image_urls,
             rejection_reason=reason,
         )

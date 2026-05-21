@@ -63,6 +63,20 @@ class Patient(Base):
     blood_group = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
+class Doctor(Base):
+    __tablename__ = "doctors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doctor_id = Column(String, unique=True, index=True, nullable=False)
+    clinic_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    specialization = Column(String, nullable=True)
+    experience = Column(String, nullable=True)
+    qualifications = Column(String, nullable=True)
+    available = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class Appointment(Base):
     __tablename__ = "appointments"
 
@@ -74,6 +88,7 @@ class Appointment(Base):
     patient_email = Column(String, nullable=False)
     patient_phone = Column(String, nullable=False)
     doctor_name = Column(String, nullable=True)
+    doctor_id = Column(String, nullable=True)
     date = Column(String, nullable=False)
     time = Column(String, nullable=False)
     status = Column(String, default="booked")
@@ -229,6 +244,7 @@ class QRAppointment(Base):
     patient_name = Column(String, nullable=False)
     patient_phone = Column(String, nullable=False)
     doctor_name = Column(String, nullable=True)
+    doctor_id = Column(String, nullable=True)
     date = Column(String, nullable=False)
     status = Column(String, default="booked")
     doctor_delay = Column(String, nullable=True)
@@ -263,6 +279,7 @@ class PendingClinicRegistration(Base):
     specialization = Column(String, nullable=True)
     experience = Column(String, nullable=True)
     qualifications = Column(String, nullable=True)
+    doctors = Column(JSON, default=list)
     image_urls = Column(JSON, default=list)
     status = Column(String, default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -306,6 +323,7 @@ class RejectedClinic(Base):
     specialization = Column(String, nullable=True)
     experience = Column(String, nullable=True)
     qualifications = Column(String, nullable=True)
+    doctors = Column(JSON, default=list)
     image_urls = Column(JSON, default=list)
     rejection_reason = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
