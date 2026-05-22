@@ -38,6 +38,31 @@ interface ClinicProfile {
   has_pinned_location?: boolean;
 }
 
+const CLINIC_FIRST_LOGIN_LOCATION_KEY = "clinic_first_login_location";
+
+const loadFirstLoginLocation = (): ClinicProfile | null => {
+  try {
+    const stored = localStorage.getItem(CLINIC_FIRST_LOGIN_LOCATION_KEY);
+    if (!stored) return null;
+    const data = JSON.parse(stored) as ClinicProfile & { first_login?: boolean };
+    const suggestedLatitude = data.admin_pinned_latitude || (!data.has_pinned_location ? data.latitude : null);
+    const suggestedLongitude = data.admin_pinned_longitude || (!data.has_pinned_location ? data.longitude : null);
+
+    if (!data.first_login || !suggestedLatitude || !suggestedLongitude || data.has_pinned_location) {
+      return null;
+    }
+
+    return {
+      ...data,
+      admin_pinned_latitude: suggestedLatitude,
+      admin_pinned_longitude: suggestedLongitude,
+      has_pinned_location: false,
+    };
+  } catch {
+    return null;
+  }
+};
+
 const ActionTile = ({ action }: { action: DashboardAction }) => (
   <Link to={action.to} className="block">
     <div className="flex min-h-[92px] flex-col justify-between rounded-[18px] bg-white/10 p-4 text-white transition duration-200 hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:min-h-[116px] sm:rounded-[22px] sm:p-5">
@@ -49,7 +74,7 @@ const ActionTile = ({ action }: { action: DashboardAction }) => (
 
 const ClinicDashboardNew = () => {
   const [clinicName, setClinicName] = useState("Clinic");
-  const [clinicProfile, setClinicProfile] = useState<ClinicProfile | null>(null);
+  const [clinicProfile, setClinicProfile] = useState<ClinicProfile | null>(() => loadFirstLoginLocation());
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [showLocationConfirm, setShowLocationConfirm] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
@@ -89,6 +114,12 @@ const ClinicDashboardNew = () => {
   }, [fetchClinicData]);
 
   useEffect(() => {
+    if (needsLocationConfirmation) {
+      setShowLocationConfirm(true);
+    }
+  }, [needsLocationConfirmation]);
+
+  useEffect(() => {
     if (!message) return;
     const timer = window.setTimeout(() => setMessage(null), 5000);
     return () => window.clearTimeout(timer);
@@ -120,6 +151,7 @@ const ClinicDashboardNew = () => {
         admin_pinned_longitude: null,
         has_pinned_location: true,
       }));
+      localStorage.removeItem(CLINIC_FIRST_LOGIN_LOCATION_KEY);
       setShowLocationConfirm(false);
       setShowLocationModal(false);
       setMessage({ text: "Clinic location saved.", type: "success" });

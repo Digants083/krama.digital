@@ -56,6 +56,9 @@ class AuthResponse(BaseModel):
     address: Optional[str] = None
     latitude: Optional[str] = None
     longitude: Optional[str] = None
+    admin_pinned_latitude: Optional[str] = None
+    admin_pinned_longitude: Optional[str] = None
+    has_pinned_location: Optional[bool] = None
 
 class ErrorResponse(BaseModel):
     error: str

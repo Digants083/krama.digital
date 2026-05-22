@@ -37,6 +37,8 @@ const PatientProfile = () => {
   };
 
   const loggedInEmail = getLoggedInEmail();
+  const normalizedLoggedInEmail = loggedInEmail?.trim().toLowerCase() || "";
+  const profileEmail = (dbProfile?.email || normalizedLoggedInEmail).trim().toLowerCase();
 
   const [phone, setPhone] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -73,7 +75,7 @@ const PatientProfile = () => {
   }, [otpCooldown]);
 
   const verifyCurrentPassword = async () => {
-    if (!loggedInEmail || !currentPassword) {
+    if (!profileEmail || !currentPassword) {
       setMessage({ text: "Please enter current password", type: "error" });
       return;
     }
@@ -84,7 +86,7 @@ const PatientProfile = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patient_email: loggedInEmail,
+          patient_email: profileEmail,
           current_password: currentPassword
         }),
       });
@@ -104,9 +106,9 @@ const PatientProfile = () => {
   };
 
   const refreshPatientProfile = async () => {
-    if (!loggedInEmail) return;
+    if (!profileEmail) return;
 
-    const response = await fetch(`/api/auth/patient/data?email=${loggedInEmail}`);
+    const response = await fetch(`/api/auth/patient/data?email=${encodeURIComponent(profileEmail)}`);
     if (response.ok) {
       const data = await response.json();
       setDbProfile(data);
@@ -143,7 +145,7 @@ const PatientProfile = () => {
   };
 
   const sendProfileOtp = async (action: "phone" | "password_forgot" | "delete") => {
-    if (!loggedInEmail) {
+    if (!profileEmail) {
       setMessage({ text: "No logged-in user found", type: "error" });
       return;
     }
@@ -181,15 +183,16 @@ const PatientProfile = () => {
       const response = await fetch("/api/auth/patient/send-profile-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patient_email: loggedInEmail }),
+        body: JSON.stringify({ patient_email: profileEmail }),
       });
 
       if (response.ok) {
+        const data = await response.json();
         setPendingAction(action);
         setOtpCode("");
         setOtpDialogOpen(true);
         setOtpCooldown(60); // Start 60 second cooldown
-        setMessage({ text: "OTP sent to your email", type: "success" });
+        setMessage({ text: data.message || `OTP sent to ${profileEmail}`, type: "success" });
       } else {
         const error = await response.json();
         setMessage({ text: error.detail || "Failed to send OTP", type: "error" });
@@ -202,7 +205,7 @@ const PatientProfile = () => {
   };
 
   const handleVerifiedAction = async () => {
-    if (!loggedInEmail || !pendingAction) {
+    if (!profileEmail || !pendingAction) {
       setMessage({ text: "No pending action found", type: "error" });
       return;
     }
@@ -222,7 +225,7 @@ const PatientProfile = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             new_phone: phone,
-            patient_email: loggedInEmail,
+            patient_email: profileEmail,
             otp_code: otpCode,
           }),
         });
@@ -234,7 +237,7 @@ const PatientProfile = () => {
           body: JSON.stringify({
             current_password: "FORGOT_PASSWORD_PLACEHOLDER", // Special marker for forgot flow
             new_password: newPassword,
-            patient_email: loggedInEmail,
+            patient_email: profileEmail,
             otp_code: otpCode,
           }),
         });
@@ -264,7 +267,7 @@ const PatientProfile = () => {
           body: JSON.stringify({
             password: deletePassword,
             confirmation: "DELETE",
-            patient_email: loggedInEmail,
+            patient_email: profileEmail,
             otp_code: otpCode,
           }),
         });
@@ -416,7 +419,7 @@ const PatientProfile = () => {
                       </div>
                       <Button
                         onClick={async () => {
-                          if (!loggedInEmail || !newPassword || !isNewPasswordStrong || newPassword !== confirmPassword) {
+                          if (!profileEmail || !newPassword || !isNewPasswordStrong || newPassword !== confirmPassword) {
                             setMessage({ text: "Please fill all fields correctly", type: "error" });
                             return;
                           }
@@ -426,7 +429,7 @@ const PatientProfile = () => {
                               method: "PUT",
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({
-                                patient_email: loggedInEmail,
+                                patient_email: profileEmail,
                                 current_password: currentPassword,
                                 new_password: newPassword,
                               }),
@@ -547,12 +550,12 @@ const PatientProfile = () => {
             </DialogTitle>
             <DialogDescription>
               {pendingAction === "phone"
-                ? `Enter the OTP sent to ${loggedInEmail} to verify your new phone number.`
+                ? `Enter the OTP sent to ${profileEmail} to verify your new phone number.`
                 : pendingAction === "password_forgot"
-                ? `Enter the OTP sent to ${loggedInEmail} to reset your password.`
+                ? `Enter the OTP sent to ${profileEmail} to reset your password.`
                 : pendingAction === "delete"
-                ? `Enter the OTP sent to ${loggedInEmail} to delete your account. This action cannot be undone.`
-                : `Enter the OTP sent to ${loggedInEmail} to continue.`
+                ? `Enter the OTP sent to ${profileEmail} to delete your account. This action cannot be undone.`
+                : `Enter the OTP sent to ${profileEmail} to continue.`
               }
             </DialogDescription>
           </DialogHeader>
