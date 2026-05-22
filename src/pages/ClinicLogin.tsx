@@ -9,6 +9,8 @@ import AuthCard from "@/components/auth/AuthCard";
 
 import { Building2, Lock, ArrowRight } from "lucide-react";
 
+const CLINIC_FIRST_LOGIN_LOCATION_KEY = "clinic_first_login_location";
+
 const ClinicLogin = () => {
   const navigate = useNavigate();
 
@@ -64,6 +66,24 @@ const ClinicLogin = () => {
       // Also store clinic_id for profile access
       if (data.clinic_id) {
         localStorage.setItem("clinic_id", data.clinic_id);
+      }
+
+      const adminPinnedLatitude = data.admin_pinned_latitude || (data.first_login ? data.latitude : null);
+      const adminPinnedLongitude = data.admin_pinned_longitude || (data.first_login ? data.longitude : null);
+
+      if (data.first_login && adminPinnedLatitude && adminPinnedLongitude) {
+        localStorage.setItem(CLINIC_FIRST_LOGIN_LOCATION_KEY, JSON.stringify({
+          clinic_id: data.clinic_id || "",
+          address: data.address || "",
+          latitude: data.latitude || null,
+          longitude: data.longitude || null,
+          admin_pinned_latitude: adminPinnedLatitude,
+          admin_pinned_longitude: adminPinnedLongitude,
+          has_pinned_location: Boolean(data.has_pinned_location),
+          first_login: true,
+        }));
+      } else {
+        localStorage.removeItem(CLINIC_FIRST_LOGIN_LOCATION_KEY);
       }
 
       // Redirect to clinic dashboard immediately

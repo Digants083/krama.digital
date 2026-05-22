@@ -385,7 +385,27 @@ def generate_patient_id():
 
 
 
+PROFILE_OTP_PURPOSE = "profile_update"
+
+
+def _normalize_email(email: Optional[str]) -> str:
+    return (email or "").strip().lower()
+
+
+async def _get_patient_by_email(db: AsyncSession, email: Optional[str]) -> Optional[Patient]:
+    normalized_email = _normalize_email(email)
+    if not normalized_email:
+        return None
+
+    result = await db.execute(
+        select(Patient).where(func.lower(Patient.email) == normalized_email)
+    )
+    return result.scalar_one_or_none()
+
+
 async def _send_profile_otp(db: AsyncSession, email: str) -> None:
+
+    email = _normalize_email(email)
 
     existing_result = await db.execute(select(OTPVerification).where(OTPVerification.email == email))
 
@@ -427,7 +447,7 @@ async def _send_profile_otp(db: AsyncSession, email: str) -> None:
 
         expires_at=datetime.utcnow().replace(microsecond=0) + timedelta(minutes=OTPService.OTP_EXPIRY_MINUTES),
 
-        user_name="",
+        user_name=PROFILE_OTP_PURPOSE,
 
         user_password="",
 
@@ -461,7 +481,24 @@ async def _send_profile_otp(db: AsyncSession, email: str) -> None:
 
 async def _verify_profile_otp_or_raise(db: AsyncSession, email: str, otp_code: str) -> None:
 
-    is_valid, message = await OTPService.verify_otp_only(db, email.strip().lower(), otp_code.strip())
+    email = _normalize_email(email)
+
+    otp_result = await db.execute(select(OTPVerification).where(OTPVerification.email == email))
+    otp_record = otp_result.scalar_one_or_none()
+
+    if not otp_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No OTP found. Please request a new OTP."
+        )
+
+    if otp_record.user_name not in ("", PROFILE_OTP_PURPOSE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please request a new profile OTP."
+        )
+
+    is_valid, message = await OTPService.verify_otp_only(db, email, otp_code.strip())
 
     if not is_valid:
 
@@ -473,7 +510,7 @@ async def _verify_profile_otp_or_raise(db: AsyncSession, email: str, otp_code: s
 
         )
 
-    await OTPService.delete_otp(db, email.strip().lower())
+    await OTPService.delete_otp(db, email)
 
 
 
@@ -1338,7 +1375,13 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
             latitude=suggested_latitude if first_login and not clinic.has_pinned_location else clinic.latitude,
 
-            longitude=suggested_longitude if first_login and not clinic.has_pinned_location else clinic.longitude
+            longitude=suggested_longitude if first_login and not clinic.has_pinned_location else clinic.longitude,
+
+            admin_pinned_latitude=clinic.admin_pinned_latitude,
+
+            admin_pinned_longitude=clinic.admin_pinned_longitude,
+
+            has_pinned_location=clinic.has_pinned_location
 
         )
 
@@ -1430,9 +1473,9 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
 async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends(get_db)):
 
-    result = await db.execute(select(Patient).where(Patient.email == patient_data.email))
+    email = _normalize_email(patient_data.email)
 
-    existing_patient = result.scalar_one_or_none()
+    existing_patient = await _get_patient_by_email(db, email)
 
 
 
@@ -1492,7 +1535,7 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
         name=patient_data.name,
 
-        email=patient_data.email,
+        email=email,
 
         password=hashed_password,
 
@@ -1522,7 +1565,7 @@ async def patient_signup(patient_data: PatientSignup, db: AsyncSession = Depends
 
             "name": patient_data.name,
 
-            "email": patient_data.email,
+            "email": email,
 
             "blood_group": patient_data.blood_group
 
@@ -1601,9 +1644,7 @@ async def get_patient_data(
 
 ):
 
-    result = await db.execute(select(Patient).where(Patient.email == email))
-
-    patient = result.scalar_one_or_none()
+    patient = await _get_patient_by_email(db, email)
 
 
 
@@ -3083,9 +3124,7 @@ async def patient_send_profile_otp(
 
     email = request.patient_email.strip().lower()
 
-    result = await db.execute(select(Patient).where(Patient.email == email))
-
-    patient = result.scalar_one_or_none()
+    patient = await _get_patient_by_email(db, email)
 
 
 
@@ -3125,9 +3164,7 @@ async def patient_change_password(
 
 ):
 
-    result = await db.execute(select(Patient).where(Patient.email == request.patient_email))
-
-    patient = result.scalar_one_or_none()
+    patient = await _get_patient_by_email(db, request.patient_email)
 
 
 
@@ -3191,7 +3228,7 @@ async def patient_verify_current_password(
 
 ):
 
-    patient_email = request.get("patient_email")
+    patient_email = _normalize_email(request.get("patient_email"))
 
     password = request.get("current_password") or request.get("password")
 
@@ -3209,9 +3246,7 @@ async def patient_verify_current_password(
 
 
 
-    result = await db.execute(select(Patient).where(Patient.email == patient_email))
-
-    patient = result.scalar_one_or_none()
+    patient = await _get_patient_by_email(db, patient_email)
 
 
 
@@ -3252,7 +3287,7 @@ async def patient_change_password_direct(
 
 ):
 
-    patient_email = request.get("patient_email")
+    patient_email = _normalize_email(request.get("patient_email"))
 
     current_password = request.get("current_password")
 
@@ -3272,9 +3307,7 @@ async def patient_change_password_direct(
 
 
 
-    result = await db.execute(select(Patient).where(Patient.email == patient_email))
-
-    patient = result.scalar_one_or_none()
+    patient = await _get_patient_by_email(db, patient_email)
 
 
 
@@ -3336,9 +3369,7 @@ async def patient_change_phone(
 
 ):
 
-    result = await db.execute(select(Patient).where(Patient.email == request.patient_email))
-
-    patient = result.scalar_one_or_none()
+    patient = await _get_patient_by_email(db, request.patient_email)
 
 
 
@@ -3378,9 +3409,7 @@ async def patient_delete_account(
 
 ):
 
-    result = await db.execute(select(Patient).where(Patient.email == request.patient_email))
-
-    patient = result.scalar_one_or_none()
+    patient = await _get_patient_by_email(db, request.patient_email)
 
 
 
