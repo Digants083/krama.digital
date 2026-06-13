@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, Request
 
 from pydantic import BaseModel, EmailStr
 
@@ -34,7 +34,7 @@ from app.database.models import (
 
 )
 
-from app.services.email_service import send_clinic_registration_received_email
+from app.services.email_service import send_clinic_registration_received_email, send_quick_book_email
 
 from app.services.geocoding_service import get_coordinates_from_address, get_coordinates_from_structured_address
 from app.services.queue_metrics import get_live_queue_metrics
@@ -42,6 +42,11 @@ from app.services.delay_jobs import parse_dt
 from app.services.realtime import publish_queue_event
 
 CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+
+
+class ClinicQuickBookEmailRequest(BaseModel):
+    clinic_id: str
+    email: EmailStr
 
 def _clinic_today_str() -> str:
     return datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
@@ -1802,6 +1807,54 @@ async def get_clinic_doctors(
     await _ensure_default_doctor(db, clinic)
     doctors_result = await db.execute(select(Doctor).where(Doctor.clinic_id == clinic_id).order_by(Doctor.id))
     return {"clinic_id": clinic_id, "doctors": [_doctor_payload(doctor) for doctor in doctors_result.scalars().all()]}
+
+
+def _request_frontend_origin(request: Request) -> str:
+    origin = request.headers.get("origin")
+    if origin:
+        return origin.rstrip("/")
+
+    referer = request.headers.get("referer")
+    if referer:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    configured_origin = os.getenv("FRONTEND_URL") or os.getenv("APP_URL")
+    if configured_origin:
+        return configured_origin.rstrip("/")
+
+    return str(request.base_url).rstrip("/")
+
+
+@router.post("/clinic/send-quick-book-email")
+async def send_clinic_quick_book_email(
+    payload: ClinicQuickBookEmailRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    clinic_id = payload.clinic_id.strip()
+    if not clinic_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Clinic ID is required")
+
+    result = await db.execute(select(Clinic).where(Clinic.clinic_id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clinic not found")
+
+    frontend_origin = _request_frontend_origin(request)
+    quick_book_url = f"{frontend_origin}/join?clinic_id={clinic.clinic_id}"
+    email_sent = send_quick_book_email(payload.email, clinic.clinic_name, quick_book_url)
+    if not email_sent:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to send email")
+
+    return {
+        "message": "Quick book link sent",
+        "email_sent": True,
+        "quick_book_url": quick_book_url,
+    }
 
 
 @router.post("/clinic/doctors")

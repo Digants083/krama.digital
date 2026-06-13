@@ -380,6 +380,62 @@ def send_clinic_rejection_email(to_email: str, clinic_name: str, reason: str = N
     return email_service._send_email(to_email, subject, text_content, html_content)
 
 
+def send_quick_book_email(to_email: str, clinic_name: str, quick_book_url: str) -> bool:
+    """Send a clinic quick booking link to a patient."""
+    safe_clinic_name = escape(clinic_name or "Clinic")
+    safe_quick_book_url = escape(quick_book_url, quote=True)
+    subject = f"Book your appointment with {clinic_name or 'your clinic'}"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: #00555A; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
+            .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }}
+            .button {{ background: #00555A; color: #ffffff; padding: 12px 22px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 18px 0; font-weight: bold; }}
+            .footer {{ font-size: 12px; color: #888; text-align: center; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h2>Quick Appointment Booking</h2>
+            </div>
+            <div class="content">
+                <p>Hello,</p>
+                <p><strong>{safe_clinic_name}</strong> has shared a quick booking link with you.</p>
+                <p>Use the button below to book your appointment or join the clinic queue.</p>
+                <p><a class="button" href="{safe_quick_book_url}" style="background: #00555A; color: #ffffff !important; padding: 12px 22px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 18px 0; font-weight: bold;">Book Appointment</a></p>
+                <p>Best regards,<br><strong>Krama Care Team</strong></p>
+            </div>
+            <div class="footer">
+                <p>(c) 2024 Krama Care. All rights reserved.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+    Quick Appointment Booking
+    =========================
+
+    Hello,
+
+    {clinic_name or "Your clinic"} has shared a quick booking link with you.
+
+    Use the Book Appointment button in this email to book your appointment or join the clinic queue.
+
+    Best regards,
+    Krama Care Team
+    """
+
+    return email_service._send_email(to_email, subject, text_content, html_content)
+
+
 def send_patient_report_email(
     patient_email: str,
     patient_name: str,

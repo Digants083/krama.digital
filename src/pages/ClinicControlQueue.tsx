@@ -1,8 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useQueue } from "@/context/QueueContext";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight, FileText, Stethoscope, CheckCircle2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Users, SkipForward, ArrowRightCircle, RefreshCw, Clock, QrCode, Calendar, Play, Square, MoveRight, FileText, Stethoscope, CheckCircle2, Mail, Send } from "lucide-react";
 import { formatDelayedStartTime, formatDelayLabel, formatIsoClock, formatTimeRange } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 
@@ -67,6 +77,9 @@ const ClinicControlQueue = () => {
   const [reportingToken, setReportingToken] = useState<string | null>(null);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [selectedDoctorId, setSelectedDoctorId] = useState("");
+  const [sendQuickBookOpen, setSendQuickBookOpen] = useState(false);
+  const [quickBookEmail, setQuickBookEmail] = useState("");
+  const [sendingQuickBook, setSendingQuickBook] = useState(false);
 
   useEffect(() => {
     if (!message) return;
@@ -571,6 +584,45 @@ const ClinicControlQueue = () => {
     return patientSlotId >= timeSlots.length;
   };
 
+  const sendQuickBookEmail = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+
+    const email = quickBookEmail.trim().toLowerCase();
+    if (!clinicId) {
+      setMessage({ text: "Clinic details missing. Please refresh and try again.", type: "error" });
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMessage({ text: "Enter a valid email address.", type: "error" });
+      return;
+    }
+
+    setSendingQuickBook(true);
+    try {
+      const response = await fetch("/api/auth/clinic/send-quick-book-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clinic_id: clinicId, email }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setMessage({ text: data.detail || "Failed to send quick book email.", type: "error" });
+        return;
+      }
+
+      setMessage({ text: `Quick book link sent to ${email}.`, type: "success" });
+      setQuickBookEmail("");
+      setSendQuickBookOpen(false);
+    } catch (error) {
+      console.error("Error sending quick book email:", error);
+      setMessage({ text: "Network error while sending quick book email.", type: "error" });
+    } finally {
+      setSendingQuickBook(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f5f3ee]">
       {message && (
@@ -593,14 +645,24 @@ const ClinicControlQueue = () => {
               <p className="text-xs text-slate-500">Manage your clinic's patient queue</p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            className="rounded-lg border-[#d8d1c6] bg-[#fbfaf7] px-4 py-2 font-medium text-slate-600 transition-all hover:bg-[#f0ede6]"
-            onClick={handleRefreshQueue}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="rounded-lg border-[#00555A]/30 bg-[#fbfaf7] px-3 py-2 font-medium text-[#00555A] transition-all hover:bg-[#e9f6f1] sm:px-4"
+              onClick={() => setSendQuickBookOpen(true)}
+            >
+              <Mail className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Send Quick Book</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="rounded-lg border-[#d8d1c6] bg-[#fbfaf7] px-3 py-2 font-medium text-slate-600 transition-all hover:bg-[#f0ede6] sm:px-4"
+              onClick={handleRefreshQueue}
+            >
+              <RefreshCw className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -1011,6 +1073,49 @@ const ClinicControlQueue = () => {
             </div>
           </div>
       </main>
+
+      <Dialog open={sendQuickBookOpen} onOpenChange={setSendQuickBookOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send Quick Book Link</DialogTitle>
+            <DialogDescription>
+              Email the clinic booking link to a patient.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={(event) => void sendQuickBookEmail(event)}>
+            <div className="space-y-2">
+              <Label htmlFor="quick-book-email">Patient Email</Label>
+              <Input
+                id="quick-book-email"
+                type="email"
+                placeholder="patient@example.com"
+                value={quickBookEmail}
+                onChange={(event) => setQuickBookEmail(event.target.value)}
+                disabled={sendingQuickBook}
+                autoComplete="email"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSendQuickBookOpen(false)}
+                disabled={sendingQuickBook}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="bg-[#00555A] text-white hover:bg-[#00494F]"
+                disabled={sendingQuickBook || !quickBookEmail.trim() || !clinicId}
+              >
+                <Send className="mr-2 h-4 w-4" />
+                {sendingQuickBook ? "Sending..." : "Send Email"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
