@@ -15,14 +15,14 @@ const LocationAccessCard = ({ onUseGPS, loading }: LocationAccessCardProps) => (
       Allow location access to find nearby clinics
     </h3>
     <p className="mt-2 text-sm text-muted-foreground">
-      We use your location to show clinics closest to you.
+      We use your location to show clinics closest to you. Your browser will ask for permission after you tap the button.
     </p>
     <div className="mt-6">
       <Button onClick={onUseGPS} disabled={loading} className="w-full sm:w-auto">
         {loading ? (
           <>
             <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-            Getting your location...
+            Waiting for permission...
           </>
         ) : (
           <>

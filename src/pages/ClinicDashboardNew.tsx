@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiUrl } from "@/lib/api";
-import { AlertCircle, CalendarDays, Eye, MapPin, Settings, User, Users } from "lucide-react";
+import { AlertCircle, CalendarDays, Eye, MapPin, ReceiptText, Settings, User, Users } from "lucide-react";
 import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 import { Button } from "@/components/ui/button";
 import {
@@ -168,6 +168,7 @@ const ClinicDashboardNew = () => {
   const actions: DashboardAction[] = [
     { to: "/clinic/manage-time", label: "Manage Time", Icon: Settings },
     { to: "/clinic/control-queue", label: "Control Queue", Icon: Users },
+    { to: "/clinic/billing", label: "Billing", Icon: ReceiptText },
     { to: "/clinic/look", label: "Look Up Patients", Icon: Eye },
     { to: "/doctor-dashboard", label: "Doctor Dashboard", Icon: User },
     { to: "/clinic/reports", label: "Patient Reports", Icon: CalendarDays },

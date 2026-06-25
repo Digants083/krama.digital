@@ -927,13 +927,18 @@ async def finish_patient(
     # Delete from the appropriate table
     await db.delete(appointment)
     await db.commit()
+    await db.refresh(completed)
     await publish_queue_event(clinic_id, "queue_updated", {"slot_id": getattr(completed, "slot_id", None)})
 
     return {
         "message": "Patient marked as served and moved to history",
         "completed": {
+            "id": completed.id,
+            "clinic_id": completed.clinic_id,
             "token": completed.appointment_token,
             "patient_name": completed.patient_name,
+            "patient_phone": completed.patient_phone,
+            "patient_id": completed.patient_id,
             "served_at": completed.served_at,
             "finished_at": completed.finished_at,
             "completed_at": completed.completed_at,

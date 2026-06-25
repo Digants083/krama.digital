@@ -105,4 +105,187 @@
   .glass-panel {
     @apply border border-white/60 bg-white/75 shadow-[0_18px_60px_-28px_rgba(19,55,50,0.35)] backdrop-blur-xl;
   }
+
+  .animate-hero-float {
+    animation: hero-float 6s ease-in-out infinite;
+  }
+
+  .animate-hero-float-delayed {
+    animation: hero-float 7s ease-in-out 900ms infinite;
+  }
+
+  .animate-hero-kenburns {
+    animation: hero-kenburns 18s ease-in-out infinite alternate;
+    transform-origin: center;
+  }
+
+  .animate-hero-copy-rise {
+    animation: hero-copy-rise 800ms ease both;
+  }
+
+  .animate-hero-orbit {
+    animation: hero-orbit 12s linear infinite;
+  }
+
+  .animate-panel-drift {
+    animation: panel-drift 7s ease-in-out infinite;
+  }
+
+  .animate-panel-rise {
+    animation: panel-rise 820ms ease 180ms both, panel-breathe 7s ease-in-out 1s infinite;
+  }
+
+  .animate-ticket-slide {
+    animation: ticket-slide 620ms ease both;
+  }
+
+  .animate-progress-grow {
+    animation: progress-grow 4.5s ease-in-out infinite;
+    transform-origin: left;
+  }
+
+  .animate-soft-ping {
+    animation: soft-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  .animate-live-rail {
+    animation: live-rail 26s linear infinite;
+  }
+
+  .animate-path-draw {
+    animation: path-draw 5.2s linear infinite;
+  }
+
+  .animate-path-pulse {
+    animation: path-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes hero-kenburns {
+  from {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.08) translate3d(-1.2%, -0.8%, 0);
+  }
+}
+
+@keyframes hero-copy-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hero-orbit {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg) scaleX(1.08);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg) scaleX(1.08);
+  }
+}
+
+@keyframes hero-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes panel-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(-8px, 10px, 0);
+  }
+}
+
+@keyframes panel-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes panel-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes ticket-slide {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes progress-grow {
+  0%,
+  100% {
+    transform: scaleX(0.46);
+  }
+  50% {
+    transform: scaleX(0.84);
+  }
+}
+
+@keyframes soft-ping {
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes live-rail {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes path-draw {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -360;
+  }
+}
+
+@keyframes path-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.78;
+    transform: scale(1.18);
+  }
 }

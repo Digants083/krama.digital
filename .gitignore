@@ -47,3 +47,11 @@ media/
 .env
 .env.local
 .env.*.local
+
+# Generated analysis artifacts
+graphify-out/
+backend/graphify-out/
+.graphify_*.json
+
+# Runtime/local upload artifacts
+backend/patient_reports/

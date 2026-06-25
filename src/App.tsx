@@ -19,6 +19,7 @@ import ClinicControlQueue from "./pages/ClinicControlQueue";
 import ClinicManageTime from "./pages/ClinicManageTime";
 import ClinicLook from "./pages/ClinicLook";
 import ClinicProfile from "./pages/ClinicProfile";
+import ClinicBilling from "./pages/ClinicBilling";
 import ClinicDetails from "./pages/ClinicDetails";
 import BookAppointment from "./pages/BookAppointment";
 import AppointmentConfirmation from "./pages/AppointmentConfirmation";
@@ -109,6 +110,7 @@ function App() {
             <Route path="/clinic/control-queue" element={<NoHeaderLayout><ClinicControlQueue /></NoHeaderLayout>} />
             <Route path="/clinic/manage-time" element={<NoHeaderLayout><ClinicManageTime /></NoHeaderLayout>} />
             <Route path="/clinic/look" element={<NoHeaderLayout><ClinicLook /></NoHeaderLayout>} />
+            <Route path="/clinic/billing" element={<NoHeaderLayout><ClinicBilling /></NoHeaderLayout>} />
             <Route path="/clinic/profile" element={<NoHeaderLayout><ClinicProfile /></NoHeaderLayout>} />
             <Route path="/clinic/reports" element={<NoHeaderLayout><ClinicPatientReports /></NoHeaderLayout>} />
             <Route

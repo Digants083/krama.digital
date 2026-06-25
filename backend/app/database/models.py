@@ -134,6 +134,26 @@ class CompletedAppointment(Base):
     served = Column(Boolean, default=True)  # True if served normally or after push, False if not served
     push_count = Column(Integer, default=0)  # Number of times patient was pushed to next slot
 
+
+class PatientRevisitReminder(Base):
+    """Doctor-created reminder for a patient to revisit after a chosen date."""
+    __tablename__ = "patient_revisit_reminders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_id = Column(String, nullable=True, index=True)
+    patient_name = Column(String, nullable=False)
+    patient_phone = Column(String, nullable=True, index=True)
+    patient_email = Column(String, nullable=True)
+    appointment_id = Column(Integer, nullable=True, index=True)
+    token = Column(String, nullable=True)
+    reminder_days = Column(Integer, nullable=True)
+    revisit_date = Column(String, nullable=False, index=True)
+    status = Column(String, default="active", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class DoctorSession(Base):
     """Canonical doctor session metadata. Existing slot_id queues map to session_id."""
     __tablename__ = "doctor_sessions"
@@ -157,25 +177,6 @@ class DoctorSession(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
-class NotificationJob(Base):
-    """Durable notification/reminder jobs that survive server restarts."""
-    __tablename__ = "notification_jobs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    job_type = Column(String, nullable=False, index=True)
-    clinic_id = Column(String, nullable=False, index=True)
-    session_id = Column(Integer, nullable=True, index=True)
-    recipient_email = Column(String, nullable=True, index=True)
-    patient_name = Column(String, nullable=True)
-    token_number = Column(String, nullable=True)
-    scheduled_for = Column(DateTime(timezone=True), nullable=False, index=True)
-    status = Column(String, default="pending", index=True)
-    dedupe_key = Column(String, unique=True, nullable=False, index=True)
-    payload = Column(JSON, default=dict)
-    sent_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 class ClinicTimeSlot(Base):
     """Model for storing clinic operating time slots - one row per clinic with all slots as JSON array"""
@@ -396,3 +397,26 @@ class CompletedReport(Base):
     report_pdf_data = Column(LargeBinary, nullable=True)
     report_type = Column(String, nullable=True)  # sent, collected, no_report
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Billing(Base):
+    """Single billing table for saved bills, template settings, and service prices."""
+    __tablename__ = "billing"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    record_type = Column(String, default="bill", index=True)  # bill or settings
+    bill_id = Column(String, unique=True, nullable=True, index=True)
+    appointment_id = Column(Integer, nullable=True, index=True)
+    patient_name = Column(String, nullable=True)
+    patient_phone = Column(String, nullable=True)
+    token = Column(String, nullable=True)
+    bill_source = Column(String, default="manual")
+    items = Column(JSON, default=list)
+    total_amount = Column(Integer, default=0)
+    payment_mode = Column(String, nullable=True)
+    payment_status = Column(String, default="paid")
+    template = Column(JSON, default=dict)
+    services = Column(JSON, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

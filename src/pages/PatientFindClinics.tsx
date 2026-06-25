@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, MapPin } from "lucide-react";
 import type { Clinic } from "@/data/mockData";
 
 type ClinicApiResponse = {
@@ -146,6 +146,30 @@ const medicalCategories: Record<
   },
 };
 
+const categoryEmoji: Record<string, string> = {
+  all: "🏥",
+  general: "🩺",
+  skin: "✨",
+  dental: "🦷",
+  bone: "🦴",
+  eye: "👁️",
+  ent: "👂",
+  heart: "❤️",
+  neuro: "🧠",
+  child: "👶",
+  women: "🌸",
+  mental: "🧘",
+  physio: "🏃",
+  vet: "🐾",
+  scanning: "🔬",
+  lab: "🧪",
+  ayurveda: "🌿",
+  homeo: "💊",
+  other: "➕",
+};
+
+const categoryLabel = (key: string) => `${categoryEmoji[key] || "🏥"} ${medicalCategories[key]?.name || key}`;
+
 const toRadians = (value: number) => (value * Math.PI) / 180;
 
 const haversineDistanceKm = (
@@ -170,7 +194,6 @@ const haversineDistanceKm = (
 const PatientFindClinics = () => {
   const [locationGranted, setLocationGranted] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
-  const [locationName, setLocationName] = useState("");
   const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -279,31 +302,9 @@ const PatientFindClinics = () => {
     void fetchClinics();
   }, [locationGranted, userCoords]);
 
-  useEffect(() => {
-    if (!locationGranted || !navigator.geolocation) {
-      return;
-    }
-
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setUserCoords({ latitude, longitude });
-      },
-      (error) => {
-        console.error("Location watch error:", error);
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000,
-        timeout: 30000,
-      }
-    );
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [locationGranted]);
-
   const handleGPS = () => {
     setLocationLoading(true);
+    setMessage({ text: "Your browser may ask for location permission. Tap Allow to continue.", type: "success" });
 
     if (!navigator.geolocation) {
       setLocationLoading(false);
@@ -315,33 +316,23 @@ const PatientFindClinics = () => {
       async (position) => {
         const { latitude, longitude } = position.coords;
         setUserCoords({ latitude, longitude });
-
-        try {
-          const response = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
-          );
-          const data = await response.json();
-          const resolvedLocation =
-            data.locality ||
-            data.city ||
-            data.principalSubdivision ||
-            `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-          setLocationName(resolvedLocation);
-        } catch {
-          setLocationName(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-        }
-
         setLocationGranted(true);
         setLocationLoading(false);
       },
       (error) => {
         console.error("Geolocation error:", error);
         setLocationLoading(false);
-        setMessage({ text: "Please allow location access to see nearby clinics.", type: "error" });
+        const denied = error.code === error.PERMISSION_DENIED;
+        setMessage({
+          text: denied
+            ? "Location is blocked. Enable location permission in your browser settings and try again."
+            : "Could not get location. Please try again.",
+          type: "error",
+        });
       },
       {
         enableHighAccuracy: true,
-        timeout: 30000,
+        timeout: 12000,
         maximumAge: 0,
       }
     );
@@ -411,11 +402,22 @@ const PatientFindClinics = () => {
         </div>
       )}
 
-      <main className="mx-auto max-w-5xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground">Find Clinics Near You</h1>
-        <p className="mt-1 text-muted-foreground">
-          Allow your location to see nearby clinics. Search can find matching clinics from anywhere.
-        </p>
+      <main className="mx-auto max-w-5xl px-4 py-5 sm:py-8">
+        <section>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-foreground">Find Clinics Near You</h1>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground sm:text-base">
+                Nearby clinics first. Search works anywhere.
+              </p>
+            </div>
+            {locationGranted && (
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary" title="Location enabled" aria-label="Location enabled">
+                <MapPin className="h-4 w-4" />
+              </span>
+            )}
+          </div>
+        </section>
 
         {!locationGranted ? (
           <div className="mt-10">
@@ -423,36 +425,25 @@ const PatientFindClinics = () => {
           </div>
         ) : (
           <>
-            <div className="mt-6">
-              <div className="flex flex-col gap-4 sm:flex-row">
+            <div className="mt-4 space-y-3 sm:mt-6">
+              <div className="grid gap-3 sm:grid-cols-[1fr_16rem]">
                 <div className="flex-1">
-                  <SearchBar value={search} onChange={setSearch} location={locationName} />
+                  <SearchBar value={search} onChange={setSearch} />
                 </div>
-                <div className="sm:w-64">
+                <div>
                   <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                    <SelectTrigger className="h-[42px] w-full">
+                    <SelectTrigger className="h-11 w-full rounded-2xl border-border bg-card px-4 font-semibold shadow-sm">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
                       {Object.entries(medicalCategories).map(([key, category]) => (
                         <SelectItem key={key} value={key}>
-                          {category.name}
+                          {categoryEmoji[key] || "🏥"} {category.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-
-              <div className="mt-4 rounded-lg border border-[#00555A]/20 bg-[#00555A]/10 p-4">
-                <h3 className="font-semibold text-[#00555A]">
-                  {medicalCategories[selectedCategory].name}
-                </h3>
-                <p className="mt-1 text-sm text-[#00555A]/80">
-                  {isSearching
-                    ? "Showing matching clinics regardless of distance or current availability."
-                    : `${medicalCategories[selectedCategory].description}. Available clinics appear first, then clinics not available right now within ${SEARCH_RADIUS_KM} km.`}
-                </p>
               </div>
             </div>
 

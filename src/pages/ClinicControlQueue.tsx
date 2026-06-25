@@ -81,6 +81,18 @@ const ClinicControlQueue = () => {
   const [quickBookEmail, setQuickBookEmail] = useState("");
   const [sendingQuickBook, setSendingQuickBook] = useState(false);
 
+  const handlePrimaryQueueAction = async () => {
+    if (currentServing) {
+      const completed = await completePatient();
+      if (completed) {
+        localStorage.setItem("krama_pending_bill_patient", JSON.stringify(completed));
+        setMessage({ text: `${completed.patient_name} completed. Open Billing to create the bill.`, type: "success" });
+      }
+      return;
+    }
+    void nextPatient();
+  };
+
   useEffect(() => {
     if (!message) return;
     const timer = setTimeout(() => setMessage(null), 5000);
@@ -941,7 +953,7 @@ const ClinicControlQueue = () => {
                   ? "bg-[#FFC107] text-[#0F172A]"
                   : "bg-[#00555A] text-white hover:bg-[#00494F]"
               }`}
-              onClick={() => currentServing ? completePatient() : nextPatient()}
+              onClick={handlePrimaryQueueAction}
               disabled={
                 (!currentServing && queue.length === 0) ||
                 (!currentServing && queue.length > 0 && !canServeInCurrentSlot())
