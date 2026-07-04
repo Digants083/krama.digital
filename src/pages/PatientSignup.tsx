@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import AuthCard from "@/components/auth/AuthCard";
-import { User, Phone, Mail, Lock, ArrowRight, Check, X, Droplet } from "lucide-react";
+import { User, Phone, Mail, Lock, ArrowRight, Check, X } from "lucide-react";
 
 const validatePassword = (password: string) => ({
   length: password.length >= 8,
@@ -31,7 +31,7 @@ const PatientSignup = () => {
   const location = useLocation();
   const fromJoinQueue = location.state as { fromJoinQueue?: boolean; clinic_id?: string } | null;
   const [step, setStep] = useState<"form" | "otp">("form");
-  const [form, setForm] = useState({ name: "", phone: "", email: "", password: "", confirm: "", blood_group: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", password: "", confirm: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [passwordValid, setPasswordValid] = useState({
@@ -72,7 +72,6 @@ const PatientSignup = () => {
           email: form.email,
           password: form.password,
           phone: form.phone,
-          blood_group: form.blood_group,
         }),
       });
 
@@ -102,7 +101,7 @@ const PatientSignup = () => {
         email={form.email}
         onBack={() => setStep("form")}
         fromJoinQueue={fromJoinQueue}
-        userData={{ name: form.name, phone: form.phone, blood_group: form.blood_group }}
+        userData={{ name: form.name, phone: form.phone }}
       />
     );
   }
@@ -148,13 +147,6 @@ const PatientSignup = () => {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="blood_group">Blood Group</Label>
-            <div className="relative">
-              <Droplet className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input id="blood_group" placeholder="B+" value={form.blood_group} onChange={(e) => update("blood_group", e.target.value.toUpperCase())} className="pl-9" />
-            </div>
-          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
@@ -209,7 +201,7 @@ const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: {
   email: string,
   onBack: () => void,
   fromJoinQueue?: { fromJoinQueue?: boolean; clinic_id?: string } | null,
-  userData?: { name: string; phone: string; blood_group?: string }
+  userData?: { name: string; phone: string }
 }) => {
   const navigate = useNavigate();
   const [otp, setOtp] = useState("");
@@ -264,8 +256,7 @@ const OTPVerificationPage = ({ email, onBack, fromJoinQueue, userData }: {
       localStorage.setItem("patientData", JSON.stringify({
         email: email,
         name: userData?.name || "",
-        phone: userData?.phone || "",
-        blood_group: userData?.blood_group || ""
+        phone: userData?.phone || ""
       }));
 
       setSuccess(true);

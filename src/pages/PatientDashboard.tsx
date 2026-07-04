@@ -2,16 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePatient } from "@/context/PatientContext";
 import {
-  Hash,
   CalendarPlus,
   ChevronRight,
   Clock,
+  Hash,
   MapPin,
   Star,
   User,
 } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
-import { formatDurationMinutes } from "@/lib/timeFormat";
+import WaitingRoomIllustration from "@/components/illustrations/WaitingRoomIllustration";
+import { formatDurationMinutes, formatIsoClock, formatTimeRange } from "@/lib/timeFormat";
 
 type Appointment = {
   id: number;
@@ -34,6 +35,49 @@ type Appointment = {
   latest_eta?: string | null;
   active_delay_minutes?: number | null;
   session_status?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
+};
+
+const formatBookedDate = (date?: string | null) => {
+  if (!date) return "Not set";
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const cleanSessionTimeLabel = (time?: string | null) =>
+  time?.replace(/^(time|session)\s*\d+\s*/i, "").trim() || "";
+
+const parseSessionTimeRange = (sessionTime?: string | null) => {
+  if (!sessionTime) return "";
+  try {
+    const range = JSON.parse(sessionTime.replace(/'/g, '"'));
+    if (Array.isArray(range) && range.length >= 2) {
+      return formatTimeRange(range.map(Number));
+    }
+  } catch {
+    // Fall back to the raw session label below.
+  }
+  return "";
+};
+
+const buildClinicMapsUrl = (latitude?: string | null, longitude?: string | null) => {
+  const lat = latitude ? Number(latitude) : NaN;
+  const lng = longitude ? Number(longitude) : NaN;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `https://www.google.com/maps?q=${lat},${lng}&z=17`;
+};
+
+const openClinicInGoogleMaps = (latitude?: string | null, longitude?: string | null) => {
+  const mapsUrl = buildClinicMapsUrl(latitude, longitude);
+  if (!mapsUrl) return;
+  window.open(mapsUrl, "_blank", "noopener,noreferrer");
 };
 
 const PatientDashboard = () => {
@@ -70,15 +114,13 @@ const PatientDashboard = () => {
         if (user.email) {
           setPatientEmail(user.email);
           fetchAppointments(user.email);
-        } else if (typeof userStr === 'string' && userStr.includes('@')) {
-          // Handle case where user is stored as plain email string
+        } else if (typeof userStr === "string" && userStr.includes("@")) {
           setPatientEmail(userStr);
           fetchAppointments(userStr);
         } else {
           setLoading(false);
         }
       } catch (e) {
-        // Handle corrupted data - clear and redirect to login
         localStorage.removeItem("user");
         localStorage.removeItem("patient_email");
         localStorage.removeItem("patientData");
@@ -117,20 +159,45 @@ const PatientDashboard = () => {
     });
   };
 
-  const patientName = profile.name?.trim() || "Patient";
+  const storedPatientData = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("patientData") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const storedUserData = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const patientName =
+    (profile.name && profile.name !== "Patient" ? profile.name.trim() : "") ||
+    storedPatientData.name?.trim?.() ||
+    storedUserData.name?.trim?.() ||
+    "Patient";
   const nextAppointment = appointments[0] || null;
-  const appointmentCountText = `${appointments.length} active ${appointments.length === 1 ? "booking" : "bookings"}`;
-  const visitTimeText = nextAppointment
-    ? [nextAppointment.date, nextAppointment.time].filter(Boolean).join(" at ")
-    : "Book your next clinic visit";
-  const waitText = nextAppointment?.consultation_window || nextAppointment?.estimated_window_text || "Track token status live";
-  const delayText = nextAppointment?.active_delay_minutes
-    ? `Delay ${formatDurationMinutes(nextAppointment.active_delay_minutes)}`
-    : null;
+  const bookedDateText = nextAppointment ? formatBookedDate(nextAppointment.date) : "No appointment booked yet";
+  const sessionSlotText =
+    parseSessionTimeRange(nextAppointment?.session_time) ||
+    cleanSessionTimeLabel(nextAppointment?.time) ||
+    "Session time pending";
+  const estimatedTimeText =
+    nextAppointment?.consultation_window ||
+    nextAppointment?.estimated_window_text ||
+    (nextAppointment?.predicted_eta ? formatIsoClock(nextAppointment.predicted_eta) : "") ||
+    "Live queue updates will appear here.";
+  const predictedTimeText = nextAppointment?.predicted_eta ? formatIsoClock(nextAppointment.predicted_eta) : "";
+  const activeDelayMinutes = nextAppointment?.active_delay_minutes ?? 0;
+  const delayText = activeDelayMinutes > 0 ? `Delay ${formatDurationMinutes(activeDelayMinutes)}` : null;
+  const clinicMapsUrl = buildClinicMapsUrl(nextAppointment?.latitude, nextAppointment?.longitude);
+  const clinicAddress = nextAppointment?.address?.trim() || "";
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#f7f4ef]">
         <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     );
@@ -138,164 +205,170 @@ const PatientDashboard = () => {
 
   return (
     <div className="min-h-screen bg-[#f7f4ef]">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6 sm:py-8 lg:py-10">
-        <section className="overflow-hidden rounded-[26px] bg-primary text-primary-foreground shadow-[0_22px_60px_-34px_rgba(31,92,84,0.9)] sm:rounded-[32px]">
-          <div className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[1.05fr_0.95fr] lg:p-8">
-            <div className="flex min-w-0 flex-col justify-between gap-8">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-foreground/70">Patient Dashboard</p>
-                  <h1 className="mt-3 truncate font-display text-3xl font-bold tracking-tight text-white sm:text-5xl">
-                    Hi, {patientName}
-                  </h1>
-                  <p className="mt-3 max-w-xl text-sm leading-6 text-primary-foreground/80 sm:text-base">
-                    Book visits, check your token, and keep feedback in one clean place.
-                  </p>
-                </div>
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-3 py-4 sm:gap-5 sm:px-6 sm:py-8">
+        <div className="flex items-start gap-3 sm:block">
+          <Link
+            to="/patient/profile"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#ded6cc] bg-white text-primary shadow-sm sm:hidden"
+            aria-label="Profile"
+          >
+            <User className="h-5 w-5" />
+          </Link>
+          <header className="min-w-0 flex-1 rounded-2xl bg-primary px-4 py-4 text-primary-foreground shadow-[0_18px_44px_-34px_rgba(31,92,84,0.9)] sm:flex sm:items-center sm:justify-between sm:gap-4 sm:rounded-3xl sm:px-7 sm:py-6">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary-foreground/70">Patient Dashboard</p>
+              <p className="mt-2 text-sm font-medium text-primary-foreground/80">Welcome back</p>
+              <h1 className="mt-0.5 break-words font-display text-2xl font-bold tracking-tight text-white sm:truncate sm:text-4xl">
+                {patientName}
+              </h1>
+            </div>
 
-                <Link
-                  to="/patient/profile"
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/12 transition hover:bg-white/20"
-                  aria-label="Profile"
-                >
-                  <User className="h-5 w-5" />
-                </Link>
+            <Link
+              to="/patient/profile"
+              className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/12 transition hover:bg-white/20 sm:inline-flex"
+              aria-label="Profile"
+            >
+              <User className="h-5 w-5" />
+            </Link>
+          </header>
+        </div>
+
+        <section className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="rounded-2xl border border-[#ded6cc] bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Current Appointment</p>
+                <h2 className="mt-2 break-words text-2xl font-bold text-slate-950">
+                  {nextAppointment ? nextAppointment.clinic_name : "No active appointment"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {nextAppointment ? nextAppointment.doctor_name || "Doctor details pending" : "Book a clinic visit when you are ready."}
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <div className="rounded-[18px] bg-white/10 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-foreground/65">Bookings</p>
-                  <p className="mt-1 text-lg font-bold text-white">{appointmentCountText}</p>
-                </div>
-                <div className="rounded-[18px] bg-white/10 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-foreground/65">Next Visit</p>
-                  <p className="mt-1 truncate text-lg font-bold text-white">{nextAppointment ? nextAppointment.appointment_token : "Ready"}</p>
-                </div>
-                <div className="col-span-2 rounded-[18px] bg-white/10 px-4 py-3 sm:col-span-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-foreground/65">Status</p>
-                  <p className="mt-1 truncate text-lg font-bold text-white">{nextAppointment?.status || "No queue"}</p>
-                </div>
+              {nextAppointment ? (
+                <button
+                  type="button"
+                  onClick={() => handleAppointmentClick(nextAppointment)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-bold text-white transition hover:bg-primary/90 sm:w-auto sm:py-2"
+                >
+                  View details <ChevronRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <Link
+                  to="/patient/find-clinics"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-bold text-white transition hover:bg-primary/90 sm:w-auto sm:py-2"
+                >
+                  Book appointment <ChevronRight className="h-4 w-4" />
+                </Link>
+              )}
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 overflow-hidden rounded-2xl bg-[#f6f3ee] sm:mt-5">
+              <div className="min-w-0 border-r border-[#e5ddd2] p-3 sm:p-4">
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-primary sm:text-[11px]">
+                  <Clock className="h-3.5 w-3.5 shrink-0" /> Date
+                </p>
+                <p className="mt-1.5 text-sm font-bold leading-snug text-slate-950 sm:text-base">{bookedDateText}</p>
+                {nextAppointment ? (
+                  <p className="mt-1 text-[11px] leading-4 text-slate-500 sm:text-sm">{sessionSlotText}</p>
+                ) : null}
+              </div>
+
+              <div className="min-w-0 border-r border-[#e5ddd2] p-3 sm:p-4">
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-primary sm:text-[11px]">
+                  <Clock className="h-3.5 w-3.5 shrink-0" /> Est. time
+                </p>
+                <p className="mt-1.5 text-sm font-bold leading-snug text-slate-950 sm:text-base">{estimatedTimeText}</p>
+                {predictedTimeText && predictedTimeText !== estimatedTimeText ? (
+                  <p className="mt-1 text-[11px] leading-4 text-primary/80 sm:text-sm">Around {predictedTimeText}</p>
+                ) : null}
+                {delayText ? (
+                  <p className="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800 sm:text-xs">
+                    {delayText}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="min-w-0 p-3 sm:p-4">
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-primary sm:text-[11px]">
+                  <Hash className="h-3.5 w-3.5 shrink-0" /> Token
+                </p>
+                <p className="mt-1.5 text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">
+                  {nextAppointment?.appointment_token || "-"}
+                </p>
+                <p className="mt-1 text-[11px] capitalize leading-4 text-primary/80 sm:text-sm">{nextAppointment?.status || "Ready"}</p>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => (nextAppointment ? handleAppointmentClick(nextAppointment) : navigate("/patient/find-clinics"))}
-              className="rounded-[24px] border border-white/14 bg-white px-5 py-5 text-left text-slate-950 shadow-sm transition hover:-translate-y-0.5 hover:shadow-xl sm:p-6"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Next Appointment</p>
-                  <h2 className="mt-3 text-2xl font-bold leading-tight">
-                    {nextAppointment ? nextAppointment.clinic_name : "Find a clinic near you"}
-                  </h2>
-                </div>
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#e8f4ef] text-primary">
-                  <ChevronRight className="h-5 w-5" />
-                </span>
-              </div>
-
-              <div className="mt-5 space-y-3 text-sm text-slate-600">
-                <p className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-primary" />
-                  <span className="font-semibold text-slate-900">{visitTimeText}</span>
-                </p>
+            <div className="mt-4 rounded-2xl border border-[#e2ddd5] p-3.5 text-sm leading-6 text-slate-600 sm:p-4">
+              {clinicAddress ? (
+                clinicMapsUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => openClinicInGoogleMaps(nextAppointment?.latitude, nextAppointment?.longitude)}
+                    className="group flex w-full items-start gap-3 rounded-xl text-left transition hover:bg-[#f6f3ee]"
+                  >
+                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary transition group-hover:bg-primary group-hover:text-white">
+                      <MapPin className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-950">{clinicAddress}</span>
+                      <span className="mt-1 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-[0.14em] text-primary">
+                        Open in Google Maps
+                        <ChevronRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                      </span>
+                    </span>
+                  </button>
+                ) : (
+                  <p className="flex items-start gap-2">
+                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <span>{clinicAddress}</span>
+                  </p>
+                )
+              ) : (
                 <p className="flex items-start gap-2">
                   <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <span>{nextAppointment?.address || waitText}</span>
+                  <span>Clinic location will appear here once available.</span>
                 </p>
-                {delayText ? <p className="rounded-full bg-amber-100 px-3 py-2 text-xs font-bold text-amber-800">{delayText}</p> : null}
-              </div>
-            </button>
-          </div>
-        </section>
-
-        <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-[24px] border border-[#ded6cc] bg-white p-4 shadow-sm sm:p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Quick Actions</p>
-                <h2 className="mt-1 text-xl font-bold text-slate-950">What do you want to do?</h2>
-              </div>
+              )}
             </div>
+          </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+          <aside className="rounded-2xl border border-[#ded6cc] bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Actions</p>
+            <h2 className="mt-2 text-xl font-bold text-slate-950">What do you need?</h2>
+
+            <div className="mt-5 grid gap-3">
               <Link
                 to="/patient/find-clinics"
-                className="group flex items-center gap-4 rounded-[18px] border border-[#dbe5e1] bg-[#f8fbfa] p-4 transition hover:border-primary/40 hover:bg-[#eef8f4]"
+                className="group flex min-h-20 items-center gap-3 rounded-2xl border border-[#dbe5e1] bg-[#f8fbfa] p-3.5 transition hover:border-primary/40 hover:bg-[#eef8f4] sm:gap-4 sm:p-4"
               >
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-white">
-                  <CalendarPlus className="h-6 w-6" />
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-white">
+                  <CalendarPlus className="h-5 w-5" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-base font-bold text-slate-950">New Appointment</span>
-                  <span className="mt-1 block text-sm leading-5 text-slate-500">Search clinics and book a token.</span>
+                  <span className="block font-bold text-slate-950">Book a visit</span>
+                  <span className="mt-1 block text-sm leading-5 text-slate-500">Find clinics and get a token.</span>
                 </span>
                 <ChevronRight className="h-5 w-5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-primary" />
               </Link>
 
-              <button
-                type="button"
-                onClick={() => (nextAppointment ? handleAppointmentClick(nextAppointment) : navigate("/confirmation"))}
-                className="group flex items-center gap-4 rounded-[18px] border border-[#dbe5e1] bg-[#f8fbfa] p-4 text-left transition hover:border-primary/40 hover:bg-[#eef8f4]"
-              >
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#102033] text-white">
-                  <Hash className="h-6 w-6" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-base font-bold text-slate-950">Booked Appointment</span>
-                  <span className="mt-1 block text-sm leading-5 text-slate-500">
-                    {nextAppointment ? `Token ${nextAppointment.appointment_token}` : "Open your booking details."}
-                  </span>
-                </span>
-                <ChevronRight className="h-5 w-5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-primary" />
-              </button>
-
               <Link
                 to="/patient/reviews"
-                className="group flex items-center gap-4 rounded-[18px] border border-[#dbe5e1] bg-[#f8fbfa] p-4 transition hover:border-primary/40 hover:bg-[#eef8f4]"
+                className="group flex min-h-20 items-center gap-3 rounded-2xl border border-[#dbe5e1] bg-[#f8fbfa] p-3.5 transition hover:border-primary/40 hover:bg-[#eef8f4] sm:gap-4 sm:p-4"
               >
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#ffc247] text-slate-950">
-                  <Star className="h-6 w-6" />
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#ffc247] text-slate-950">
+                  <Star className="h-5 w-5" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-base font-bold text-slate-950">Write Feedback</span>
+                  <span className="block font-bold text-slate-950">Write feedback</span>
                   <span className="mt-1 block text-sm leading-5 text-slate-500">Share your clinic experience.</span>
                 </span>
                 <ChevronRight className="h-5 w-5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-primary" />
               </Link>
             </div>
-          </div>
-
-          <div className="rounded-[24px] border border-[#ded6cc] bg-white p-4 shadow-sm sm:p-5">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Visit Summary</p>
-            <h2 className="mt-1 text-xl font-bold text-slate-950">Your clinic flow</h2>
-
-            <div className="mt-5 space-y-3">
-              <div className="rounded-[18px] bg-[#f6f3ee] p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Appointment</p>
-                <p className="mt-2 text-lg font-bold text-slate-950">
-                  {nextAppointment ? `${nextAppointment.doctor_name || "Doctor"} at ${nextAppointment.clinic_name}` : "No active appointment"}
-                </p>
-                <p className="mt-1 text-sm text-slate-500">{visitTimeText}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-[18px] border border-[#e2ddd5] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Token</p>
-                  <p className="mt-2 text-2xl font-black text-primary">{nextAppointment?.appointment_token || "-"}</p>
-                </div>
-                <div className="rounded-[18px] border border-[#e2ddd5] p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Queue</p>
-                  <p className="mt-2 truncate text-lg font-black text-slate-950">{nextAppointment?.status || "Ready"}</p>
-                </div>
-              </div>
-
-              <p className="rounded-[18px] bg-[#eaf7f3] px-4 py-3 text-sm font-semibold leading-5 text-primary">
-                {nextAppointment ? waitText : "Start with New Appointment when you are ready to visit a clinic."}
-              </p>
-            </div>
-          </div>
+          </aside>
         </section>
       </main>
     </div>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
-import { CalendarDays, MapPin, Stethoscope, type LucideIcon } from "lucide-react";
+import { MapPin, Stethoscope, Users } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 
@@ -179,7 +179,6 @@ const AppointmentConfirmation = () => {
   const doctorName = state?.doctor || appointmentDetails?.doctor_name || "Available Doctor";
   const dateText = state?.date || appointmentDetails?.date || "";
   const timeText = state?.time || appointmentDetails?.time || "";
-  const displayTimeText = timeText.replace(/^(time|session)\s*\d+\s*/i, "").trim();
   const patientsAhead = queuePosition?.patients_ahead ?? 0;
   const estimatedWait = queuePosition?.estimated_wait_minutes ?? state?.estimated_wait_minutes ?? appointmentDetails?.estimated_wait_minutes ?? 0;
   const consultationWindow =
@@ -202,6 +201,9 @@ const AppointmentConfirmation = () => {
   const sessionStatusText = queuePosition?.session_status || appointmentDetails?.session_status || state?.session_status || "";
   const hasActiveDelay = Boolean(delayNotice || activeDelayMinutes > 0 || sessionStatusText.toLowerCase() === "delayed");
   const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : delayNotice || "Delayed";
+  const queuePositionText = queuePosition
+    ? `${queuePosition.queue_position || queuePosition.your_position} of ${queuePosition.total_in_queue}`
+    : null;
 
   useEffect(() => {
     if (!token || !clinicName || !doctorName || !dateText || !timeText) return;
@@ -252,104 +254,95 @@ const AppointmentConfirmation = () => {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
-      <div className="w-full max-w-md">
-        <div className="rounded-[36px] bg-primary p-8 text-white shadow-[0_28px_80px_-40px_rgba(31,92,84,0.9)]">
-          <p className="text-sm uppercase tracking-[0.28em] text-white/70">Your Token</p>
-          <p className="mt-4 font-display text-6xl font-bold tracking-tight">{token}</p>
-
-          <div className="mt-8 grid grid-cols-2 gap-4">
-            <div className="rounded-[24px] bg-white/10 p-5">
-              <p className="text-sm text-white/70">Now serving</p>
-              <p className="mt-3 text-3xl font-bold">{nowServing}</p>
-            </div>
-            <div className="rounded-[24px] bg-white/10 p-5">
-              <p className="text-sm text-white/70">Estimated wait</p>
-              <p className="mt-3 text-3xl font-bold">{formatDurationMinutes(estimatedWait)}</p>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-[24px] bg-white/10 p-5">
-            <p className="text-sm text-white/70">Estimated Consultation Window</p>
-            <p className="mt-3 text-2xl font-bold leading-tight">{consultationWindow || "Calculating..."}</p>
-            {predictedConsultationTime && (
-              <p className="mt-2 text-sm font-semibold text-white/80">Predicted Consultation Time: {predictedConsultationTime}</p>
+    <div className="flex min-h-screen items-center justify-center bg-[#f5f3ef] px-4 py-10">
+      <div className="w-full max-w-md space-y-4">
+        {/* Token & live queue */}
+        <div className="overflow-hidden rounded-[32px] bg-primary shadow-[0_28px_80px_-40px_rgba(31,92,84,0.9)]">
+          <div className="px-6 pb-2 pt-8 text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/60">Your Token</p>
+            <p className="mt-2 font-display text-7xl font-bold tracking-tight text-white">{token}</p>
+            {queuePositionText && (
+              <p className="mt-2 text-sm font-medium text-white/70">Position {queuePositionText}</p>
             )}
           </div>
 
-          <div className={`mt-4 grid gap-4 ${hasActiveDelay ? "grid-cols-2" : "grid-cols-1"}`}>
-            <div className="rounded-[24px] bg-white/10 p-5">
-              <p className="text-sm text-white/70">Patients ahead</p>
-              <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
+          <div className="mx-5 mb-5 mt-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <TokenStat label="Now serving" value={nowServing} />
+              <TokenStat label="Est. wait" value={formatDurationMinutes(estimatedWait)} />
             </div>
-            {hasActiveDelay && (
-              <div className="rounded-[24px] bg-white/10 p-5">
-                <p className="text-sm text-white/70">Delay update</p>
-                <p className="mt-3 text-3xl font-bold">{delayAmountText}</p>
-              </div>
-            )}
-          </div>
-        </div>
 
-        <div className="mt-5 rounded-[28px] border border-border/70 bg-white p-6 shadow-sm">
-          <div className="space-y-4">
-            <DetailRow icon={MapPin} label="Clinic" value={clinicName} subvalue={clinicAddress} />
-            <DetailRow icon={Stethoscope} label="Doctor" value={doctorName} />
-            <DetailRow icon={CalendarDays} label="Appointment" value={dateText} subvalue={displayTimeText} />
-            <div className="grid grid-cols-2 gap-4 rounded-[20px] bg-secondary/60 p-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Token</p>
-                <p className="mt-1 text-lg font-bold text-foreground">{token}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Position</p>
-                <p className="mt-1 text-lg font-bold text-foreground">
-                  {queuePosition ? `${queuePosition.queue_position || queuePosition.your_position} / ${queuePosition.total_in_queue}` : "1 / 1"}
-                </p>
-              </div>
-            </div>
-            <div className="rounded-[20px] bg-secondary/60 p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Queue Status</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{sessionStatusText || "Active"}</p>
-            </div>
-            <div className="rounded-[20px] bg-primary/5 p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{consultationWindow || "Calculating..."}</p>
+            <div className="rounded-2xl bg-white/10 px-4 py-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-white/60">Consultation window</p>
+              <p className="mt-1.5 text-lg font-bold leading-snug text-white">
+                {consultationWindow || "Calculating..."}
+              </p>
               {predictedConsultationTime && (
-                <p className="mt-1 text-sm font-semibold text-primary">Predicted Consultation Time: {predictedConsultationTime}</p>
+                <p className="mt-1 text-sm text-white/75">Around {predictedConsultationTime}</p>
+              )}
+            </div>
+
+            <div className={`grid gap-3 ${hasActiveDelay ? "grid-cols-2" : "grid-cols-1"}`}>
+              <TokenStat label="Patients ahead" value={String(patientsAhead)} icon={Users} />
+              {hasActiveDelay && (
+                <div className="rounded-2xl bg-amber-400/20 px-4 py-3.5">
+                  <p className="text-xs font-medium uppercase tracking-wide text-amber-100/80">Delay</p>
+                  <p className="mt-1 text-xl font-bold text-white">{delayAmountText}</p>
+                </div>
               )}
             </div>
           </div>
         </div>
 
-        <div className="mt-5">
-          <Button variant="outline" className="w-full" onClick={() => navigate("/patient")}>
-            Back to Dashboard
-          </Button>
+        {/* Clinic info only */}
+        <div className="rounded-[28px] border border-[#e6ded3] bg-white p-6 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+              <MapPin className="h-5 w-5 text-primary" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Clinic</p>
+              <p className="mt-0.5 text-lg font-bold text-foreground">{clinicName}</p>
+              {clinicAddress ? (
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{clinicAddress}</p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="mt-5 flex items-center gap-3 border-t border-border/50 pt-5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+              <Stethoscope className="h-5 w-5 text-primary" />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Doctor</p>
+              <p className="mt-0.5 font-semibold text-foreground">{doctorName}</p>
+            </div>
+          </div>
         </div>
+
+        <Button variant="outline" className="h-12 w-full rounded-2xl border-[#e6ded3] bg-white" onClick={() => navigate("/patient")}>
+          Back to Dashboard
+        </Button>
       </div>
     </div>
   );
 };
 
-const DetailRow = ({
-  icon: Icon,
+const TokenStat = ({
   label,
   value,
-  subvalue,
+  icon: Icon,
 }: {
-  icon: LucideIcon;
   label: string;
   value: string;
-  subvalue?: string;
+  icon?: typeof Users;
 }) => (
-  <div className="flex items-start gap-3">
-    <Icon className="mt-0.5 h-5 w-5 text-primary" />
-    <div>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="font-semibold text-foreground">{value}</p>
-      {subvalue ? <p className="text-sm text-muted-foreground">{subvalue}</p> : null}
+  <div className="rounded-2xl bg-white/10 px-4 py-3.5">
+    <div className="flex items-center gap-1.5">
+      {Icon ? <Icon className="h-3.5 w-3.5 text-white/50" /> : null}
+      <p className="text-xs font-medium uppercase tracking-wide text-white/60">{label}</p>
     </div>
+    <p className="mt-1 text-2xl font-bold text-white">{value}</p>
   </div>
 );
 

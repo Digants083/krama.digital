@@ -347,12 +347,9 @@ const PatientProfile = () => {
           </div>
 
           {dbProfile && (
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 md:grid-cols-4 md:gap-4">
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 md:gap-4">
               <ProfileStat label="Patient ID" value={dbProfile.patient_id} mono />
-              <ProfileStat label="Phone" value={dbProfile.phone} />
-              <ProfileStat label="Blood Group" value={dbProfile.blood_group || "N/A"} />
-              <ProfileStat label="Member Since" value={new Date(dbProfile.created_at).toLocaleDateString()} />
-            </div>
+              <ProfileStat label="Phone" value={dbProfile.phone} />`r`n            </div>
           )}
         </section>
 

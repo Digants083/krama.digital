@@ -159,6 +159,18 @@
   .animate-path-pulse {
     animation: path-pulse 1.6s ease-in-out infinite;
   }
+
+  .animate-section-rise {
+    animation: section-rise 700ms ease both;
+  }
+
+  .animate-path-travel {
+    animation: path-travel 4s ease-in-out infinite;
+  }
+
+  .animate-path-shimmer {
+    animation: path-shimmer 3s ease-in-out infinite;
+  }
 }
 
 @keyframes hero-kenburns {
@@ -287,5 +299,64 @@
   50% {
     opacity: 0.78;
     transform: scale(1.18);
+  }
+}
+
+@keyframes section-rise {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes path-travel {
+  0% {
+    top: 4%;
+    opacity: 0.4;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    top: 96%;
+    opacity: 0.4;
+  }
+}
+
+@keyframes path-shimmer {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-hero-float,
+  .animate-hero-float-delayed,
+  .animate-hero-kenburns,
+  .animate-hero-copy-rise,
+  .animate-hero-orbit,
+  .animate-panel-drift,
+  .animate-panel-rise,
+  .animate-ticket-slide,
+  .animate-progress-grow,
+  .animate-soft-ping,
+  .animate-live-rail,
+  .animate-path-draw,
+  .animate-path-pulse,
+  .animate-path-shimmer,
+  .animate-path-travel,
+  .animate-section-rise {
+    animation: none !important;
   }
 }
