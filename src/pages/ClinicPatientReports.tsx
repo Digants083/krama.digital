@@ -60,7 +60,7 @@ const PendingReportCard = ({
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)]">
+    <div className="overflow-hidden rounded-[26px] border border-white/70 bg-white/80 backdrop-blur shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)]">
       {/* Header - always visible */}
       <div 
         className="cursor-pointer p-4 transition-colors hover:bg-[#00555A]/5"
@@ -68,7 +68,7 @@ const PendingReportCard = ({
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3 sm:items-center">
-            <div className="shrink-0 rounded-lg bg-[#00555A]/10 p-2">
+            <div className="shrink-0 rounded-2xl bg-[#00555A]/10 p-2">
               <User className="h-5 w-5 text-[#00555A]" />
             </div>
             <div className="min-w-0">
@@ -100,14 +100,14 @@ const PendingReportCard = ({
 
       {/* Expanded Content */}
       {expanded && (
-        <div className="border-t border-[#e6ded3] bg-[#f0ede6] p-4">
+        <div className="border-t border-[#e6ded3] bg-[#f6f1e8] p-4">
           {/* Booking Details */}
           <div className="mb-4">
             <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#00555A]">
               <Calendar className="h-4 w-4" />
               Appointment Details
             </h4>
-            <div className="rounded-lg border border-[#e6ded3] bg-[#fffdf8] p-3 text-sm">
+            <div className="rounded-2xl border border-[#e6ded3] bg-white/85 p-3 text-sm">
               <p className="text-[#0F172A]">
                 <span className="font-medium">Booked on:</span> {formatDate(report.created_at)}
               </p>
@@ -217,7 +217,7 @@ const PendingReportCard = ({
               disabled={processing === report.report_id}
               size="sm"
               variant="outline"
-              className="w-full gap-1 border-[#d8d1c6] text-muted-foreground hover:bg-[#f0ede6] sm:w-auto"
+              className="w-full gap-1 border-[#d8d1c6] text-muted-foreground hover:bg-[#f6f1e8] sm:w-auto"
             >
               <XCircle className="h-4 w-4" />
               No Report
@@ -469,14 +469,14 @@ const ClinicPatientReports = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee]">
+    <div className="min-h-screen bg-transparent">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/95 shadow-sm backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-[#fbfaf7]/85 shadow-sm backdrop-blur-xl">
         <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-3 px-4 py-2">
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => navigate("/clinic")}
-              className="shrink-0 rounded-lg bg-[#00555A]/10 p-2 text-[#00555A] transition-colors hover:bg-[#00555A]/15"
+              className="shrink-0 rounded-2xl bg-[#00555A]/10 p-2 text-[#00555A] transition-colors hover:bg-[#00555A]/15"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
@@ -487,7 +487,7 @@ const ClinicPatientReports = () => {
           </div>
           <Button
             variant="outline"
-            className="shrink-0 rounded-lg border-[#00555A]/30 px-3 py-2 font-medium text-[#00555A] transition-all hover:bg-[#00555A]/10 sm:px-4"
+            className="shrink-0 rounded-2xl border-[#00555A]/30 px-3 py-2 font-medium text-[#00555A] transition-all hover:bg-[#00555A]/10 sm:px-4"
             onClick={() => {
               fetchPendingReports();
               fetchCompletedReports();
@@ -504,28 +504,28 @@ const ClinicPatientReports = () => {
         {/* Stats Cards */}
         {stats && (
           <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
+            <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
                 <FileText className="h-5 w-5 text-[#00555A]" />
               </div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">Pending</p>
               <p className="text-2xl font-bold text-[#0F172A] sm:text-3xl">{stats.pending}</p>
             </div>
-            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
+            <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
                 <CheckCircle className="h-5 w-5 text-[#00555A]" />
               </div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">Provided</p>
               <p className="text-2xl font-bold text-[#00555A] sm:text-3xl">{stats.provided}</p>
             </div>
-            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
+            <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#FFC107]/20">
                 <XCircle className="h-5 w-5 text-[#7A5800]" />
               </div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">No Report</p>
               <p className="text-2xl font-bold text-[#7A5800] sm:text-3xl">{stats.no_report}</p>
             </div>
-            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
+            <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-4 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)] sm:p-5">
               <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#00555A]/10">
                 <Package className="h-5 w-5 text-[#00555A]" />
               </div>
@@ -557,12 +557,12 @@ const ClinicPatientReports = () => {
         {activeTab === "pending" && (
           <div className="space-y-3">
             {loading ? (
-              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <div className="animate-spin h-8 w-8 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto mb-4"></div>
                 <p className="text-muted-foreground">Loading pending reports...</p>
               </div>
             ) : pendingReports.length === 0 ? (
-              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <FileText className="mx-auto mb-4 h-12 w-12 text-[#00555A]/35" />
                 <p className="mb-2 font-medium text-[#0F172A]">No pending reports</p>
                 <p className="text-sm text-muted-foreground">All patients have been processed</p>
@@ -588,12 +588,12 @@ const ClinicPatientReports = () => {
         {activeTab === "completed" && (
           <div className="space-y-4">
             {loading ? (
-              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <div className="animate-spin h-8 w-8 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto mb-4"></div>
                 <p className="text-muted-foreground">Loading completed reports...</p>
               </div>
             ) : completedReports.length === 0 ? (
-              <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
+              <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-8 text-center shadow-[0_18px_50px_-32px_rgba(19,55,50,0.45)]">
                 <Package className="mx-auto mb-4 h-12 w-12 text-[#00555A]/35" />
                 <p className="mb-2 font-medium text-[#0F172A]">No completed reports</p>
                 <p className="text-sm text-muted-foreground">Processed reports will appear here</p>
@@ -602,12 +602,12 @@ const ClinicPatientReports = () => {
               completedReports.map((report) => (
                 <div
                   key={report.report_id}
-                  className="overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)] transition-shadow hover:shadow-[0_20px_60px_-30px_rgba(19,55,50,0.55)]"
+                  className="overflow-hidden rounded-[26px] border border-white/70 bg-white/80 backdrop-blur shadow-[0_18px_50px_-30px_rgba(19,55,50,0.45)] transition-shadow hover:shadow-[0_20px_60px_-30px_rgba(19,55,50,0.55)]"
                 >
                   {/* Patient Header */}
-                  <div className="flex flex-col gap-3 border-b border-[#e6ded3] bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                  <div className="flex flex-col gap-3 border-b border-[#e6ded3] bg-[#f6f1e8] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="shrink-0 rounded-lg bg-[#00555A]/10 p-2">
+                      <div className="shrink-0 rounded-2xl bg-[#00555A]/10 p-2">
                         <User className="h-5 w-5 text-[#00555A]" />
                       </div>
                       <div className="min-w-0">
@@ -634,7 +634,7 @@ const ClinicPatientReports = () => {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-[#e6ded3] bg-[#f0ede6] p-4">
+                    <div className="rounded-xl border border-[#e6ded3] bg-[#f6f1e8] p-4">
                       <p className="mb-1 text-xs text-muted-foreground">Completed at:</p>
                       <p className="text-sm text-[#0F172A]">{formatDate(report.completed_at)}</p>
                     </div>

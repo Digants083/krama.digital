@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, CheckCircle, Lock, LogOut, Phone, Trash2, User, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle, Lock, LogOut, Phone, Trash2, User, XCircle, type LucideIcon } from "lucide-react";
 
 const getPasswordChecks = (password: string) => ({
   length: password.length >= 8,
@@ -308,14 +308,16 @@ const PatientProfile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee]">
-      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/90 backdrop-blur-xl">
-        <div className="section-container flex h-16 items-center gap-3 px-4 md:px-8">
-          <Link to="/patient" className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />
-            Dashboard
+    <div className="min-h-screen bg-transparent">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-[#fbfaf7]/80 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 w-full max-w-md items-center justify-between gap-3 px-4 sm:max-w-xl sm:px-6 md:max-w-2xl">
+          <Link to="/patient" className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-primary shadow-[0_16px_38px_-30px_rgba(19,55,50,0.7)] transition active:scale-95" aria-label="Back to dashboard">
+            <ArrowLeft className="h-5 w-5" />
           </Link>
-          <span className="text-sm font-semibold text-foreground">Patient Profile</span>
+          <span className="text-sm font-black uppercase tracking-[0.16em] text-primary/70">Profile</span>
+          <button type="button" onClick={handleLogout} className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-primary shadow-[0_16px_38px_-30px_rgba(19,55,50,0.7)] transition active:scale-95" aria-label="Sign out">
+            <LogOut className="h-5 w-5" />
+          </button>
         </div>
       </header>
 
@@ -329,35 +331,36 @@ const PatientProfile = () => {
         </div>
       )}
 
-      <main className="section-container px-4 py-6 md:px-8 md:py-10">
-        <section className="rounded-[24px] bg-primary px-4 py-6 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] sm:rounded-[32px] sm:px-6 sm:py-8 md:px-8">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20 sm:h-20 sm:w-20">
-              <User className="h-7 w-7 sm:h-10 sm:w-10" />
+      <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 pb-8 pt-5 sm:max-w-xl sm:px-6 md:max-w-2xl">
+        <section className="motion-rise motion-shimmer overflow-hidden rounded-[30px] bg-[#143b34] p-4 text-white shadow-[0_26px_70px_-42px_rgba(31,92,84,0.95)] sm:p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/20">
+              <User className="h-7 w-7" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.18em] text-primary-foreground/70 sm:text-sm sm:tracking-[0.22em]">Patient Account</p>
-              <h1 className="mt-1 truncate font-display text-2xl font-bold sm:mt-2 sm:text-3xl md:text-4xl">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">Patient Account</p>
+              <h1 className="mt-1 truncate font-display text-3xl font-bold">
                 {dbProfile ? dbProfile.name : profile.name}
               </h1>
-              <p className="mt-1 truncate text-sm text-primary-foreground/75 sm:mt-2 sm:text-base">
+              <p className="mt-1 truncate text-sm text-white/70">
                 {dbProfile ? dbProfile.email : profile.email}
               </p>
             </div>
           </div>
 
           {dbProfile && (
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 md:gap-4">
+            <div className="mt-5 grid grid-cols-2 gap-2">
               <ProfileStat label="Patient ID" value={dbProfile.patient_id} mono />
-              <ProfileStat label="Phone" value={dbProfile.phone} />`r`n            </div>
+              <ProfileStat label="Phone" value={dbProfile.phone || "Not set"} />
+            </div>
           )}
         </section>
 
-        <section className="mt-4 grid grid-cols-2 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-12 lg:gap-6">
-          <div className="col-span-2 sm:col-span-1 lg:col-span-4">
+        <section className="motion-rise-delayed grid gap-3">
+          <div>
             <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
-              <div className="flex gap-2">
-                <div className="w-20">
+              <div className="grid grid-cols-[82px_1fr] gap-2">
+                <div>
                   <Label htmlFor="countryCode">Code</Label>
                   <Input
                     id="countryCode"
@@ -367,7 +370,7 @@ const PatientProfile = () => {
                     className="mt-2 bg-[#f0ede6]"
                   />
                 </div>
-                <div className="flex-1">
+                <div className="min-w-0">
                   <Label htmlFor="phone">Phone Number</Label>
                   <Input
                     id="phone"
@@ -385,7 +388,7 @@ const PatientProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 lg:col-span-7">
+          <div>
             <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
               {!showForgotPassword ? (
                 // Normal password change - verify current password first, no OTP
@@ -500,7 +503,7 @@ const PatientProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 lg:col-span-5">
+          <div>
             <ProfileCard icon={Trash2} title="Delete Account" description="Permanently delete your account and all data" danger>
               <div>
                 <Label htmlFor="delete-pw">Enter Password to Confirm</Label>
@@ -512,7 +515,7 @@ const PatientProfile = () => {
                   className="mt-2"
                 />
               </div>
-              <div className="flex flex-wrap gap-3">
+              <div className="grid gap-2 sm:grid-cols-2">
                 <Button onClick={() => void sendProfileOtp("delete")} disabled={!deletePassword || otpSending} className="bg-red-600 text-white hover:bg-red-700">
                   <Trash2 className="mr-2 h-4 w-4" />
                   Verify OTP and Delete
@@ -537,7 +540,7 @@ const PatientProfile = () => {
           }
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="rounded-[28px] border border-white/70 bg-[#fbfaf7] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
               {pendingAction === "phone" ? "Verify OTP for Phone Change" :
@@ -589,7 +592,7 @@ const PatientProfile = () => {
 };
 
 const PasswordRules = ({ checks }: { checks: ReturnType<typeof getPasswordChecks> }) => (
-  <div className="space-y-2 rounded-2xl bg-[#f0ede6] p-4">
+  <div className="space-y-2 rounded-[18px] bg-[#f6f1e8] p-4">
     <p className="text-xs text-muted-foreground">Password must contain:</p>
     <PasswordRule ok={checks.length} text="At least 8 characters" />
     <PasswordRule ok={checks.uppercase} text="One uppercase letter (A-Z)" />
@@ -607,9 +610,9 @@ const PasswordRule = ({ ok, text }: { ok: boolean; text: string }) => (
 );
 
 const ProfileStat = ({ label, value, mono = false, className = "" }: { label: string; value: string; mono?: boolean; className?: string }) => (
-  <div className={`rounded-[18px] bg-white/10 px-3 py-3 sm:rounded-[22px] sm:px-4 sm:py-4 ${className}`}>
-    <p className="text-xs text-primary-foreground/70 sm:text-sm">{label}</p>
-    <p className={`mt-1 break-words text-sm font-bold leading-tight text-white sm:mt-2 sm:text-lg ${mono ? "font-mono" : ""}`}>{value}</p>
+  <div className={`min-w-0 rounded-[18px] bg-[#f6f1e8] px-3 py-3 text-[#17312d] ${className}`}>
+    <p className="text-[10px] font-black uppercase tracking-wide text-primary/75">{label}</p>
+    <p className={`mt-2 truncate text-sm font-black leading-tight ${mono ? "font-mono" : ""}`}>{value}</p>
   </div>
 );
 
@@ -620,23 +623,23 @@ const ProfileCard = ({
   children,
   danger = false,
 }: {
-  icon: any;
+  icon: LucideIcon;
   title: string;
   description: string;
   children: React.ReactNode;
   danger?: boolean;
 }) => (
-  <div className={`rounded-[20px] border p-4 shadow-sm sm:rounded-[28px] sm:p-6 ${danger ? "border-red-200 bg-red-50/50" : "border-[#e6ded3] bg-[#fbfaf7]"}`}>
-    <div className="mb-4 flex items-center gap-3 sm:mb-6">
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 sm:rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-[#f0ede6] text-primary"}`}>
-        <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+  <div className={`rounded-[26px] border p-4 shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur ${danger ? "border-red-200 bg-red-50/70" : "border-white/70 bg-white/80"}`}>
+    <div className="mb-4 flex items-center gap-3">
+      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-[#f6f1e8] text-primary"}`}>
+        <Icon className="h-5 w-5" />
       </div>
       <div className="min-w-0">
-        <h2 className="text-base font-bold leading-tight text-foreground sm:text-xl">{title}</h2>
-        <p className="mt-0.5 text-xs leading-snug text-muted-foreground sm:text-sm">{description}</p>
+        <h2 className="text-base font-black leading-tight text-slate-950">{title}</h2>
+        <p className="mt-0.5 text-sm leading-snug text-slate-500">{description}</p>
       </div>
     </div>
-    <div className="space-y-3 sm:space-y-4">{children}</div>
+    <div className="space-y-3">{children}</div>
   </div>
 );
 

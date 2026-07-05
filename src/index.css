@@ -106,6 +106,63 @@
     @apply border border-white/60 bg-white/75 shadow-[0_18px_60px_-28px_rgba(19,55,50,0.35)] backdrop-blur-xl;
   }
 
+  .krama-ambient {
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 12% 18%, rgba(31, 92, 84, 0.14), transparent 28%),
+      radial-gradient(circle at 84% 14%, rgba(224, 164, 88, 0.18), transparent 25%),
+      linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(247, 244, 239, 0.94));
+  }
+
+  .krama-ambient::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(115deg, transparent 0 36%, rgba(255, 255, 255, 0.34) 47%, transparent 58%),
+      radial-gradient(circle at 24% 82%, rgba(31, 92, 84, 0.09), transparent 22%);
+    opacity: 0.72;
+    animation: ambient-sweep 16s ease-in-out infinite alternate;
+  }
+
+  .krama-ambient > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .motion-rise {
+    animation: section-rise 700ms ease both;
+  }
+
+  .motion-rise-delayed {
+    animation: section-rise 700ms ease 120ms both;
+  }
+
+  .motion-float-soft {
+    animation: hero-float 6s ease-in-out infinite;
+  }
+
+  .motion-breathe {
+    animation: panel-breathe 7s ease-in-out 1s infinite;
+  }
+
+  .motion-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .motion-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    transform: translateX(-120%);
+    background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.34), transparent 65%);
+    animation: card-shimmer 5.4s ease-in-out infinite;
+  }
+
   .animate-hero-float {
     animation: hero-float 6s ease-in-out infinite;
   }
@@ -313,6 +370,25 @@
   }
 }
 
+@keyframes ambient-sweep {
+  from {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2%, 1%, 0) scale(1.04);
+  }
+}
+
+@keyframes card-shimmer {
+  0%,
+  55% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
 @keyframes path-travel {
   0% {
     top: 4%;
@@ -356,7 +432,13 @@
   .animate-path-pulse,
   .animate-path-shimmer,
   .animate-path-travel,
-  .animate-section-rise {
+  .animate-section-rise,
+  .krama-ambient::before,
+  .motion-rise,
+  .motion-rise-delayed,
+  .motion-float-soft,
+  .motion-breathe,
+  .motion-shimmer::after {
     animation: none !important;
   }
 }

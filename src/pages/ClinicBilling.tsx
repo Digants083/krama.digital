@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  Minus,
   Pencil,
   Plus,
   Printer,
@@ -161,6 +162,14 @@ const ClinicBilling = () => {
     () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
     [items],
   );
+  const activeServices = useMemo(
+    () => services.filter((service) => service.active !== false),
+    [services],
+  );
+  const selectedItemNames = useMemo(
+    () => new Set(items.map((item) => item.name.toLowerCase())),
+    [items],
+  );
   const receiptTemplate = useMemo(() => {
     const sourceTemplate = hasTemplateSnapshot(viewedBill) ? viewedBill?.template : template;
     return { ...emptyTemplate, ...(sourceTemplate || {}) };
@@ -307,6 +316,15 @@ const ClinicBilling = () => {
           : item,
       );
     });
+  };
+
+  const updateBillItemQuantity = (name: string, nextQuantity: number) => {
+    setViewedBill(null);
+    setItems((current) => (
+      nextQuantity <= 0
+        ? current.filter((item) => item.name !== name)
+        : current.map((item) => item.name === name ? { ...item, quantity: nextQuantity } : item)
+    ));
   };
 
   const fillPatient = (patient: PendingPatient) => {
@@ -561,7 +579,7 @@ const ClinicBilling = () => {
   );
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee] px-4 py-5 text-slate-950 print:bg-white print:p-0">
+    <div className="min-h-screen bg-transparent px-4 py-5 text-slate-950 print:bg-white print:p-0">
       <style>
         {`
           @media (min-width: 900px) {
@@ -638,7 +656,7 @@ const ClinicBilling = () => {
             <p className="text-sm font-semibold text-slate-500">Create bills, edit template, set prices, and view saved bills.</p>
           </div>
         </div>
-        <nav className="grid gap-2 rounded-[20px] border border-[#ded7ca] bg-white p-2 shadow-sm sm:grid-cols-4">
+        <nav className="grid gap-2 rounded-[20px] border border-white/70 bg-white/85 backdrop-blur p-2 shadow-sm sm:grid-cols-4">
           {billingTabs.map((tab) => (
             <button
               key={tab.id}
@@ -662,21 +680,11 @@ const ClinicBilling = () => {
             : "max-w-3xl"
       }`}>
         {showingReceipt && (
-          <section className="rounded-[22px] border border-[#ded7ca] bg-white p-5 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none">
-            <div className="mb-5 flex items-center justify-between gap-3 print:hidden">
+          <section className="rounded-[26px] border border-white/70 bg-white/85 backdrop-blur p-5 shadow-sm print:rounded-none print:border-0 print:p-0 print:shadow-none">
+            <div className="mb-5 print:hidden">
               <div>
                 <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#00555A]">Template</p>
                 <h2 className="text-xl font-black text-slate-950">Bill preview</h2>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" className="rounded-full" onClick={printBill}>
-                  <Printer className="mr-2 h-4 w-4" />
-                  Print
-                </Button>
-                <Button className="rounded-full bg-[#FFC107] text-slate-950 hover:bg-[#f2b600]" onClick={() => void saveBill()} disabled={saving || !!viewedBill}>
-                  <Save className="mr-2 h-4 w-4" />
-                  {viewedBill ? "Saved Receipt" : "Save Bill"}
-                </Button>
               </div>
             </div>
 
@@ -748,7 +756,7 @@ const ClinicBilling = () => {
           </section>
         )}
 
-        <aside className={`rounded-[22px] border border-[#ded7ca] bg-white p-4 shadow-sm print:hidden ${showingReceipt ? "md:sticky md:top-5" : ""}`}>
+        <aside className={`rounded-[26px] border border-white/70 bg-white/85 backdrop-blur p-4 shadow-sm print:hidden ${showingReceipt ? "md:sticky md:top-5" : ""}`}>
           {activePanel === "history" && viewedBill && (
             <div className="space-y-3">
               <div>
@@ -774,14 +782,14 @@ const ClinicBilling = () => {
           )}
 
           {activePanel === "bill" && !viewedBill && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <p className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-[#00555A]">Bill details</p>
-                <h2 className="text-lg font-black text-slate-950">Patient, services and payment</h2>
+                <p className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-[#00555A]">New bill</p>
+                <h2 className="text-lg font-black text-slate-950">Patient, services, payment</h2>
               </div>
               {pendingPatient?.patient_name && (
-                <div className="rounded-2xl border border-[#b8d7da] bg-[#f3fbfb] p-4">
-                  <div className="flex items-start justify-between gap-3">
+                <div className="rounded-[24px] border border-[#b8d7da] bg-[#f3fbfb] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#00555A]">Ready to bill</p>
                       <p className="mt-1 text-lg font-black text-slate-950">{pendingPatient.patient_name}</p>
@@ -789,65 +797,98 @@ const ClinicBilling = () => {
                         {[pendingPatient.patient_phone, pendingPatient.token ? `Token ${pendingPatient.token}` : ""].filter(Boolean).join(" · ")}
                       </p>
                     </div>
-                    <Button className="rounded-full bg-[#FFC107] text-slate-950 hover:bg-[#f2b600]" onClick={() => fillPatient(pendingPatient)}>
+                    <Button className="w-full rounded-full bg-[#FFC107] text-slate-950 hover:bg-[#f2b600] sm:w-auto" onClick={() => fillPatient(pendingPatient)}>
                       Bill
                     </Button>
                   </div>
                 </div>
               )}
-              <div className="space-y-2 rounded-2xl border border-slate-200 p-3">
-                <h3 className="text-sm font-extrabold text-slate-950">Who needs bill?</h3>
+              <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-extrabold text-slate-950">Patient</h3>
+                  {token && <span className="rounded-full bg-[#FFC107]/25 px-3 py-1 text-xs font-black text-[#7a5800]">{token}</span>}
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
                   <Input className="h-9" placeholder="Patient name" value={patientName} onChange={(event) => setPatientName(event.target.value)} />
                   <Input className="h-9" placeholder="Phone" value={patientPhone} onChange={(event) => setPatientPhone(event.target.value)} />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 p-3">
-                <h3 className="mb-2 text-sm font-extrabold">Add service</h3>
-                <div className="grid max-h-[180px] gap-1.5 overflow-y-auto pr-1">
-                  {services.filter((service) => service.active !== false).map((service) => (
-                    <button
-                      key={service.id}
-                      className="grid min-h-[38px] grid-cols-[1fr_auto_auto] items-center gap-2 rounded-xl border border-[#cddce0] px-3 py-1.5 text-left transition hover:border-[#00555A] hover:bg-[#f5fbfb]"
-                      onClick={() => addServiceToBill(service)}
-                    >
-                      <span className="min-w-0 truncate text-sm font-extrabold text-slate-950">
-                        {service.name}
-                      </span>
-                      <span className="text-sm font-black text-[#00555A]">{currency(service.price)}</span>
-                      <span className="grid h-6 w-6 place-items-center rounded-full bg-[#e8f6f4] text-[#00555A]">
-                        <Plus className="h-3.5 w-3.5" />
-                      </span>
-                    </button>
-                  ))}
+              <div className="rounded-[24px] border border-slate-200 bg-white/70 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-extrabold">Add services</h3>
+                    <p className="text-xs font-semibold text-slate-500">Tap once to add, tap again to increase quantity.</p>
+                  </div>
+                  <span className="rounded-full bg-[#00555A]/10 px-3 py-1 text-xs font-black text-[#00555A]">{activeServices.length}</span>
                 </div>
+                {activeServices.length ? (
+                  <div className="grid max-h-[260px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                    {activeServices.map((service) => {
+                      const selected = selectedItemNames.has(service.name.toLowerCase());
+                      return (
+                        <button
+                          key={service.id}
+                          type="button"
+                          className={`grid min-h-[76px] grid-cols-[1fr_auto] items-center gap-3 rounded-2xl border p-3 text-left transition active:scale-[0.99] ${selected ? "border-[#00555A] bg-[#e9f7f2] shadow-[0_14px_34px_-28px_rgba(0,85,90,0.75)]" : "border-[#d8e3df] bg-white/90 hover:border-[#00555A] hover:bg-[#f5fbfb]"}`}
+                          onClick={() => addServiceToBill(service)}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-black text-slate-950">{service.name}</span>
+                            <span className="mt-1 block text-sm font-black text-[#00555A]">{currency(service.price)}</span>
+                          </span>
+                          <span className={`grid h-9 w-9 place-items-center rounded-full ${selected ? "bg-[#00555A] text-white" : "bg-[#e8f6f4] text-[#00555A]"}`}>
+                            <Plus className="h-4 w-4" />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm font-semibold text-slate-500">
+                    Add service prices first, then they will show here.
+                  </div>
+                )}
               </div>
 
-              <div className="rounded-2xl border border-slate-200 p-3">
-                <h3 className="mb-2 text-sm font-extrabold">Selected</h3>
+              <div className="rounded-[24px] border border-slate-200 bg-white/70 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-extrabold">Selected</h3>
+                  <span className="text-xs font-black text-slate-500">{items.length} item{items.length === 1 ? "" : "s"}</span>
+                </div>
                 <div className="space-y-2">
-                  {items.map((item) => (
-                    <div key={item.name} className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5">
-                      <div>
-                        <p className="text-sm font-extrabold">{item.name}</p>
-                        <p className="text-xs text-slate-500">{item.quantity} x {currency(item.price)}</p>
+                  {items.length ? items.map((item) => (
+                    <div key={item.name} className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-2xl bg-slate-50 p-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-extrabold">{item.name}</p>
+                        <p className="text-xs font-semibold text-slate-500">{currency(item.price)} each</p>
                       </div>
-                      <button className="text-red-600" onClick={() => setItems((current) => current.filter((next) => next.name !== item.name))} aria-label={`Remove ${item.name}`}>
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button type="button" className="grid h-8 w-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-700" onClick={() => updateBillItemQuantity(item.name, item.quantity - 1)} aria-label={`Decrease ${item.name}`}>
+                          <Minus className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="grid h-8 min-w-8 place-items-center rounded-full bg-white px-2 text-sm font-black">{item.quantity}</span>
+                        <button type="button" className="grid h-8 w-8 place-items-center rounded-full bg-[#00555A] text-white" onClick={() => updateBillItemQuantity(item.name, item.quantity + 1)} aria-label={`Increase ${item.name}`}>
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm font-semibold text-slate-500">
+                      No services selected yet.
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 p-3">
+              <div className="rounded-[24px] border border-slate-200 bg-white/70 p-3">
                 <h3 className="mb-2 text-sm font-extrabold">Payment</h3>
                 <div className="grid grid-cols-2 gap-2">
                   {paymentModes.map(({ mode, Icon }) => (
                     <button
                       key={mode}
-                      className={`flex min-h-[42px] items-center gap-2 rounded-xl border px-3 py-2 text-sm font-extrabold ${paymentMode === mode ? "border-[#00555A] bg-[#00555A] text-white" : "border-slate-200"}`}
+                      type="button"
+                      className={`flex min-h-[46px] items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-extrabold transition ${paymentMode === mode ? "border-[#00555A] bg-[#00555A] text-white" : "border-slate-200 bg-white/85 text-slate-700 hover:bg-[#f5fbfb]"}`}
                       onClick={() => setPaymentMode(mode)}
                     >
                       <Icon className="h-4 w-4" />
@@ -857,9 +898,24 @@ const ClinicBilling = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-slate-950 p-3 text-white">
-                <p className="text-xs font-bold text-white/70">Total</p>
-                <p className="text-3xl font-black">{currency(total)}</p>
+              <div className="rounded-[24px] bg-slate-950 p-4 text-white shadow-[0_18px_44px_-32px_rgba(15,23,42,0.9)]">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-white/70">Total</p>
+                    <p className="text-3xl font-black">{currency(total)}</p>
+                  </div>
+                  <p className="pb-1 text-right text-xs font-semibold text-white/60">{paymentMode}</p>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <Button className="rounded-full bg-[#FFC107] text-slate-950 hover:bg-[#f2b600]" onClick={() => void saveBill()} disabled={saving || !!viewedBill}>
+                    <Save className="mr-2 h-4 w-4" />
+                    {saving ? "Saving..." : "Save Bill"}
+                  </Button>
+                  <Button variant="outline" className="rounded-full border-white/25 bg-white/10 text-white hover:bg-white/20 hover:text-white" onClick={printBill}>
+                    <Printer className="mr-2 h-4 w-4" />
+                    Print
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -1052,7 +1108,7 @@ const ClinicBilling = () => {
         </aside>
 
         {activePanel === "template" && (
-          <section className="rounded-[22px] border border-[#ded7ca] bg-white p-5 shadow-sm print:hidden">
+          <section className="rounded-[26px] border border-white/70 bg-white/85 backdrop-blur p-5 shadow-sm print:hidden">
             <div className="mb-5">
               <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#00555A]">Live preview</p>
               <h2 className="text-xl font-black text-slate-950">Billing sheet</h2>

@@ -2,7 +2,7 @@ import React from "react";
 
 const NoHeaderLayout = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="krama-ambient min-h-screen bg-background">
       {children}
     </div>
   );

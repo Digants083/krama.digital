@@ -360,38 +360,34 @@ const JoinQueue = () => {
     const hasActiveDelay = Boolean(tokenResult.doctor_delay || activeDelayMinutes > 0);
     const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : tokenResult.doctor_delay;
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-        <div className="w-full max-w-sm rounded-3xl border border-primary/10 bg-white p-8 text-center shadow-[0_22px_70px_-38px_rgba(19,55,50,0.55)]">
-          {/* Tick icon */}
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-            <svg className="h-7 w-7 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+      <div className="krama-ambient flex min-h-screen items-center justify-center px-4 py-8">
+        <div className="motion-rise w-full max-w-sm rounded-[32px] border border-white/70 bg-white/85 p-5 text-center shadow-[0_22px_70px_-44px_rgba(19,55,50,0.75)] backdrop-blur sm:p-6">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#f6f1e8] text-primary">
+            <CheckCircle2 className="h-7 w-7" />
           </div>
 
-          <h2 className="text-lg font-semibold text-[#0F172A] mb-1">You're in the queue!</h2>
+          <h2 className="mb-1 font-display text-2xl font-black text-[#17312d]">You're in the queue!</h2>
           {clinicInfo && (
-            <p className="mb-6 text-sm font-medium text-primary">{clinicInfo.name}</p>
+            <p className="mb-5 text-sm font-bold text-primary">{clinicInfo.name}</p>
           )}
 
-          {/* Token badge */}
-          <div className="rounded-2xl bg-[#FFC107] px-6 py-6 mb-6">
-            <p className="text-xs font-medium uppercase tracking-widest text-[#0F172A] mb-1">
+          <div className="motion-shimmer mb-4 rounded-[28px] bg-[#143b34] px-6 py-6 text-white shadow-[0_24px_70px_-42px_rgba(31,92,84,0.95)]">
+            <p className="mb-1 text-xs font-black uppercase tracking-[0.22em] text-white/60">
               Your Token
             </p>
-            <p className="text-5xl font-extrabold tracking-widest text-[#0F172A]">
+            <p className="font-display text-5xl font-black tracking-widest">
               {tokenResult.token_label}
             </p>
           </div>
 
-          <div className="mb-6 rounded-xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground">
+          <div className="mb-4 rounded-2xl border border-[#eadfce] bg-[#fbfaf7] px-4 py-3 text-sm text-[#17312d]">
             <span className="text-muted-foreground">Patients ahead of you: </span>
             <span className="font-semibold">{Math.max(0, tokenResult.position - 1)}</span>
           </div>
 
-          <div className="mb-6 rounded-xl border border-primary/10 bg-white px-4 py-4 text-left">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
-            <p className="mt-1 text-lg font-bold text-foreground">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
+          <div className="mb-4 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-4 text-left">
+            <p className="text-xs font-black uppercase tracking-wide text-muted-foreground">Estimated consultation window</p>
+            <p className="mt-1 text-lg font-black text-[#17312d]">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
             {tokenResult.predicted_eta && (
               <p className="mt-1 text-xs font-semibold text-primary">Predicted Consultation Time: {formatIsoClock(tokenResult.predicted_eta)}</p>
             )}
@@ -401,7 +397,7 @@ const JoinQueue = () => {
           </div>
 
           {hasActiveDelay && (
-            <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 px-4 py-4 text-left">
+            <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-4 text-left">
               <p className="text-xs font-semibold uppercase tracking-wide text-orange-700">Delay update</p>
               <p className="mt-1 text-lg font-bold text-orange-900">Slot delayed by {delayAmountText}</p>
               {tokenResult.delay_original_start_time && tokenResult.delay_updated_start_time && (
@@ -415,16 +411,16 @@ const JoinQueue = () => {
             </div>
           )}
 
-          <p className="mb-4 text-xs text-muted-foreground">
+          <p className="mb-4 text-xs font-semibold text-muted-foreground">
             Please wait for your token to be called.
           </p>
 
-          <div className="mb-4 rounded-2xl border border-primary/15 bg-primary/5 p-4 text-left">
+          <div className="mb-4 rounded-[24px] border border-white/70 bg-[#fbfaf7] p-4 text-left shadow-[0_16px_44px_-36px_rgba(19,55,50,0.65)]">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary">
               <MapPinned className="h-4 w-4" />
               Check it later from the header
             </div>
-            <div className="rounded-xl border border-primary/10 bg-white p-3">
+            <div className="rounded-2xl border border-[#eadfce] bg-white p-3">
               <div className="mb-3 flex items-center justify-between border-b border-border pb-2">
                 <span className="text-sm font-bold text-primary">Krama</span>
                 <span className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground">
@@ -445,7 +441,7 @@ const JoinQueue = () => {
             </div>
             <button
               onClick={() => navigate("/your-token")}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-all duration-200 hover:bg-primary/90"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-black text-primary-foreground transition-all duration-200 hover:bg-primary/90"
             >
               Open Your Token
               <ArrowRight className="h-4 w-4" />
@@ -454,7 +450,7 @@ const JoinQueue = () => {
 
           <button
             onClick={handleGoHome}
-            className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-all duration-200 hover:bg-primary/90"
+            className="w-full rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm font-black text-primary transition-all duration-200 hover:bg-primary/10"
           >
             Back to Home
           </button>

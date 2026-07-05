@@ -5,13 +5,13 @@ import {
   CalendarPlus,
   ChevronRight,
   Clock,
+  ClipboardList,
   Hash,
-  MapPin,
   Star,
+  type LucideIcon,
   User,
 } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
-import WaitingRoomIllustration from "@/components/illustrations/WaitingRoomIllustration";
 import { formatDurationMinutes, formatIsoClock, formatTimeRange } from "@/lib/timeFormat";
 
 type Appointment = {
@@ -65,19 +65,6 @@ const parseSessionTimeRange = (sessionTime?: string | null) => {
     // Fall back to the raw session label below.
   }
   return "";
-};
-
-const buildClinicMapsUrl = (latitude?: string | null, longitude?: string | null) => {
-  const lat = latitude ? Number(latitude) : NaN;
-  const lng = longitude ? Number(longitude) : NaN;
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return `https://www.google.com/maps?q=${lat},${lng}&z=17`;
-};
-
-const openClinicInGoogleMaps = (latitude?: string | null, longitude?: string | null) => {
-  const mapsUrl = buildClinicMapsUrl(latitude, longitude);
-  if (!mapsUrl) return;
-  window.open(mapsUrl, "_blank", "noopener,noreferrer");
 };
 
 const PatientDashboard = () => {
@@ -189,11 +176,34 @@ const PatientDashboard = () => {
     nextAppointment?.estimated_window_text ||
     (nextAppointment?.predicted_eta ? formatIsoClock(nextAppointment.predicted_eta) : "") ||
     "Live queue updates will appear here.";
-  const predictedTimeText = nextAppointment?.predicted_eta ? formatIsoClock(nextAppointment.predicted_eta) : "";
   const activeDelayMinutes = nextAppointment?.active_delay_minutes ?? 0;
   const delayText = activeDelayMinutes > 0 ? `Delay ${formatDurationMinutes(activeDelayMinutes)}` : null;
-  const clinicMapsUrl = buildClinicMapsUrl(nextAppointment?.latitude, nextAppointment?.longitude);
-  const clinicAddress = nextAppointment?.address?.trim() || "";
+  const tokenText = nextAppointment?.appointment_token || "--";
+  const statusText = nextAppointment?.status || "Ready";
+  const fourSections = [
+    {
+      title: "Book appointment",
+      text: "Find a clinic and get a token.",
+      icon: CalendarPlus,
+      to: "/patient/find-clinics",
+      tone: "bg-primary text-white",
+    },
+    {
+      title: "See appointment",
+      text: nextAppointment ? "Open your token details." : "No appointment yet.",
+      icon: ClipboardList,
+      onClick: nextAppointment ? () => handleAppointmentClick(nextAppointment) : undefined,
+      tone: "bg-[#f6f1e8] text-primary",
+      disabled: !nextAppointment,
+    },
+    {
+      title: "Review",
+      text: "Share clinic feedback.",
+      icon: Star,
+      to: "/patient/reviews",
+      tone: "bg-[#ffc247] text-slate-950",
+    },
+  ];
 
   if (loading) {
     return (
@@ -204,174 +214,130 @@ const PatientDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#f7f4ef]">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-3 py-4 sm:gap-5 sm:px-6 sm:py-8">
-        <div className="flex items-start gap-3 sm:block">
+    <div className="min-h-screen bg-transparent">
+      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-4 px-4 pb-8 pt-5 sm:max-w-xl sm:px-6 md:max-w-2xl">
+        <header className="motion-rise flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary/70">Patient</p>
+            <h1 className="mt-1 truncate font-display text-3xl font-bold text-[#17312d]">{patientName}</h1>
+          </div>
           <Link
             to="/patient/profile"
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#ded6cc] bg-white text-primary shadow-sm sm:hidden"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-primary shadow-[0_16px_38px_-28px_rgba(19,55,50,0.7)]"
             aria-label="Profile"
           >
             <User className="h-5 w-5" />
           </Link>
-          <header className="min-w-0 flex-1 rounded-2xl bg-primary px-4 py-4 text-primary-foreground shadow-[0_18px_44px_-34px_rgba(31,92,84,0.9)] sm:flex sm:items-center sm:justify-between sm:gap-4 sm:rounded-3xl sm:px-7 sm:py-6">
+        </header>
+
+        <section className="motion-rise-delayed motion-shimmer overflow-hidden rounded-[30px] bg-[#143b34] p-4 text-white shadow-[0_26px_70px_-42px_rgba(31,92,84,0.95)]">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary-foreground/70">Patient Dashboard</p>
-              <p className="mt-2 text-sm font-medium text-primary-foreground/80">Welcome back</p>
-              <h1 className="mt-0.5 break-words font-display text-2xl font-bold tracking-tight text-white sm:truncate sm:text-4xl">
-                {patientName}
-              </h1>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">Appointment</p>
+              <h2 className="mt-2 truncate text-lg font-bold">
+                {nextAppointment ? nextAppointment.clinic_name : "No appointment booked"}
+              </h2>
+              <p className="mt-1 truncate text-sm text-white/70">
+                {nextAppointment ? nextAppointment.doctor_name || "Doctor pending" : "Book one when ready"}
+              </p>
             </div>
-
-            <Link
-              to="/patient/profile"
-              className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/12 transition hover:bg-white/20 sm:inline-flex"
-              aria-label="Profile"
-            >
-              <User className="h-5 w-5" />
-            </Link>
-          </header>
-        </div>
-
-        <section className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-2xl border border-[#ded6cc] bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Current Appointment</p>
-                <h2 className="mt-2 break-words text-2xl font-bold text-slate-950">
-                  {nextAppointment ? nextAppointment.clinic_name : "No active appointment"}
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {nextAppointment ? nextAppointment.doctor_name || "Doctor details pending" : "Book a clinic visit when you are ready."}
-                </p>
-              </div>
-
-              {nextAppointment ? (
-                <button
-                  type="button"
-                  onClick={() => handleAppointmentClick(nextAppointment)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-bold text-white transition hover:bg-primary/90 sm:w-auto sm:py-2"
-                >
-                  View details <ChevronRight className="h-4 w-4" />
-                </button>
-              ) : (
-                <Link
-                  to="/patient/find-clinics"
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-bold text-white transition hover:bg-primary/90 sm:w-auto sm:py-2"
-                >
-                  Book appointment <ChevronRight className="h-4 w-4" />
-                </Link>
-              )}
-            </div>
-
-            <div className="mt-4 grid grid-cols-3 overflow-hidden rounded-2xl bg-[#f6f3ee] sm:mt-5">
-              <div className="min-w-0 border-r border-[#e5ddd2] p-3 sm:p-4">
-                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-primary sm:text-[11px]">
-                  <Clock className="h-3.5 w-3.5 shrink-0" /> Date
-                </p>
-                <p className="mt-1.5 text-sm font-bold leading-snug text-slate-950 sm:text-base">{bookedDateText}</p>
-                {nextAppointment ? (
-                  <p className="mt-1 text-[11px] leading-4 text-slate-500 sm:text-sm">{sessionSlotText}</p>
-                ) : null}
-              </div>
-
-              <div className="min-w-0 border-r border-[#e5ddd2] p-3 sm:p-4">
-                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-primary sm:text-[11px]">
-                  <Clock className="h-3.5 w-3.5 shrink-0" /> Est. time
-                </p>
-                <p className="mt-1.5 text-sm font-bold leading-snug text-slate-950 sm:text-base">{estimatedTimeText}</p>
-                {predictedTimeText && predictedTimeText !== estimatedTimeText ? (
-                  <p className="mt-1 text-[11px] leading-4 text-primary/80 sm:text-sm">Around {predictedTimeText}</p>
-                ) : null}
-                {delayText ? (
-                  <p className="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800 sm:text-xs">
-                    {delayText}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="min-w-0 p-3 sm:p-4">
-                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-primary sm:text-[11px]">
-                  <Hash className="h-3.5 w-3.5 shrink-0" /> Token
-                </p>
-                <p className="mt-1.5 text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">
-                  {nextAppointment?.appointment_token || "-"}
-                </p>
-                <p className="mt-1 text-[11px] capitalize leading-4 text-primary/80 sm:text-sm">{nextAppointment?.status || "Ready"}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-[#e2ddd5] p-3.5 text-sm leading-6 text-slate-600 sm:p-4">
-              {clinicAddress ? (
-                clinicMapsUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => openClinicInGoogleMaps(nextAppointment?.latitude, nextAppointment?.longitude)}
-                    className="group flex w-full items-start gap-3 rounded-xl text-left transition hover:bg-[#f6f3ee]"
-                  >
-                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary transition group-hover:bg-primary group-hover:text-white">
-                      <MapPin className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-slate-950">{clinicAddress}</span>
-                      <span className="mt-1 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-[0.14em] text-primary">
-                        Open in Google Maps
-                        <ChevronRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
-                      </span>
-                    </span>
-                  </button>
-                ) : (
-                  <p className="flex items-start gap-2">
-                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                    <span>{clinicAddress}</span>
-                  </p>
-                )
-              ) : (
-                <p className="flex items-start gap-2">
-                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <span>Clinic location will appear here once available.</span>
-                </p>
-              )}
-            </div>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold capitalize text-white/80">
+              {statusText}
+            </span>
           </div>
 
-          <aside className="rounded-2xl border border-[#ded6cc] bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Actions</p>
-            <h2 className="mt-2 text-xl font-bold text-slate-950">What do you need?</h2>
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            <InfoMini icon={Hash} label="Token" value={tokenText} />
+            <InfoMini icon={Clock} label="Est time" value={estimatedTimeText} />
+            <InfoMini icon={Clock} label="Date" value={bookedDateText} helper={nextAppointment ? sessionSlotText : ""} />
+          </div>
 
-            <div className="mt-5 grid gap-3">
-              <Link
-                to="/patient/find-clinics"
-                className="group flex min-h-20 items-center gap-3 rounded-2xl border border-[#dbe5e1] bg-[#f8fbfa] p-3.5 transition hover:border-primary/40 hover:bg-[#eef8f4] sm:gap-4 sm:p-4"
-              >
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-white">
-                  <CalendarPlus className="h-5 w-5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-bold text-slate-950">Book a visit</span>
-                  <span className="mt-1 block text-sm leading-5 text-slate-500">Find clinics and get a token.</span>
-                </span>
-                <ChevronRight className="h-5 w-5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-primary" />
-              </Link>
+          {delayText ? (
+            <p className="mt-3 inline-flex rounded-full bg-amber-300 px-3 py-1 text-xs font-black text-[#17312d]">
+              {delayText}
+            </p>
+          ) : null}
+        </section>
 
-              <Link
-                to="/patient/reviews"
-                className="group flex min-h-20 items-center gap-3 rounded-2xl border border-[#dbe5e1] bg-[#f8fbfa] p-3.5 transition hover:border-primary/40 hover:bg-[#eef8f4] sm:gap-4 sm:p-4"
-              >
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#ffc247] text-slate-950">
-                  <Star className="h-5 w-5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-bold text-slate-950">Write feedback</span>
-                  <span className="mt-1 block text-sm leading-5 text-slate-500">Share your clinic experience.</span>
-                </span>
-                <ChevronRight className="h-5 w-5 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-primary" />
-              </Link>
-            </div>
-          </aside>
+        <section className="motion-rise-delayed grid grid-cols-2 gap-3">
+          {fourSections.map((item) => (
+            <DashboardAction key={item.title} {...item} />
+          ))}
         </section>
       </main>
     </div>
+  );
+};
+
+const InfoMini = ({
+  icon: Icon,
+  label,
+  value,
+  helper,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  helper?: string;
+}) => (
+  <div className="min-w-0 rounded-[18px] bg-[#f6f1e8] p-3 text-[#17312d]">
+    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-primary/75">
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{label}</span>
+    </div>
+    <p className="mt-2 line-clamp-2 min-h-9 text-sm font-black leading-tight">{value}</p>
+    {helper ? <p className="mt-1 truncate text-[11px] font-semibold text-slate-500">{helper}</p> : null}
+  </div>
+);
+
+const DashboardAction = ({
+  title,
+  text,
+  icon: Icon,
+  tone,
+  to,
+  onClick,
+  disabled,
+}: {
+  title: string;
+  text: string;
+  icon: LucideIcon;
+  tone: string;
+  to?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) => {
+  const content = (
+    <>
+      <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${tone}`}>
+        <Icon className="h-5 w-5" />
+      </span>
+      <span className="mt-4 block text-base font-black text-slate-950">{title}</span>
+      <span className="mt-1 block text-sm leading-5 text-slate-500">{text}</span>
+      <ChevronRight className="absolute right-3 top-3 h-5 w-5 text-slate-300" />
+    </>
+  );
+
+  const className =
+    "relative min-h-[152px] rounded-[26px] border border-white/70 bg-white/80 p-4 text-left shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur transition active:scale-[0.98] hover:-translate-y-0.5 hover:bg-white";
+
+  if (to) {
+    return (
+      <Link to={to} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`${className} ${disabled ? "opacity-65" : ""}`}
+    >
+      {content}
+    </button>
   );
 };
 

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,9 +93,9 @@ const ClinicLook = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee]">
+    <div className="min-h-screen bg-transparent">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/95 backdrop-blur">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-[#fbfaf7]/85 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-4xl items-center gap-3 px-4">
           <Link
             to="/clinic"
@@ -153,7 +153,7 @@ const ClinicLook = () => {
 
         {/* Search Panel */}
         {searchType && (
-          <div className="mb-6 rounded-xl border border-[#e6ded3] bg-[#fbfaf7] p-4 shadow-sm sm:p-6">
+          <div className="mb-6 rounded-[24px] border border-white/70 bg-white/80 backdrop-blur p-4 shadow-sm sm:p-6">
             {/* Search Inputs */}
             {searchType === "date" && (
               <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -223,13 +223,13 @@ const ClinicLook = () => {
 
         {/* Results */}
         {searchCount > 0 && (
-          <div className="rounded-xl border border-[#e6ded3] bg-[#fbfaf7] p-4 shadow-sm sm:p-6">
+          <div className="rounded-[24px] border border-white/70 bg-white/80 backdrop-blur p-4 shadow-sm sm:p-6">
             <h2 className="text-lg font-semibold mb-4">
               Found <span className="text-[#00555A]">{searchCount}</span> patients
             </h2>
             <div className="space-y-3">
               {searchResults.map((patient, idx) => (
-                <div key={idx} className="rounded-lg border border-[#e6ded3] bg-[#f0ede6] p-4">
+                <div key={idx} className="rounded-2xl border border-[#e6ded3] bg-[#f6f1e8] p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <span className="block truncate text-lg font-semibold">{patient.patient_name}</span>
@@ -242,7 +242,7 @@ const ClinicLook = () => {
                         <span className="truncate">{patient.patient_phone}</span>
                       </p>
                     </div>
-                    <span className="shrink-0 self-start rounded-lg bg-[#00555A]/10 px-3 py-1 text-lg font-bold text-[#00555A]">
+                    <span className="shrink-0 self-start rounded-2xl bg-[#00555A]/10 px-3 py-1 text-lg font-bold text-[#00555A]">
                       {patient.appointment_token}
                     </span>
                   </div>
@@ -267,7 +267,7 @@ const ClinicLook = () => {
 
         {/* No results */}
         {searchType && searchCount === 0 && !searching && (
-          <div className="rounded-xl border border-dashed border-[#d8d1c6] bg-[#fbfaf7]/80 py-10 text-center text-muted-foreground sm:py-12">
+          <div className="rounded-[24px] border border-dashed border-white/70 bg-white/70 backdrop-blur py-10 text-center text-muted-foreground sm:py-12">
             <Eye className="mx-auto h-12 w-12 mb-3" />
             <p>No patients found matching your search.</p>
           </div>

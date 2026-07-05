@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiUrl } from "@/lib/api";
-import { AlertCircle, CalendarDays, Eye, MapPin, ReceiptText, Settings, User, Users } from "lucide-react";
+import { AlertCircle, CalendarDays, ChevronRight, Eye, MapPin, ReceiptText, Settings, User, Users } from "lucide-react";
 import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 import { Button } from "@/components/ui/button";
 import {
@@ -64,11 +64,13 @@ const loadFirstLoginLocation = (): ClinicProfile | null => {
 };
 
 const ActionTile = ({ action }: { action: DashboardAction }) => (
-  <Link to={action.to} className="block">
-    <div className="flex min-h-[92px] flex-col justify-between rounded-[18px] bg-white/10 p-4 text-white transition duration-200 hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:min-h-[116px] sm:rounded-[22px] sm:p-5">
-      <action.Icon className="h-6 w-6 stroke-[2.4] text-white sm:h-8 sm:w-8" />
-      <h3 className="text-sm font-bold leading-tight tracking-[-0.01em] sm:text-lg">{action.label}</h3>
-    </div>
+  <Link to={action.to} className="group relative min-h-[152px] rounded-[26px] border border-white/70 bg-white/80 p-4 text-left shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur transition active:scale-[0.98] hover:-translate-y-0.5 hover:bg-white">
+    <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f6f1e8] text-primary">
+      <action.Icon className="h-5 w-5 stroke-[2.4]" />
+    </span>
+    <span className="mt-4 block text-base font-black leading-tight text-slate-950">{action.label}</span>
+    <span className="mt-1 block text-sm leading-5 text-slate-500">Open clinic tool</span>
+    <ChevronRight className="absolute right-3 top-3 h-5 w-5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-primary" />
   </Link>
 );
 
@@ -175,29 +177,36 @@ const ClinicDashboardNew = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee] px-4 py-6 md:py-12">
+    <div className="min-h-screen bg-transparent">
       {message && (
         <div className={`fixed right-4 top-4 z-50 rounded-full px-4 py-2 text-sm shadow-lg ${message.type === "success" ? "bg-[#1a5c4a] text-white" : "bg-red-600 text-white"}`}>
           {message.text}
         </div>
       )}
 
-      <main className="mx-auto max-w-5xl">
-        <section className="rounded-[24px] bg-[#1d6758] px-5 py-6 text-white shadow-[0_38px_80px_-46px_rgba(18,64,54,0.85)] sm:rounded-[30px] sm:px-6 sm:py-8 md:px-9 md:py-10">
-          <div className="mb-6 flex items-start justify-between gap-4 sm:mb-9">
-            <div className="min-w-0">
-              <p className="mb-4 text-xs font-medium uppercase tracking-[0.24em] text-white/75 sm:mb-6 sm:text-sm sm:tracking-[0.32em]">Clinic Dashboard</p>
-              <h1 className="truncate text-3xl font-extrabold leading-none tracking-[-0.03em] sm:text-4xl md:text-5xl">{clinicName}</h1>
-              <p className="mt-3 text-sm font-semibold text-white sm:mt-4 sm:text-base">Keep queue control simple and visible.</p>
-            </div>
+      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-4 px-4 pb-8 pt-5 sm:max-w-xl sm:px-6 md:max-w-2xl">
+        <header className="motion-rise flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary/70">Clinic</p>
+            <h1 className="mt-1 truncate font-display text-3xl font-bold text-[#17312d]">{clinicName}</h1>
+          </div>
+          <Link to="/clinic/profile" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-primary shadow-[0_16px_38px_-28px_rgba(19,55,50,0.7)]" aria-label="Profile settings">
+            <User className="h-5 w-5" />
+          </Link>
+        </header>
 
-            <Link to="/clinic/profile" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:h-14 sm:w-14" aria-label="Profile settings">
-              <User className="h-5 w-5 sm:h-6 sm:w-6" />
-            </Link>
+        <section className="motion-rise-delayed motion-shimmer overflow-hidden rounded-[30px] bg-[#143b34] p-4 text-white shadow-[0_26px_70px_-42px_rgba(31,92,84,0.95)]">
+          <div className="mb-5 flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">Clinic Dashboard</p>
+              <h2 className="mt-2 truncate text-lg font-bold">Queue control center</h2>
+              <p className="mt-1 text-sm text-white/70">Keep queue control simple and visible.</p>
+            </div>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white/80">Live</span>
           </div>
 
           {needsLocationConfirmation && (
-            <div className="mb-5 rounded-2xl border border-white/20 bg-white/10 p-4">
+            <div className="mb-4 rounded-[22px] border border-white/20 bg-white/10 p-4">
               <div className="flex items-start gap-3">
                 <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-white" />
                 <div>
@@ -216,7 +225,7 @@ const ClinicDashboardNew = () => {
           )}
 
           {!hasConfirmedLocation && !needsLocationConfirmation && (
-            <div className="mb-5 rounded-2xl border border-yellow-300/30 bg-yellow-300/15 p-4">
+            <div className="mb-4 rounded-[22px] border border-yellow-300/30 bg-yellow-300/15 p-4">
               <div className="flex items-start gap-3">
                 <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-100" />
                 <div>
@@ -230,11 +239,12 @@ const ClinicDashboardNew = () => {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
+        </section>
+
+        <section className="motion-rise-delayed grid grid-cols-2 gap-3">
             {actions.map((action) => (
               <ActionTile key={action.label} action={action} />
             ))}
-          </div>
         </section>
       </main>
 

@@ -12,9 +12,7 @@ const Header = () => {
       <div className="section-container px-4 md:px-8">
         <div className="flex min-h-16 items-center justify-between gap-4 py-2">
           <Link to="/" onClick={closeMenu} className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f6d8c4] text-base font-bold text-[#142620]">
-              K
-            </div>
+            <img src="/krama-logo.png" alt="Krama" className="h-9 w-9 rounded-xl shadow-[0_12px_28px_-18px_rgba(246,216,196,0.8)]" />
             <p className="font-display text-2xl font-bold tracking-tight text-white">Krama</p>
           </Link>
 
