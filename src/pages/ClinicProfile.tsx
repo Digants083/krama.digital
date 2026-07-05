@@ -1,10 +1,10 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import { ArrowLeft, Phone, Lock, Trash2, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, CheckCircle, XCircle, UserPlus, Stethoscope } from "lucide-react";
+import { ArrowLeft, Phone, Lock, Trash2, LogOut, Building2, QrCode, MapPin, ImagePlus, X, Download, CheckCircle, XCircle, UserPlus, Stethoscope, type LucideIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -684,8 +684,8 @@ const ClinicProfile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee]">
-      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/90 backdrop-blur-xl">
+    <div className="min-h-screen bg-transparent">
+      <header className="sticky top-0 z-50 border-b border-white/70 bg-white/80/90 backdrop-blur-xl">
         <div className="section-container flex h-16 items-center gap-3 px-4 md:px-8">
           <Link to="/clinic" className="flex items-center gap-2 text-sm font-medium text-muted-foreground transition hover:text-foreground">
             <ArrowLeft className="h-4 w-4" />
@@ -705,32 +705,32 @@ const ClinicProfile = () => {
         </div>
       )}
 
-      <main className="section-container px-4 py-6 md:px-8 md:py-10">
-        <section className="rounded-[24px] bg-primary px-4 py-6 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] sm:rounded-[32px] sm:px-6 sm:py-8 md:px-8">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20 sm:h-20 sm:w-20">
-              <Building2 className="h-7 w-7 sm:h-10 sm:w-10" />
+      <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 pb-8 pt-5 sm:max-w-xl sm:px-6 md:max-w-2xl">
+        <section className="motion-rise motion-shimmer overflow-hidden rounded-[30px] bg-[#143b34] p-4 text-white shadow-[0_26px_70px_-42px_rgba(31,92,84,0.95)] sm:p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/20">
+              <Building2 className="h-7 w-7" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.18em] text-primary-foreground/70 sm:text-sm sm:tracking-[0.22em]">Clinic Account</p>
-              <h1 className="mt-1 truncate font-display text-2xl font-bold sm:mt-2 sm:text-3xl md:text-4xl">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">Clinic Account</p>
+              <h1 className="mt-1 truncate font-display text-3xl font-bold">
                 {dbProfile?.clinic_name || "Clinic"}
               </h1>
-              <p className="mt-1 truncate text-sm text-primary-foreground/75 sm:mt-2 sm:text-base">{dbProfile?.email || "clinic@example.com"}</p>
+              <p className="mt-1 truncate text-sm text-white/70">{dbProfile?.email || "clinic@example.com"}</p>
             </div>
           </div>
 
           {dbProfile && (
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 md:grid-cols-3 md:gap-4">
+            <div className="mt-5 grid grid-cols-2 gap-2">
               <ProfileStat label="Clinic ID" value={dbProfile.clinic_id} mono />
               <ProfileStat label="Phone" value={dbProfile.phone} />
-              <ProfileStat className="col-span-2 md:col-span-1" label="Address" value={dbProfile.full_formatted_address || dbProfile.address || "Not set"} />
+              
             </div>
           )}
         </section>
 
-        <section className="mt-4 grid grid-cols-2 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-12 lg:gap-6">
-          <div className="col-span-2 lg:col-span-12">
+        <section className="motion-rise-delayed grid gap-3">
+          <div >
             <ProfileCard icon={UserPlus} title="Doctors" description="Add and manage doctors for this clinic">
               {doctors.length > 0 && (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -760,20 +760,20 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 sm:col-span-1 lg:col-span-4">
+          <div >
             <ProfileCard icon={Phone} title="Change Phone Number" description="Update your contact number">
-              <div className="flex gap-2">
-                <div className="w-20">
+              <div className="grid grid-cols-[82px_1fr] gap-2">
+                <div>
                   <Label htmlFor="countryCode">Code</Label>
                   <Input
                     id="countryCode"
                     type="tel"
                     value="+91"
                     disabled
-                    className="mt-2 bg-slate-100"
+                    className="mt-2 bg-[#f0ede6]"
                   />
                 </div>
-                <div className="flex-1">
+                <div className="min-w-0">
                   <Label htmlFor="phone">Phone Number</Label>
                   <Input id="phone" type="tel" placeholder="9876543210" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-2" />
                 </div>
@@ -784,9 +784,9 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 lg:col-span-8">
+          <div >
             <ProfileCard icon={MapPin} title="Change Address" description="Update clinic location">
-              <div className="rounded-2xl bg-secondary p-4 text-sm text-foreground">
+              <div className="rounded-[18px] bg-[#f6f1e8] p-4 text-sm text-foreground">
                 <p className="text-muted-foreground">Current Address</p>
                 <p className="mt-1 font-medium">{dbProfile?.full_formatted_address || dbProfile?.address || "Not set"}</p>
                 {locationCoords ? (
@@ -842,7 +842,7 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 sm:col-span-1 lg:col-span-7">
+          <div >
             <ProfileCard icon={ImagePlus} title="Clinic Images" description="Upload and manage up to 5 images">
               {imageUrls.filter(Boolean).length > 0 && (
                 <div className="grid grid-cols-3 gap-2">
@@ -875,7 +875,7 @@ const ClinicProfile = () => {
                   <input type="file" id="file-upload" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
                   <label
                     htmlFor="file-upload"
-                    className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#e6ded3] bg-[#fbfaf7] px-3 py-3 text-center transition hover:bg-[#f0ede6] sm:justify-start sm:px-4"
+                    className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/70 bg-white/80 px-3 py-3 text-center transition hover:bg-[#f0ede6] sm:justify-start sm:px-4"
                   >
                     <ImagePlus className="h-5 w-5 text-primary" />
                     <span className="min-w-0 truncate text-sm font-medium text-muted-foreground">
@@ -895,14 +895,21 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 sm:col-span-1 lg:col-span-5">
+          <div >
             <ProfileCard icon={QrCode} title="QR Code" description="Show QR code for patients to join queue">
               <div className="space-y-4">
-                <div className="rounded-2xl border border-border bg-secondary/40 p-4">
-                  <p className="text-sm font-medium text-foreground">Quick access for patients</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Open a larger QR preview or download it for the front desk.</p>
+                <div className="overflow-hidden rounded-[24px] border border-white/70 bg-[#143b34] p-4 text-white shadow-[0_18px_54px_-42px_rgba(19,55,50,0.9)]">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
+                      <QrCode className="h-6 w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-black">Quick access for patients</p>
+                      <p className="mt-1 text-sm leading-5 text-white/70">Scan, choose a slot, and get a token.</p>
+                    </div>
+                  </div>
                 </div>
-                <Button onClick={() => setShowQrDialog(true)} className="w-full bg-primary text-white hover:bg-primary/90">
+                <Button onClick={() => setShowQrDialog(true)} className="w-full rounded-2xl bg-primary py-6 text-white hover:bg-primary/90">
                   <QrCode className="mr-2 h-4 w-4" />
                   Show QR Code
                 </Button>
@@ -910,7 +917,7 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 lg:col-span-7">
+          <div >
             <ProfileCard icon={Lock} title="Change Password" description="Update your account password">
               {!showForgotPassword ? (
                 // Normal password change - verify current password first
@@ -1022,7 +1029,7 @@ const ClinicProfile = () => {
             </ProfileCard>
           </div>
 
-          <div className="col-span-2 lg:col-span-5">
+          <div >
             <ProfileCard icon={Trash2} title="Delete Account" description="Permanently delete your clinic account and all data" danger>
               <div>
                 <Label htmlFor="delete-clinic-pw">Enter Password to Confirm</Label>
@@ -1034,7 +1041,7 @@ const ClinicProfile = () => {
                   className="mt-2"
                 />
               </div>
-              <div className="flex flex-wrap gap-3">
+              <div className="grid gap-2 sm:grid-cols-2">
                 <Button onClick={() => void sendProfileOtp("delete")} disabled={!deletePassword || otpSending} className="bg-red-600 text-white hover:bg-red-700">
                   <Trash2 className="mr-2 h-4 w-4" />
                   Verify OTP and Delete
@@ -1050,31 +1057,35 @@ const ClinicProfile = () => {
       </main>
 
       <Dialog open={showQrDialog} onOpenChange={setShowQrDialog}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="rounded-[30px] border border-white/70 bg-[#fbfaf7] p-5 sm:max-w-md">
           <DialogHeader className="space-y-4 text-center">
-            <DialogTitle className="font-display text-2xl font-bold text-primary">KRAMA</DialogTitle>
-            <DialogDescription className="text-sm">Scan to join the queue</DialogDescription>
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#143b34] text-white">
+              <QrCode className="h-6 w-6" />
+            </div>
+            <DialogTitle className="font-display text-2xl font-black text-[#17312d]">Clinic QR</DialogTitle>
+            <DialogDescription className="text-sm">Patients scan this to join the queue.</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col items-center justify-center p-4">
+          <div className="flex flex-col items-center justify-center">
             {getClinicQrUrl() && (
-              <div className="relative">
+              <div className="relative rounded-[28px] border border-[#eadfce] bg-white p-4 shadow-[0_22px_60px_-44px_rgba(19,55,50,0.75)]">
                 <img
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(getClinicQrUrl())}`}
                   alt="Clinic QR Code"
-                  className="h-44 w-44 rounded-lg shadow-lg"
+                  className="h-48 w-48 rounded-2xl"
                 />
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <span className="rounded bg-white/95 px-2 py-0.5 text-xs font-bold tracking-widest text-primary shadow-sm">KRAMA</span>
+                  <span className="rounded-full bg-white/95 px-3 py-1 text-xs font-black tracking-widest text-primary shadow-sm">KRAMA</span>
                 </div>
               </div>
             )}
-            <p className="mt-4 text-sm text-muted-foreground">{dbProfile?.clinic_name}</p>
+            <p className="mt-4 text-center text-sm font-bold text-[#17312d]">{dbProfile?.clinic_name}</p>
+            <p className="mt-1 text-center text-xs text-muted-foreground">Place this near reception for walk-in patients.</p>
 
             <Button
               title="Download QR Code"
               variant="outline"
               onClick={downloadClinicQr}
-              className="mt-4 w-full"
+              className="mt-4 w-full rounded-2xl py-6"
               disabled={!getClinicQrUrl()}
             >
               <Download className="mr-2 h-4 w-4" />
@@ -1085,7 +1096,7 @@ const ClinicProfile = () => {
       </Dialog>
 
       <Dialog open={expandedImage !== null} onOpenChange={(open) => !open && setExpandedImage(null)}>
-        <DialogContent className="max-w-4xl p-0">
+        <DialogContent className="max-w-4xl rounded-[28px] border border-white/70 bg-[#fbfaf7] p-0">
           {expandedImage && (
             <div className="overflow-hidden rounded-lg bg-black">
               <img
@@ -1108,7 +1119,7 @@ const ClinicProfile = () => {
           }
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="rounded-[28px] border border-white/70 bg-[#fbfaf7] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
               {pendingAction === "phone" ? "Verify OTP for Phone Change" : 
@@ -1163,7 +1174,7 @@ const ClinicProfile = () => {
 };
 
 const PasswordRules = ({ checks }: { checks: ReturnType<typeof getPasswordChecks> }) => (
-  <div className="space-y-2 rounded-2xl bg-secondary/60 p-4">
+  <div className="space-y-2 rounded-[18px] bg-[#f6f1e8] p-4">
     <p className="text-xs text-muted-foreground">Password must contain:</p>
     <PasswordRule ok={checks.length} text="At least 8 characters" />
     <PasswordRule ok={checks.uppercase} text="One uppercase letter (A-Z)" />
@@ -1181,9 +1192,9 @@ const PasswordRule = ({ ok, text }: { ok: boolean; text: string }) => (
 );
 
 const ProfileStat = ({ label, value, mono = false, className = "" }: { label: string; value: string; mono?: boolean; className?: string }) => (
-  <div className={`rounded-[18px] bg-white/10 px-3 py-3 sm:rounded-[22px] sm:px-4 sm:py-4 ${className}`}>
-    <p className="text-xs text-primary-foreground/70 sm:text-sm">{label}</p>
-    <p className={`mt-1 break-words text-sm font-bold leading-tight text-white sm:mt-2 sm:text-lg ${mono ? "font-mono" : ""}`}>{value}</p>
+  <div className={`min-w-0 rounded-[18px] bg-[#f6f1e8] px-3 py-3 text-[#17312d] ${className}`}>
+    <p className="text-[10px] font-black uppercase tracking-wide text-primary/75">{label}</p>
+    <p className={`mt-2 truncate text-sm font-black leading-tight ${mono ? "font-mono" : ""}`}>{value}</p>
   </div>
 );
 
@@ -1194,23 +1205,23 @@ const ProfileCard = ({
   children,
   danger = false,
 }: {
-  icon: any;
+  icon: LucideIcon;
   title: string;
   description: string;
   children: React.ReactNode;
   danger?: boolean;
 }) => (
-  <div className={`rounded-[20px] border p-4 shadow-sm sm:rounded-[28px] sm:p-6 ${danger ? "border-red-200 bg-red-50/50" : "border-[#e6ded3] bg-[#fbfaf7]"}`}>
-    <div className="mb-4 flex items-center gap-3 sm:mb-6">
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 sm:rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-[#f0ede6] text-primary"}`}>
-        <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+  <div className={`rounded-[26px] border p-4 shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur ${danger ? "border-red-200 bg-red-50/70" : "border-white/70 bg-white/80"}`}>
+    <div className="mb-4 flex items-center gap-3">
+      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${danger ? "bg-red-100 text-red-600" : "bg-[#f6f1e8] text-primary"}`}>
+        <Icon className="h-5 w-5" />
       </div>
       <div className="min-w-0">
-        <h2 className="text-base font-bold leading-tight text-foreground sm:text-xl">{title}</h2>
-        <p className="mt-0.5 text-xs leading-snug text-muted-foreground sm:text-sm">{description}</p>
+        <h2 className="text-base font-black leading-tight text-slate-950">{title}</h2>
+        <p className="mt-0.5 text-sm leading-snug text-slate-500">{description}</p>
       </div>
     </div>
-    <div className="space-y-3 sm:space-y-4">{children}</div>
+    <div className="space-y-3">{children}</div>
   </div>
 );
 

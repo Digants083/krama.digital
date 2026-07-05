@@ -1,198 +1,292 @@
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { SUPPORT_EMAIL } from "@/config/app";
 import {
   ArrowRight,
+  Brain,
   Building2,
-  CheckCircle,
+  CheckCircle2,
   Clock,
   Mail,
+  MapPin,
   Smartphone,
-  Users
+  Stethoscope,
+  Ticket,
+  Users,
 } from "lucide-react";
+import { useEffect } from "react";
+import { Link } from "react-router-dom";
 
-const benefits = [
+const problems = [
+  {
+    icon: Stethoscope,
+    title: "What Krama is",
+    text: "Krama is a clinic queue, appointment, and patient-flow system. It helps patients book, receive a live token, track their turn, and continue care after the visit.",
+  },
   {
     icon: Clock,
-    title: "Save Time",
-    description: "Join queues remotely and get live updates before you leave for the clinic."
+    title: "The problem",
+    text: "Patients wait without knowing how long it will take. Clinics handle crowds, repeated questions, delays, and scattered visit details at the same time.",
   },
+  {
+    icon: Ticket,
+    title: "The solution",
+    text: "Krama makes the queue visible. It connects doctor slots, digital tokens, live delay updates, reports, billing, reminders, and patient history into one flow.",
+  },
+  {
+    icon: Brain,
+    title: "The future update",
+    text: "Our next step is AI for patient-doctor conversations: summaries, reminders, patient instructions, and better context for doctors before the next plan.",
+  },
+];
+
+const flow = [
   {
     icon: Smartphone,
-    title: "Mobile First",
-    description: "Book appointments, track queue movement, and manage visits from your phone."
+    label: "Patient starts",
+    title: "Login and choose the reason",
+    text: "The patient enters Krama, verifies securely, and selects why they need to visit.",
   },
   {
-    icon: Users,
-    title: "For Patients",
-    description: "Reduce waiting room stress with clearer queue status and appointment flow."
+    icon: MapPin,
+    label: "Clinic choice",
+    title: "Pick the clinic and slot",
+    text: "Krama shows available clinic sessions, doctors, and time slots so the patient can choose clearly.",
+  },
+  {
+    icon: Ticket,
+    label: "Live token",
+    title: "Track position and ETA",
+    text: "After booking, the patient sees their token, people ahead, estimated wait, and live queue movement.",
   },
   {
     icon: Building2,
-    title: "For Clinics",
-    description: "Organize patient flow, reduce crowding, and keep front-desk work simpler."
-  }
+    label: "Clinic control",
+    title: "Staff manage time and queue",
+    text: "Clinics control doctor slots, add delays, move the queue, manage billing, and organize patient records.",
+  },
+  {
+    icon: Brain,
+    label: "Future care",
+    title: "AI summaries and reminders",
+    text: "The future AI layer will listen to the patient-doctor conversation, create a useful summary, remind patients what to follow, and help doctors plan better treatment from previous context.",
+  },
 ];
 
-const steps = [
-  {
-    title: "Register",
-    description: "Sign up as a patient or clinic."
-  },
-  {
-    title: "Book or Join",
-    description: "Reserve a time or enter the queue."
-  },
-  {
-    title: "Track",
-    description: "Follow queue status and timing updates."
-  },
-  {
-    title: "Visit",
-    description: "Arrive closer to the consultation time."
-  }
+const capabilities = [
+  "Digital queue tokens",
+  "Live wait-time updates",
+  "Doctor-wise time slots",
+  "Delay controls",
+  "Patient reports",
+  "Billing support",
+  "AI visit summaries",
+  "Conversation reminders",
+  "Follow-up reminders",
 ];
 
-const quickLinks = [
+const links = [
   { to: "/patient/signup", label: "Patient Registration" },
   { to: "/clinic/register", label: "Clinic Registration" },
   { to: "/patient/login", label: "Patient Login" },
-  { to: "/clinic/login", label: "Clinic Login" }
+  { to: "/clinic/login", label: "Clinic Login" },
 ];
 
 const AboutUs = () => {
-  return (
-    <main className="min-h-screen bg-background sm:bg-[linear-gradient(180deg,hsl(var(--secondary))_0%,hsl(var(--background))_34%,hsl(var(--background))_100%)]">
-      <section className="mx-auto max-w-6xl px-4 py-5 sm:py-10 lg:py-14">
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm sm:rounded-2xl sm:border-primary/15 sm:bg-primary sm:shadow-[0_24px_70px_-36px_rgba(18,80,70,0.75)]">
-          <div className="grid gap-0 lg:grid-cols-[1.18fr_0.82fr]">
-            <div className="p-5 text-foreground sm:p-8 sm:text-primary-foreground lg:p-10">
-              <span className="inline-flex rounded-full border border-border bg-secondary px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:border-white/20 sm:bg-white/10 sm:text-white">
-              About Krama
-              </span>
-              <h1 className="mt-4 max-w-2xl font-display text-2xl font-bold leading-tight sm:mt-5 sm:text-5xl">
-                A calmer clinic visit, from booking to consultation.
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:mt-5 sm:text-base sm:text-white">
-                Krama transforms the healthcare experience by reducing wait times and streamlining patient flow through digital queue management. Quality healthcare starts with a smooth, stress-free journey from home to consultation.
-              </p>
-              <div className="mt-5 flex flex-col gap-3 sm:mt-7 sm:flex-row">
-                <Button asChild className="sm:bg-primary-foreground sm:text-primary sm:hover:bg-primary-foreground/90">
-                  <Link to="/patient/signup">
-                    Patient Registration
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" className="sm:border-white/25 sm:bg-white/5 sm:text-primary-foreground sm:hover:bg-white/10 sm:hover:text-primary-foreground">
-                  <Link to="/clinic/register">Clinic Registration</Link>
-                </Button>
-              </div>
-            </div>
+  useEffect(() => {
+    document.body.classList.add("about-route");
+    return () => document.body.classList.remove("about-route");
+  }, []);
 
-            <div className="border-t border-border bg-secondary/45 p-5 sm:border-white/10 sm:bg-white/[0.07] sm:p-8 lg:border-l lg:border-t-0 lg:p-10">
-              <div className="hidden h-11 w-11 items-center justify-center rounded-lg bg-white/12 text-primary-foreground sm:flex">
-                <CheckCircle className="h-5 w-5" />
-              </div>
-              <h2 className="font-display text-xl font-bold text-foreground sm:mt-5 sm:text-2xl sm:text-primary-foreground">Our Mission</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-white">
-                Build a queue experience where patients know when to arrive and clinics can keep movement predictable.
-              </p>
-              <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground sm:mt-6 sm:space-y-3 sm:border-white/10 sm:pt-5 sm:text-white">
-                <div className="flex gap-3">
-                  <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
-                  <span>Clearer appointment and queue status for patients.</span>
-                </div>
-                <div className="flex gap-3">
-                  <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
-                  <span>Better front-desk visibility for clinics.</span>
-                </div>
-              </div>
+  return (
+    <main className="about-page overflow-hidden bg-[#0E2620] text-white">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&family=Fira+Code:wght@400&display=swap');
+        body.about-route { background: #0E2620 !important; background-image: none !important; }
+        body.about-route .krama-ambient { background: #0E2620 !important; overflow: visible; }
+        body.about-route .krama-ambient::before { display: none; }
+        .about-page { font-family: 'Inter', system-ui, sans-serif; }
+        .about-serif { font-family: 'EB Garamond', Georgia, serif; letter-spacing: 0; }
+        .about-mono { font-family: 'Fira Code', ui-monospace, monospace; }
+        @media (max-width: 640px) {
+          .about-page h1, .about-page h2 { overflow-wrap: anywhere; }
+        }
+      `}</style>
+      <section className="relative isolate min-h-[calc(100svh-4rem)] overflow-hidden">
+        <img
+          src="/krama-hero-clinic.png"
+          alt="Patients using phones in a calm clinic waiting room"
+          className="absolute inset-0 h-full w-full object-cover object-center"
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(14,38,32,0.96)_0%,rgba(14,38,32,0.8)_42%,rgba(14,38,32,0.5)_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_22%_48%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(to_bottom,rgba(14,38,32,0.2),rgba(14,38,32,0.92))]" />
+
+        <div className="section-container relative z-10 flex min-h-[calc(100svh-4rem)] items-center px-4 py-16 md:px-8">
+          <div className="max-w-4xl">
+            <p className="about-mono text-xs font-medium uppercase tracking-[0.32em] text-[#22D3EE]">
+              About Krama
+            </p>
+            <h1 className="about-serif mt-6 max-w-4xl text-5xl font-normal leading-[1.02] text-white sm:text-6xl md:text-7xl">
+              Krama makes clinic visits easier from start to finish.
+            </h1>
+            <p className="mt-6 max-w-2xl text-base leading-8 text-[#C4D8D0] md:text-lg">
+              Krama helps patients book appointments, get live queue tokens, track their turn, and follow care instructions after the visit. For clinics, it brings time slots, queue control, reports, billing, and patient history into one calmer system.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Button asChild className="h-12 rounded-lg bg-[#F8B4D9] px-6 text-[#0E2620] hover:bg-[#FBCFE8]">
+                <Link to="/patient/signup">
+                  Start as patient
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+              <Button
+                asChild
+                variant="outline"
+                className="h-12 rounded-lg border-white/25 bg-white/5 px-6 text-white hover:bg-white/10 hover:text-white"
+              >
+                <Link to="/clinic/register">Register clinic</Link>
+              </Button>
             </div>
           </div>
         </div>
+      </section>
 
-        <section className="mt-6 sm:mt-10">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <section className="px-4 py-16 md:px-8 md:py-24">
+        <div className="section-container">
+          <div className="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-end">
             <div>
-              <h2 className="font-display text-xl font-bold text-foreground sm:text-2xl">Why Choose Krama?</h2>
-              <p className="mt-2 text-sm text-muted-foreground">Focused tools for patients and clinics without extra noise.</p>
+              <p className="about-mono text-xs uppercase tracking-[0.28em] text-[#22D3EE]">Krama in clear words</p>
+              <h2 className="about-serif mt-4 max-w-xl text-4xl font-normal leading-tight md:text-5xl">
+                What we are solving, and where we are going next.
+              </h2>
             </div>
+            <p className="max-w-3xl text-base leading-8 text-[#C4D8D0]">
+              Krama starts with the queue, but the vision is bigger. We want every patient to understand their visit before, during, and after care, while every doctor gets enough context to make a better plan.
+            </p>
           </div>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            {benefits.map(({ icon: Icon, title, description }) => (
-              <article key={title} className="rounded-xl border border-border/80 bg-card/90 p-4 shadow-sm sm:p-5 sm:shadow-[0_16px_45px_-34px_rgba(18,80,70,0.55)]">
-                <div className="flex gap-3">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-foreground">{title}</h3>
-                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
-                  </div>
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            {problems.map(({ icon: Icon, title, text }) => (
+              <article key={title} className="border border-white/10 bg-white/[0.025] p-6 backdrop-blur">
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#22D3EE]/10 text-[#22D3EE]">
+                  <Icon className="h-6 w-6" />
                 </div>
+                <h3 className="about-serif mt-5 text-2xl font-normal leading-tight">{title}</h3>
+                <p className="mt-3 text-sm leading-7 text-[#C4D8D0]">{text}</p>
               </article>
             ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="mt-6 rounded-xl border border-border bg-card/85 p-4 shadow-sm sm:mt-10 sm:rounded-2xl sm:p-6 sm:shadow-[0_20px_60px_-42px_rgba(18,80,70,0.6)]">
-          <h2 className="font-display text-xl font-bold text-foreground sm:text-2xl">How It Works</h2>
-          <div className="mt-5 grid gap-3 md:grid-cols-4">
-            {steps.map((step, index) => (
-              <article key={step.title} className="rounded-xl border border-border bg-background/70 p-4">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
-                  {index + 1}
-                </div>
-                <h3 className="mt-4 font-semibold text-foreground">{step.title}</h3>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">{step.description}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-6 grid gap-5 rounded-xl border border-border bg-card p-4 shadow-sm sm:mt-10 sm:gap-6 sm:rounded-2xl sm:border-primary/15 sm:bg-[linear-gradient(135deg,hsl(var(--card))_0%,hsl(var(--secondary))_100%)] sm:p-6 sm:shadow-[0_22px_65px_-42px_rgba(18,80,70,0.6)] md:grid-cols-2">
+      <section className="border-y border-white/10 bg-[#102b24] px-4 py-16 md:px-8 md:py-24">
+        <div className="section-container grid gap-10 lg:grid-cols-[1fr_0.9fr] lg:items-center">
           <div>
-            <h2 className="font-display text-xl font-bold text-foreground sm:text-2xl">Get in Touch</h2>
-            <div className="mt-5 space-y-4 text-sm">
-              <div className="flex gap-3">
-                <Mail className="mt-0.5 h-5 w-5 text-primary" />
-                <div>
-                  <p className="font-semibold text-foreground">Email</p>
-                  <a href={`mailto:${SUPPORT_EMAIL}`} className="text-primary transition hover:text-primary/80">
-                    {SUPPORT_EMAIL}
-                  </a>
+            <p className="about-mono text-xs uppercase tracking-[0.28em] text-[#22D3EE]">What we do</p>
+            <h2 className="about-serif mt-4 text-4xl font-normal leading-tight md:text-5xl">
+              The solution is visibility for both sides.
+            </h2>
+            <p className="mt-5 max-w-2xl text-base leading-8 text-[#C4D8D0]">
+              Patients get a clear path: login, book, receive a token, and track the queue. Clinics get the control layer behind it: doctor sessions, availability, queue movement, delay updates, billing, reports, and patient history.
+            </p>
+            <div className="mt-8 grid gap-3 sm:grid-cols-2">
+              {capabilities.map((item) => (
+                <div key={item} className="flex items-center gap-3 border border-white/10 bg-white/[0.025] px-4 py-3 text-sm text-[#E6F8F2]">
+                  <CheckCircle2 className="h-4 w-4 text-[#22D3EE]" />
+                  {item}
                 </div>
-              </div>
-              <div className="flex gap-3">
-                <Clock className="mt-0.5 h-5 w-5 text-primary" />
-                <div>
-                  <p className="font-semibold text-foreground">Support Hours</p>
-                  <p className="text-muted-foreground">All day. Help from 10 AM to 4 PM.</p>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
+          <figure className="relative min-h-[420px] overflow-hidden border border-white/10">
+            <img
+              src="/krama-patient-phone.png"
+              alt="Patient viewing a Krama token on a phone"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0E2620] via-[#0E2620]/25 to-transparent" />
+            <figcaption className="absolute bottom-0 left-0 right-0 p-6">
+              <p className="about-mono text-xs uppercase tracking-[0.22em] text-[#F8B4D9]">Live patient view</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-white/80">
+                Token number, people ahead, estimated wait, and appointment status stay easy to reopen.
+              </p>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section className="px-4 py-16 md:px-8 md:py-24">
+        <div className="section-container">
+          <div className="max-w-3xl">
+            <p className="about-mono text-xs uppercase tracking-[0.28em] text-[#22D3EE]">From start to end</p>
+            <h2 className="about-serif mt-4 text-4xl font-normal leading-tight md:text-5xl">
+              One connected journey for patients and clinics.
+            </h2>
+          </div>
+
+          <div className="mt-10 grid gap-4">
+            {flow.map(({ icon: Icon, label, title, text }, index) => (
+              <article
+                key={title}
+                className="grid gap-5 border border-white/10 bg-white/[0.025] p-5 backdrop-blur md:grid-cols-[72px_0.55fr_1fr] md:items-center md:p-6"
+              >
+                <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-[#22D3EE]/10 text-[#22D3EE]">
+                  <Icon className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="about-mono text-xs uppercase tracking-[0.22em] text-[#22D3EE]">
+                    {String(index + 1).padStart(2, "0")} / {label}
+                  </p>
+                  <h3 className="about-serif mt-2 text-2xl font-normal leading-tight">{title}</h3>
+                </div>
+                <p className="text-sm leading-7 text-[#C4D8D0]">{text}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden border-t border-white/10 px-4 py-16 md:px-8 md:py-24">
+        <img
+          src="/krama-clinic-staff.png"
+          alt="Clinic team using Krama for patient flow"
+          className="absolute inset-0 h-full w-full object-cover opacity-25"
+        />
+        <div className="absolute inset-0 bg-[#0E2620]/85" />
+        <div className="section-container relative z-10 grid gap-8 lg:grid-cols-[1fr_0.8fr] lg:items-center">
           <div>
-            <h3 className="font-semibold text-foreground">Quick Links</h3>
-            <div className="mt-4 grid gap-2">
-              {quickLinks.map((link) => (
+            <p className="about-mono text-xs uppercase tracking-[0.28em] text-[#22D3EE]">Future update</p>
+            <h2 className="about-serif mt-4 max-w-3xl text-4xl font-normal leading-tight md:text-5xl">
+              Future update: AI that helps after the conversation.
+            </h2>
+            <p className="mt-5 max-w-2xl text-base leading-8 text-[#C4D8D0]">
+              We are building an AI layer for patient-doctor conversations. It can create a preview summary for the doctor, help the doctor understand earlier visits, and give the patient reminders for medicines, actions, follow-ups, and things to avoid.
+            </p>
+          </div>
+          <div className="border border-white/10 bg-[#0E2620]/80 p-6 backdrop-blur">
+            <div className="flex gap-3">
+              <Mail className="mt-1 h-5 w-5 text-[#22D3EE]" />
+              <div>
+                <p className="about-serif text-2xl font-normal">Talk to Krama</p>
+                <a href={`mailto:${SUPPORT_EMAIL}`} className="mt-2 inline-block text-sm text-[#F8B4D9] hover:text-white">
+                  {SUPPORT_EMAIL}
+                </a>
+              </div>
+            </div>
+            <div className="mt-6 grid gap-2">
+              {links.map((link) => (
                 <Link
                   key={link.to}
                   to={link.to}
-                  className="flex items-center justify-between rounded-lg border border-border bg-card/80 px-4 py-3 text-sm font-medium text-foreground transition hover:border-primary/35 hover:bg-card hover:text-primary"
+                  className="flex items-center justify-between border border-white/10 bg-white/[0.035] px-4 py-3 text-sm text-white/85 transition hover:border-[#22D3EE]/40 hover:text-[#22D3EE]"
                 >
                   {link.label}
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               ))}
             </div>
-            <Button asChild className="mt-4 w-full">
-              <Link to="/">Back to Home</Link>
-            </Button>
           </div>
-        </section>
+        </div>
       </section>
     </main>
   );

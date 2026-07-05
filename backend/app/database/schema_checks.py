@@ -123,6 +123,38 @@ REQUIRED_TABLE_COLUMNS: Dict[str, Dict[str, str]] = {
         "report_pdf_data": "BYTEA",
         "report_type": "VARCHAR",
     },
+    "billing": {
+        "clinic_id": "VARCHAR",
+        "record_type": "VARCHAR DEFAULT 'bill'",
+        "bill_id": "VARCHAR",
+        "appointment_id": "INTEGER",
+        "patient_name": "VARCHAR",
+        "patient_phone": "VARCHAR",
+        "token": "VARCHAR",
+        "bill_source": "VARCHAR DEFAULT 'manual'",
+        "items": "JSON DEFAULT '[]'",
+        "total_amount": "INTEGER DEFAULT 0",
+        "payment_mode": "VARCHAR",
+        "payment_status": "VARCHAR DEFAULT 'paid'",
+        "template": "JSON DEFAULT '{}'",
+        "services": "JSON DEFAULT '[]'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    },
+    "patient_revisit_reminders": {
+        "clinic_id": "VARCHAR",
+        "patient_id": "VARCHAR",
+        "patient_name": "VARCHAR",
+        "patient_phone": "VARCHAR",
+        "patient_email": "VARCHAR",
+        "appointment_id": "INTEGER",
+        "token": "VARCHAR",
+        "reminder_days": "INTEGER",
+        "revisit_date": "VARCHAR",
+        "status": "VARCHAR DEFAULT 'active'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    },
 }
 
 
@@ -136,6 +168,8 @@ EXPECTED_RELATED_TABLES = [
     "clinic_time_slots",
     "reports",
     "completed_reports",
+    "billing",
+    "patient_revisit_reminders",
 ]
 
 
@@ -203,6 +237,38 @@ REQUIRED_INDEXES: Dict[str, str] = {
     "idx_doctor_sessions_eta": (
         "CREATE INDEX IF NOT EXISTS idx_doctor_sessions_eta "
         "ON doctor_sessions(clinic_id, slot_id, session_date, status)"
+    ),
+    "idx_billing_clinic_record": (
+        "CREATE INDEX IF NOT EXISTS idx_billing_clinic_record "
+        "ON billing(clinic_id, record_type)"
+    ),
+    "idx_billing_bill_id": (
+        "CREATE INDEX IF NOT EXISTS idx_billing_bill_id "
+        "ON billing(bill_id)"
+    ),
+    "idx_billing_appointment_id": (
+        "CREATE INDEX IF NOT EXISTS idx_billing_appointment_id "
+        "ON billing(appointment_id)"
+    ),
+    "idx_billing_created_at": (
+        "CREATE INDEX IF NOT EXISTS idx_billing_created_at "
+        "ON billing(created_at DESC)"
+    ),
+    "idx_revisit_reminders_clinic_patient": (
+        "CREATE INDEX IF NOT EXISTS idx_revisit_reminders_clinic_patient "
+        "ON patient_revisit_reminders(clinic_id, patient_id)"
+    ),
+    "idx_revisit_reminders_clinic_phone": (
+        "CREATE INDEX IF NOT EXISTS idx_revisit_reminders_clinic_phone "
+        "ON patient_revisit_reminders(clinic_id, patient_phone)"
+    ),
+    "idx_revisit_reminders_revisit_date": (
+        "CREATE INDEX IF NOT EXISTS idx_revisit_reminders_revisit_date "
+        "ON patient_revisit_reminders(revisit_date)"
+    ),
+    "idx_revisit_reminders_status": (
+        "CREATE INDEX IF NOT EXISTS idx_revisit_reminders_status "
+        "ON patient_revisit_reminders(status)"
     ),
 }
 
@@ -337,6 +403,10 @@ async def _normalize_column_defaults(conn: AsyncConnection) -> None:
             """
         )
     )
+    await conn.execute(text("UPDATE billing SET record_type = 'bill' WHERE record_type IS NULL"))
+    await conn.execute(text("UPDATE billing SET items = '[]' WHERE items IS NULL"))
+    await conn.execute(text("UPDATE billing SET template = '{}' WHERE template IS NULL"))
+    await conn.execute(text("UPDATE billing SET services = '[]' WHERE services IS NULL"))
 
 
 async def _ensure_required_indexes(conn: AsyncConnection) -> None:

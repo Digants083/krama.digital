@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRightCircle, CheckCircle2, Clock, Megaphone, RefreshCw, Stethoscope, Users } from "lucide-react";
+import { ArrowLeft, ArrowRightCircle, CalendarDays, CheckCircle2, Clock, Megaphone, RefreshCw, Stethoscope, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useQueue } from "@/context/QueueContext";
 import { apiUrl } from "@/lib/api";
 import { formatDelayedStartTime, formatDelayLabel } from "@/lib/timeFormat";
@@ -21,6 +22,26 @@ function initials(name: string): string {
     .slice(0, 2)
     .toUpperCase();
 }
+
+function dateInputValue(date: Date): string {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function addDaysInputValue(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return dateInputValue(date);
+}
+
+const reminderQuickOptions = [
+  { label: "7d", days: 7 },
+  { label: "15d", days: 15 },
+  { label: "1m", days: 30 },
+  { label: "3m", days: 90 },
+  { label: "6m", days: 180 },
+  { label: "1yr", days: 365 },
+];
 
 function sourceLabel(source?: string) {
   if (source === "walkin") return "Walk-in";
@@ -48,6 +69,17 @@ interface PatientHistory {
   visit_count: number;
   last_visit: string | null;
   previous_visits?: PreviousVisit[];
+}
+
+interface RevisitReminder {
+  id: number;
+  patient_name: string;
+  patient_phone?: string;
+  token?: string;
+  reminder_days?: number;
+  revisit_date: string;
+  status: string;
+  created_at?: string;
 }
 
 interface DoctorSessionSlot {
@@ -173,7 +205,7 @@ function VisitHistoryDetails({ history }: { history: PatientHistory }) {
   if (!previousVisits.length) return null;
 
   return (
-    <div className="mt-4 rounded-lg bg-white/45 px-3 py-3 text-left">
+    <div className="mt-4 rounded-2xl bg-white/45 px-3 py-3 text-left">
       <p className="mb-3 text-[11px] font-bold uppercase tracking-wide text-[#77756f]">Previous Visits</p>
       <div className="space-y-2">
         {previousVisits.map((visit) => (
@@ -191,7 +223,7 @@ const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history,
   const isReturning = Boolean(history?.is_returning);
 
   return (
-    <div className="rounded-xl bg-[#f0ede6] p-3">
+    <div className="rounded-xl bg-[#f6f1e8] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-[#77756f]">Visit History</p>
         {isLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#77756f]" />}
@@ -242,7 +274,7 @@ const SessionCard = memo(function SessionCard({ session, selected, onSelect }: {
     <button
       type="button"
       onClick={() => onSelect(session.session_id)}
-      className={`min-w-0 rounded-xl border p-3 text-left transition hover:shadow-sm ${selected ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-[#fffdf8] hover:border-[#b7d7c8]"}`}
+      className={`min-w-0 rounded-xl border p-3 text-left transition hover:shadow-sm ${selected ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-white/85 hover:border-[#b7d7c8]"}`}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -260,11 +292,11 @@ const SessionCard = memo(function SessionCard({ session, selected, onSelect }: {
         <SessionStatusBadge status={session.status} />
       </div>
       <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-        <div className="rounded-lg bg-[#f0ede6] px-2 py-1.5">
+        <div className="rounded-2xl bg-[#f6f1e8] px-2 py-1.5">
           <p className="text-[#77756f]">Patients</p>
           <p className="mt-0.5 font-bold text-[#202825]">{session.queue_count}</p>
         </div>
-        <div className="rounded-lg bg-[#f0ede6] px-2 py-1.5">
+        <div className="rounded-2xl bg-[#f6f1e8] px-2 py-1.5">
           <p className="text-[#77756f]">Completed</p>
           <p className="mt-0.5 font-bold text-[#202825]">{session.completed_count}</p>
         </div>
@@ -321,6 +353,11 @@ export default function KramaDoctorDashboard() {
   const [patientHistory, setPatientHistory] = useState<PatientHistory | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [latestReminder, setLatestReminder] = useState<RevisitReminder | null>(null);
+  const [isReminderOpen, setIsReminderOpen] = useState(false);
+  const [reminderDays, setReminderDays] = useState("30");
+  const [revisitDate, setRevisitDate] = useState(() => addDaysInputValue(30));
+  const [isSavingReminder, setIsSavingReminder] = useState(false);
   const [sessions, setSessions] = useState<DoctorSessionSlot[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -544,6 +581,7 @@ export default function KramaDoctorDashboard() {
         queue_adjusted_time: displayCurrentServing.queue_adjusted_time,
         session_status: displayCurrentServing.session_status,
         source: displayCurrentServing.source,
+        appointmentId: displayCurrentServing.appointmentId,
         status: "Serving",
       }
     : selectedQueuePatient
@@ -567,6 +605,7 @@ export default function KramaDoctorDashboard() {
           queue_adjusted_time: selectedQueuePatient.queue_adjusted_time,
           session_status: selectedQueuePatient.session_status,
           source: selectedQueuePatient.source,
+          appointmentId: selectedQueuePatient.appointment_id,
           status: "Waiting",
         }
       : null;
@@ -613,6 +652,79 @@ export default function KramaDoctorDashboard() {
 
     return () => controller.abort();
   }, [activePatient?.patient_email, activePatient?.phone, clinicId, activePatientId]);
+
+  useEffect(() => {
+    setIsReminderOpen(false);
+    setReminderDays("30");
+    setRevisitDate(addDaysInputValue(30));
+
+    if (!clinicId || (!activePatientId && !activePatient?.phone)) {
+      setLatestReminder(null);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const fetchLatestReminder = async () => {
+      try {
+        const params = new URLSearchParams({ clinic_id: clinicId });
+        if (activePatientId) params.set("patient_id", activePatientId);
+        if (activePatient?.phone) params.set("phone", activePatient.phone);
+        const response = await fetch(apiUrl(`/api/patient-reminders/latest?${params.toString()}`), {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Failed to fetch reminder");
+        setLatestReminder(await response.json());
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setLatestReminder(null);
+      }
+    };
+
+    fetchLatestReminder();
+    return () => controller.abort();
+  }, [activePatient?.phone, activePatientId, clinicId]);
+
+  const chooseReminderDays = (days: number) => {
+    setReminderDays(String(days));
+    setRevisitDate(addDaysInputValue(days));
+  };
+
+  const saveRevisitReminder = async () => {
+    if (!clinicId || !activePatient) return;
+    if (!revisitDate) {
+      setMessage({ text: "Choose a revisit date.", type: "error" });
+      return;
+    }
+
+    setIsSavingReminder(true);
+    try {
+      const response = await fetch(apiUrl("/api/patient-reminders"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clinic_id: clinicId,
+          patient_id: activePatient.patient_id || null,
+          patient_name: activePatient.name,
+          patient_phone: activePatient.phone || null,
+          patient_email: activePatient.patient_email || null,
+          appointment_id: activePatient.appointmentId || null,
+          token: activePatient.token || null,
+          reminder_days: Number(reminderDays) || null,
+          revisit_date: revisitDate,
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to save reminder");
+      const savedReminder: RevisitReminder = await response.json();
+      setLatestReminder(savedReminder);
+      setIsReminderOpen(false);
+      setMessage({ text: `Revisit reminder saved for ${formatVisitDate(savedReminder.revisit_date)}.`, type: "success" });
+    } catch {
+      setMessage({ text: "Could not save revisit reminder.", type: "error" });
+    } finally {
+      setIsSavingReminder(false);
+    }
+  };
 
   const totalToday = displayTotalToday;
   const activeSessionDelay = activeSession?.delay_minutes ? `${activeSession.delay_minutes} min` : null;
@@ -803,14 +915,14 @@ export default function KramaDoctorDashboard() {
 
   if (!hasChosenDoctor) {
     return (
-      <div className="min-h-screen bg-[#f5f3ee] text-[#1f2522]">
+      <div className="min-h-screen bg-transparent text-[#1f2522]">
         {message && (
           <div className={`fixed right-5 top-5 z-50 rounded-full px-4 py-2 text-sm shadow-lg ${message.type === "success" ? "bg-[#1a5c4a] text-white" : "bg-red-600 text-white"}`}>
             {message.text}
           </div>
         )}
 
-        <header className="border-b border-[#e6ded3] bg-[#fbfaf7]">
+        <header className="border-b border-white/60 bg-[#fbfaf7]/85 backdrop-blur-xl">
           <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-4 md:px-8">
             <Link to="/clinic" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7]" aria-label="Back to clinic dashboard">
               <ArrowLeft className="h-5 w-5" />
@@ -823,8 +935,8 @@ export default function KramaDoctorDashboard() {
         </header>
 
         <main className="mx-auto max-w-4xl px-4 py-8 md:px-8">
-          <div className="overflow-hidden rounded-2xl border border-[#d9eadf] bg-[#fbfaf7] shadow-sm">
-            <div className="border-b border-[#e6ded3] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] p-5 md:p-7">
+          <div className="overflow-hidden rounded-2xl border border-white/70 bg-white/80 backdrop-blur shadow-sm">
+            <div className="border-b border-[#e6ded3] bg-[#f6f1e8] p-5 md:p-7">
               <div className="flex items-start gap-4">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#dff4ea] text-[#1a5c4a]">
                   <Stethoscope className="h-6 w-6" />
@@ -838,7 +950,7 @@ export default function KramaDoctorDashboard() {
 
             <div className="p-5 md:p-7">
               {doctors.length === 0 ? (
-                <div className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">
+                <div className="rounded-xl bg-[#f6f1e8] px-4 py-6 text-center text-sm text-[#77756f]">
                   Loading doctors...
                 </div>
               ) : (
@@ -873,14 +985,14 @@ export default function KramaDoctorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee] text-[#1f2522]">
+    <div className="min-h-screen bg-transparent text-[#1f2522]">
       {message && (
         <div className={`fixed right-5 top-5 z-50 rounded-full px-4 py-2 text-sm shadow-lg ${message.type === "success" ? "bg-[#1a5c4a] text-white" : "bg-red-600 text-white"}`}>
           {message.text}
         </div>
       )}
 
-      <header className="border-b border-[#e6ded3] bg-[#fbfaf7]">
+      <header className="border-b border-white/60 bg-[#fbfaf7]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 sm:min-h-[72px] sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 sm:py-0 md:px-8">
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <Link to="/clinic" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7] sm:h-10 sm:w-10" aria-label="Back to clinic dashboard">
@@ -957,7 +1069,7 @@ export default function KramaDoctorDashboard() {
                 </div>
               )}
             </div>
-            <Button onClick={refreshQueue} variant="outline" className="h-9 w-full rounded-full border-[#d8d1c6] bg-[#fbfaf7] px-2 text-xs text-[#40514b] hover:bg-[#f5f3ee] sm:h-10 sm:w-auto sm:px-5 sm:text-sm">
+            <Button onClick={refreshQueue} variant="outline" className="h-9 w-full rounded-full border-[#d8d1c6] bg-white/80 px-2 text-xs text-[#40514b] hover:bg-[#f6f1e8] sm:h-10 sm:w-auto sm:px-5 sm:text-sm">
               <RefreshCw className="mr-1.5 h-4 w-4 sm:mr-2" />
               Refresh
             </Button>
@@ -967,7 +1079,7 @@ export default function KramaDoctorDashboard() {
 
       <main className="mx-auto grid max-w-6xl gap-4 px-4 py-4 md:px-8 md:py-6 xl:grid-cols-[1fr_320px]">
         <section className="space-y-4 md:space-y-5">
-          <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 md:p-5">
+          <div className="rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-4 md:p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-lg font-bold text-[#202825]">Today's Time Slots</p>
@@ -982,7 +1094,7 @@ export default function KramaDoctorDashboard() {
                 { label: "Waiting", value: displayQueue.length },
                 { label: "Queue", value: displayCurrentServing ? "Serving" : displayQueue.length ? "Ready" : "Idle" },
               ].map((item) => (
-                <div key={item.label} className="rounded-lg bg-[#f0ede6] px-2 py-2 text-center">
+                <div key={item.label} className="rounded-2xl bg-[#f6f1e8] px-2 py-2 text-center">
                   <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-[#77756f]">{item.label}</p>
                   <p className="mt-0.5 truncate text-xs font-bold text-[#202825] sm:text-sm">{item.value}</p>
                 </div>
@@ -992,11 +1104,11 @@ export default function KramaDoctorDashboard() {
               <p className="mb-3 rounded-xl bg-red-50 px-4 py-3 text-center text-sm font-semibold text-red-700">{sessionsError}</p>
             )}
             {sessionsLoading && sessions.length === 0 ? (
-              <p className="rounded-xl bg-[#f8f6f2] px-4 py-5 text-center text-sm text-[#77756f]">Loading sessions...</p>
+              <p className="rounded-xl bg-[#f6f1e8] px-4 py-5 text-center text-sm text-[#77756f]">Loading sessions...</p>
             ) : sessionsError && sessions.length === 0 ? (
               <p className="rounded-xl bg-red-50 px-4 py-5 text-center text-sm font-semibold text-red-700">{sessionsError}</p>
             ) : sessions.length === 0 ? (
-              <p className="rounded-xl bg-[#f8f6f2] px-4 py-5 text-center text-sm text-[#77756f]">No sessions configured for today.</p>
+              <p className="rounded-xl bg-[#f6f1e8] px-4 py-5 text-center text-sm text-[#77756f]">No sessions configured for today.</p>
             ) : (
               <div className="grid min-h-[104px] grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">
                 {sessions.map((session) => (
@@ -1006,7 +1118,7 @@ export default function KramaDoctorDashboard() {
             )}
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-[0_20px_55px_-45px_rgba(18,64,54,0.65)] transition-colors duration-200">
+          <div className="relative overflow-hidden rounded-[26px] border border-white/70 bg-white/80 backdrop-blur shadow-[0_20px_55px_-45px_rgba(18,64,54,0.65)] transition-colors duration-200">
             <SwitchingOverlay show={isSessionSwitching} />
             <div className="bg-[#1a5c4a] px-6 py-4 text-center text-white">
               <p className="font-semibold">{displayCurrentServing ? "Now Serving" : displayQueue.length ? "Next Patient" : "No Active Token"}</p>
@@ -1028,7 +1140,6 @@ export default function KramaDoctorDashboard() {
                     <div className="min-w-0 text-left">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="min-w-0 truncate text-xl font-bold text-[#202825] md:text-2xl">{activePatient.name}</p>
-                        <SourceBadge source={activePatient.source} />
                         <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#1a5c4a]">{activePatient.status}</span>
                       </div>
 
@@ -1038,14 +1149,56 @@ export default function KramaDoctorDashboard() {
                           <p className="mt-1 break-words text-sm font-bold text-[#202825]">{activePatient.phone || "N/A"}</p>
                         </div>
                         <div className="rounded-xl bg-white/70 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Blood</p>
-                          <p className="mt-1 text-sm font-bold text-[#202825]">{activePatient.blood_group || "N/A"}</p>
-                        </div>
-                        <div className="rounded-xl bg-white/70 p-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Source</p>
-                          <p className="mt-1 text-sm font-bold text-[#202825]">{sourceLabel(activePatient.source)}</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#77756f]">Remember</p>
+                              <p className="mt-1 text-sm font-bold text-[#202825]">
+                                {latestReminder ? `Revisit ${formatVisitDate(latestReminder.revisit_date)}` : "Set revisit"}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#e1f5ee] text-[#1a5c4a]"
+                              onClick={() => setIsReminderOpen((current) => !current)}
+                              aria-label="Set revisit reminder"
+                            >
+                              <CalendarDays className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
+                      {isReminderOpen && (
+                        <div className="mt-3 rounded-2xl border border-[#cdebdc] bg-white/80 p-3">
+                          <div className="mb-2 flex flex-wrap gap-1.5">
+                            {reminderQuickOptions.map((option) => (
+                              <button
+                                key={option.label}
+                                type="button"
+                                className={`rounded-full px-3 py-1 text-xs font-bold ${reminderDays === String(option.days) ? "bg-[#1a5c4a] text-white" : "bg-[#f6f1e8] text-[#40514b]"}`}
+                                onClick={() => chooseReminderDays(option.days)}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                            <Input
+                              type="date"
+                              className="h-9 bg-white"
+                              value={revisitDate}
+                              onChange={(event) => setRevisitDate(event.target.value)}
+                            />
+                            <Button
+                              type="button"
+                              className="h-9 rounded-full bg-[#1a5c4a] px-4 text-xs text-white hover:bg-[#144d3e]"
+                              onClick={() => void saveRevisitReminder()}
+                              disabled={isSavingReminder}
+                            >
+                              {isSavingReminder ? "Saving..." : "Save"}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1073,7 +1226,7 @@ export default function KramaDoctorDashboard() {
             </Button>
           </div>
 
-          <div className="relative min-h-[300px] rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-4 transition-colors duration-200 md:p-5">
+          <div className="relative min-h-[300px] rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-4 transition-colors duration-200 md:p-5">
             <SwitchingOverlay show={isSessionSwitching} />
             <div className={`transition-opacity duration-200 ${isSessionSwitching ? "opacity-65" : "opacity-100"}`}>
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -1087,7 +1240,7 @@ export default function KramaDoctorDashboard() {
             </div>
 
             {displayActivePatientCount === 0 ? (
-              <p className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">No patients in this session.</p>
+              <p className="rounded-xl bg-[#f6f1e8] px-4 py-6 text-center text-sm text-[#77756f]">No patients in this session.</p>
             ) : (
               <div className="space-y-3">
                 {displayCurrentServing && (
@@ -1112,7 +1265,7 @@ export default function KramaDoctorDashboard() {
                     key={`${patient.source}-${patient.appointment_id || patient.token}`}
                     type="button"
                     onClick={() => setSelectedToken(patient.token)}
-                    className={`grid w-full grid-cols-[64px_1fr] items-center gap-3 rounded-xl border px-3 py-3 text-left transition sm:grid-cols-[72px_1fr_auto] sm:px-4 ${selectedQueuePatient?.token === patient.token ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-[#fffdf8] hover:bg-[#f0ede6]"}`}
+                    className={`grid w-full grid-cols-[64px_1fr] items-center gap-3 rounded-xl border px-3 py-3 text-left transition sm:grid-cols-[72px_1fr_auto] sm:px-4 ${selectedQueuePatient?.token === patient.token ? "border-[#1a5c4a] bg-[#e9f7f2]" : "border-[#e6ded3] bg-white/85 hover:bg-[#f6f1e8]"}`}
                   >
                     <div className="rounded-xl bg-[#fff0bf] px-3 py-2 text-center font-bold text-[#7a5800]">{patient.token}</div>
                     <div className="min-w-0">
@@ -1132,7 +1285,7 @@ export default function KramaDoctorDashboard() {
         </section>
 
         <aside className="hidden space-y-5 xl:block">
-          <div className="min-h-[420px] rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-5 transition-colors duration-200">
+          <div className="min-h-[260px] rounded-[26px] border border-white/70 bg-white/80 backdrop-blur p-5 transition-colors duration-200">
             <p className="mb-4 text-xs font-bold uppercase tracking-[0.08em] text-[#77756f]">Current Patient</p>
             {activePatient ? (
               <div className="space-y-4">
@@ -1146,18 +1299,6 @@ export default function KramaDoctorDashboard() {
                   </div>
                 </div>
                 <div className="grid gap-3">
-                  <div className="rounded-xl bg-[#f0ede6] p-3">
-                    <p className="mb-1 text-xs text-[#77756f]">Phone</p>
-                    <p className="font-semibold text-[#202825]">{activePatient.phone || "N/A"}</p>
-                  </div>
-                  <div className="rounded-xl bg-[#f0ede6] p-3">
-                    <p className="mb-1 text-xs text-[#77756f]">Source</p>
-                    <p className="font-semibold text-[#202825]">{sourceLabel(activePatient.source)}</p>
-                  </div>
-                  <div className="rounded-xl bg-[#f0ede6] p-3">
-                    <p className="mb-1 text-xs text-[#77756f]">Status</p>
-                    <p className="font-semibold text-[#202825]">{activePatient.status}</p>
-                  </div>
                   <VisitHistorySidebarCard history={patientHistory} isLoading={isHistoryLoading} error={historyError} />
                 </div>
               </div>

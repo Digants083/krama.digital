@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 import { Link } from "react-router-dom";
 
@@ -345,8 +345,8 @@ const ClinicManageTime = () => {
 
   if (!hasChosenDoctor) {
     return (
-      <div className="min-h-screen bg-[#f5f3ee] text-[#1f2522]">
-        <header className="border-b border-[#e6ded3] bg-[#fbfaf7]">
+      <div className="min-h-screen bg-transparent text-[#1f2522]">
+        <header className="border-b border-white/60 bg-[#fbfaf7]/85 backdrop-blur-xl">
           <div className="mx-auto flex max-w-4xl items-center gap-4 px-4 py-4 md:px-8">
             <Link to="/clinic" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7]" aria-label="Back to clinic dashboard">
               <ArrowLeft className="h-5 w-5" />
@@ -359,8 +359,8 @@ const ClinicManageTime = () => {
         </header>
 
         <main className="mx-auto max-w-4xl px-4 py-8 md:px-8">
-          <div className="overflow-hidden rounded-2xl border border-[#d9eadf] bg-[#fbfaf7] shadow-sm">
-            <div className="border-b border-[#e6ded3] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] p-5 md:p-7">
+          <div className="overflow-hidden rounded-2xl border border-white/70 bg-white/80 backdrop-blur shadow-sm">
+            <div className="border-b border-[#e6ded3] bg-[#f6f1e8] p-5 md:p-7">
               <div className="flex items-start gap-4">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#dff4ea] text-[#1a5c4a]">
                   <Clock className="h-6 w-6" />
@@ -374,11 +374,11 @@ const ClinicManageTime = () => {
 
             <div className="p-5 md:p-7">
               {loadingDoctors ? (
-                <div className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">
+                <div className="rounded-xl bg-[#f6f1e8] px-4 py-6 text-center text-sm text-[#77756f]">
                   Loading doctors...
                 </div>
               ) : doctors.length === 0 ? (
-                <div className="rounded-xl bg-[#f8f6f2] px-4 py-6 text-center text-sm text-[#77756f]">
+                <div className="rounded-xl bg-[#f6f1e8] px-4 py-6 text-center text-sm text-[#77756f]">
                   No doctors found. Add a doctor from clinic profile first.
                 </div>
               ) : (
@@ -414,15 +414,15 @@ const ClinicManageTime = () => {
 
   return (
 
-    <div className="min-h-screen bg-[#f5f3ee]">
+    <div className="min-h-screen bg-transparent">
 
-      <header className="sticky top-0 z-50 bg-[#fbfaf7]/90 backdrop-blur-md border-b border-[#e6ded3] shadow-sm">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-[#fbfaf7]/85 shadow-sm backdrop-blur-xl">
 
         <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
 
           <div className="flex items-center gap-3">
 
-            <Link to="/clinic" className="p-2 rounded-lg bg-[#f0ede6] hover:bg-[#e6ded3] text-slate-600 transition-colors">
+            <Link to="/clinic" className="p-2 rounded-2xl bg-[#f6f1e8] hover:bg-[#e6ded3] text-slate-600 transition-colors">
 
               <ArrowLeft className="h-5 w-5" />
 
@@ -444,7 +444,7 @@ const ClinicManageTime = () => {
 
             disabled={slots.length >= MAX_SLOTS || !selectedDoctorId}
 
-            className="bg-[#00555A] hover:bg-[#00494F] text-white px-5 py-2 rounded-lg font-medium shadow-md hover:shadow-lg transition-all"
+            className="bg-[#00555A] hover:bg-[#00494F] text-white px-5 py-2 rounded-2xl font-medium shadow-md hover:shadow-lg transition-all"
 
           >
 
@@ -461,7 +461,7 @@ const ClinicManageTime = () => {
 
 
       <main className="mx-auto max-w-4xl px-4 py-8">
-        <div className="mb-6 rounded-2xl border border-[#d9eadf] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] p-4 shadow-sm">
+        <div className="mb-6 rounded-2xl border border-[#d9eadf] bg-[#f6f1e8] p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e1f5ee] text-[#1a5c4a]">
@@ -483,7 +483,7 @@ const ClinicManageTime = () => {
 
         {showAddForm && (
 
-          <div className="bg-[#fbfaf7] rounded-2xl shadow-lg p-6 mb-6 border border-[#e6ded3] overflow-hidden">
+          <div className="rounded-[26px] border border-white/70 bg-white/80 p-6 mb-6 shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur overflow-hidden">
 
             <div className="bg-gradient-to-r from-[#00555A] to-[#006e78] -mx-6 -mt-6 px-6 py-4 mb-6">
 
@@ -499,7 +499,7 @@ const ClinicManageTime = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
 
-              <div className="bg-[#f0ede6] rounded-xl p-4 border border-[#e6ded3]">
+              <div className="bg-[#f6f1e8] rounded-xl p-4 border border-[#e6ded3]">
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">Slot Name</label>
 
@@ -511,7 +511,7 @@ const ClinicManageTime = () => {
 
                   onChange={(e) => setNewSlot({ ...newSlot, slot_name: e.target.value })}
 
-                  className="w-full border border-[#d8d1c6] rounded-lg px-4 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] transition-all"
+                  className="w-full border border-[#d8d1c6] rounded-2xl px-4 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white/85 transition-all"
 
                 >
 
@@ -527,7 +527,7 @@ const ClinicManageTime = () => {
 
               </div>
 
-              <div className="bg-[#f0ede6] rounded-xl p-4 border border-[#e6ded3]">
+              <div className="bg-[#f6f1e8] rounded-xl p-4 border border-[#e6ded3]">
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">Start Time</label>
 
@@ -541,7 +541,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_hour: parseInt(e.target.value) })}
 
-                    className="flex-1 border border-[#d8d1c6] rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="flex-1 border border-[#d8d1c6] rounded-2xl px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white/85 text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -563,7 +563,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_minute: parseInt(e.target.value) })}
 
-                    className="w-20 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-20 border border-[#d8d1c6] rounded-2xl px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white/85 text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -583,7 +583,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, start_ampm: e.target.value })}
 
-                    className="w-24 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-24 border border-[#d8d1c6] rounded-2xl px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white/85 text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -599,7 +599,7 @@ const ClinicManageTime = () => {
 
               </div>
 
-              <div className="bg-[#f0ede6] rounded-xl p-4 border border-[#e6ded3]">
+              <div className="bg-[#f6f1e8] rounded-xl p-4 border border-[#e6ded3]">
 
                 <label className="block text-sm font-medium text-slate-700 mb-2">End Time</label>
 
@@ -613,7 +613,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_hour: parseInt(e.target.value) })}
 
-                    className="flex-1 border border-[#d8d1c6] rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="flex-1 border border-[#d8d1c6] rounded-2xl px-3 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white/85 text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -635,7 +635,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_minute: parseInt(e.target.value) })}
 
-                    className="w-20 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-20 border border-[#d8d1c6] rounded-2xl px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white/85 text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -655,7 +655,7 @@ const ClinicManageTime = () => {
 
                     onChange={(e) => setNewSlot({ ...newSlot, end_ampm: e.target.value })}
 
-                    className="w-24 border border-[#d8d1c6] rounded-lg px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-[#fffdf8] text-lg font-semibold text-slate-800 cursor-pointer"
+                    className="w-24 border border-[#d8d1c6] rounded-2xl px-2 py-2.5 focus:outline-none focus:border-[#00555A] focus:ring-2 focus:ring-[#00555A]/20 bg-white/85 text-lg font-semibold text-slate-800 cursor-pointer"
 
                   >
 
@@ -681,7 +681,7 @@ const ClinicManageTime = () => {
 
                 disabled={saving}
 
-                className="bg-[#00555A] hover:bg-[#00494F] text-white px-6 py-2.5 rounded-lg font-medium shadow-md hover:shadow-lg transition-all"
+                className="bg-[#00555A] hover:bg-[#00494F] text-white px-6 py-2.5 rounded-2xl font-medium shadow-md hover:shadow-lg transition-all"
 
               >
 
@@ -715,7 +715,7 @@ const ClinicManageTime = () => {
 
                 onClick={() => setShowAddForm(false)}
 
-                className="border-[#d8d1c6] text-slate-600 hover:bg-[#f0ede6] px-6 py-2.5 rounded-lg font-medium transition-all"
+                className="border-[#d8d1c6] text-slate-600 hover:bg-[#f6f1e8] px-6 py-2.5 rounded-2xl font-medium transition-all"
 
               >
 
@@ -733,9 +733,9 @@ const ClinicManageTime = () => {
 
         {/* Time Slots List */}
 
-        <div className="bg-[#fbfaf7] rounded-2xl shadow-lg border border-[#e6ded3] overflow-hidden">
+        <div className="rounded-[26px] border border-white/70 bg-white/80 shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur overflow-hidden">
 
-          <div className="bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] px-6 py-4 border-b border-[#e6ded3]">
+          <div className="bg-[#f6f1e8] px-6 py-4 border-b border-[#e6ded3]">
 
             <div className="flex items-center justify-between">
 
@@ -773,7 +773,7 @@ const ClinicManageTime = () => {
 
             <div className="text-center py-12">
 
-              <div className="bg-[#f0ede6] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="bg-[#f6f1e8] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
 
                 <Clock className="h-8 w-8 text-slate-400" />
 

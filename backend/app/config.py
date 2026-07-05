@@ -9,6 +9,23 @@ def _env(name: str, default: str = "") -> str:
     return (os.getenv(name, default) or "").strip()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = _env(name)
+    if not raw_value:
+        return default
+    return raw_value.lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw_value = _env(name)
+    if not raw_value:
+        return default
+    try:
+        return max(minimum, int(raw_value))
+    except ValueError:
+        return default
+
+
 def database_url() -> str:
     raw_url = _env("DATABASE_URL")
     if not raw_url:
@@ -48,3 +65,15 @@ def admin_seeds() -> list[AdminSeed]:
 
 def admin_usernames() -> set[str]:
     return {admin.username for admin in admin_seeds() if admin.email and admin.confirmation_email}
+
+
+def background_jobs_enabled() -> bool:
+    return _env_bool("BACKGROUND_JOBS_ENABLED", True)
+
+
+def scheduler_active_poll_seconds() -> int:
+    return _env_int("SCHEDULER_ACTIVE_POLL_SECONDS", 60, minimum=30)
+
+
+def scheduler_idle_poll_seconds() -> int:
+    return _env_int("SCHEDULER_IDLE_POLL_SECONDS", 300, minimum=60)

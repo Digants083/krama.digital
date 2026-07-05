@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
+import { Check, QrCode, Ticket } from "lucide-react";
 
 // Types
 interface ClinicInfo {
@@ -158,9 +159,12 @@ const WalkinQueue = () => {
   // Invalid QR code
   if (!qrClinicId) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
-          <p className="text-gray-500 text-sm">
+      <div className="krama-ambient flex min-h-screen items-center justify-center px-4 py-8">
+        <div className="motion-rise w-full max-w-sm rounded-[30px] border border-white/70 bg-white/85 p-8 text-center shadow-[0_22px_70px_-44px_rgba(19,55,50,0.75)] backdrop-blur">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#f6f1e8] text-primary">
+            <QrCode className="h-6 w-6" />
+          </div>
+          <p className="text-sm font-semibold text-muted-foreground">
             Invalid QR code. Please scan the clinic's QR code again.
           </p>
         </div>
@@ -171,10 +175,10 @@ const WalkinQueue = () => {
   // Loading clinic info
   if (clinicLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
-          <div className="h-6 w-32 mx-auto rounded bg-gray-100 animate-pulse mb-2" />
-          <div className="h-4 w-24 mx-auto rounded bg-gray-100 animate-pulse" />
+      <div className="krama-ambient flex min-h-screen items-center justify-center px-4 py-8">
+        <div className="motion-rise w-full max-w-sm rounded-[30px] border border-white/70 bg-white/85 p-8 text-center shadow-[0_22px_70px_-44px_rgba(19,55,50,0.75)] backdrop-blur">
+          <div className="mx-auto mb-2 h-6 w-32 animate-pulse rounded bg-primary/10" />
+          <div className="mx-auto h-4 w-24 animate-pulse rounded bg-primary/10" />
         </div>
       </div>
     );
@@ -186,43 +190,39 @@ const WalkinQueue = () => {
     const hasActiveDelay = Boolean(tokenResult.doctor_delay || activeDelayMinutes > 0);
     const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : tokenResult.doctor_delay;
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
-          {/* Tick icon */}
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#00555A]/10">
-            <svg className="h-7 w-7 text-[#00555A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+      <div className="krama-ambient flex min-h-screen items-center justify-center px-4 py-8">
+        <div className="motion-rise w-full max-w-sm rounded-[32px] border border-white/70 bg-white/85 p-5 text-center shadow-[0_22px_70px_-44px_rgba(19,55,50,0.75)] backdrop-blur sm:p-6">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#f6f1e8] text-primary">
+            <Check className="h-7 w-7" />
           </div>
 
-          <h2 className="text-lg font-semibold text-[#0F172A] mb-1">You're in the queue!</h2>
+          <h2 className="mb-1 font-display text-2xl font-black text-[#17312d]">You're in the queue!</h2>
           {clinicInfo && (
-            <p className="text-sm text-gray-500 mb-6">{clinicInfo.name}</p>
+            <p className="mb-5 text-sm font-bold text-primary">{clinicInfo.name}</p>
           )}
 
-          {/* Token badge */}
-          <div className="rounded-2xl bg-[#FFC107] px-6 py-6 mb-6">
-            <p className="text-xs font-medium uppercase tracking-widest text-[#0F172A] mb-1">
+          <div className="motion-shimmer mb-4 rounded-[28px] bg-[#143b34] px-6 py-6 text-white shadow-[0_24px_70px_-42px_rgba(31,92,84,0.95)]">
+            <p className="mb-1 text-xs font-black uppercase tracking-[0.22em] text-white/60">
               Your Token
             </p>
-            <p className="text-5xl font-extrabold tracking-widest text-[#0F172A]">
+            <p className="font-display text-5xl font-black tracking-widest">
               {tokenResult.token_label}
             </p>
           </div>
 
-          <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-[#0F172A] mb-6">
-            <span className="text-gray-500">Patients ahead of you: </span>
+          <div className="mb-4 rounded-2xl border border-[#eadfce] bg-[#fbfaf7] px-4 py-3 text-sm text-[#17312d]">
+            <span className="text-muted-foreground">Patients ahead of you: </span>
             <span className="font-semibold">{Math.max(0, tokenResult.position - 1)}</span>
           </div>
 
-          <div className="mb-6 rounded-xl border border-[#00555A]/10 bg-[#00555A]/5 px-4 py-4 text-left">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Estimated Consultation Window</p>
-            <p className="mt-1 text-lg font-bold text-[#0F172A]">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
+          <div className="mb-4 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-4 text-left">
+            <p className="text-xs font-black uppercase tracking-wide text-muted-foreground">Estimated consultation window</p>
+            <p className="mt-1 text-lg font-black text-[#17312d]">{tokenResult.consultation_window || tokenResult.estimated_window_text || "Calculating..."}</p>
             {tokenResult.predicted_eta && (
               <p className="mt-1 text-xs font-semibold text-[#00555A]">Predicted Consultation Time: {formatIsoClock(tokenResult.predicted_eta)}</p>
             )}
             {tokenResult.estimated_wait_minutes != null && (
-              <p className="mt-1 text-xs text-gray-500">Estimated wait {formatDurationMinutes(tokenResult.estimated_wait_minutes)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Estimated wait {formatDurationMinutes(tokenResult.estimated_wait_minutes)}</p>
             )}
           </div>
 
@@ -241,13 +241,13 @@ const WalkinQueue = () => {
             </div>
           )}
 
-          <p className="text-xs text-gray-400 mb-4">
+          <p className="mb-4 text-xs font-semibold text-muted-foreground">
             Please wait for your token to be called.
           </p>
 
           <button
             onClick={handleGoHome}
-            className="w-full rounded-xl bg-[#00555A] px-4 py-3 text-sm font-medium text-white hover:opacity-90 transition-all duration-200"
+            className="w-full rounded-2xl bg-primary px-4 py-3 text-sm font-black text-white transition-all duration-200 hover:bg-primary/90"
           >
             Back to Home
           </button>
@@ -259,8 +259,8 @@ const WalkinQueue = () => {
   // Error screen
   if (step === "error") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm text-center">
+      <div className="krama-ambient flex min-h-screen items-center justify-center px-4 py-8">
+        <div className="motion-rise w-full max-w-sm rounded-[30px] border border-white/70 bg-white/85 p-8 text-center shadow-[0_22px_70px_-44px_rgba(19,55,50,0.75)] backdrop-blur">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
             <svg className="h-7 w-7 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -270,7 +270,7 @@ const WalkinQueue = () => {
           <p className="text-sm text-gray-500 mb-6">{errorMsg}</p>
           <button
             onClick={() => { setStep("form"); setErrorMsg(""); }}
-            className="w-full rounded-xl bg-[#00555A] px-4 py-3 text-sm font-medium text-white hover:opacity-90 transition-all duration-200"
+            className="w-full rounded-2xl bg-primary px-4 py-3 text-sm font-black text-white transition-all duration-200 hover:bg-primary/90"
           >
             Try Again
           </button>
@@ -281,42 +281,45 @@ const WalkinQueue = () => {
 
   // Form screen
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
+    <div className="krama-ambient flex min-h-screen items-center justify-center px-4 py-8">
+      <div className="motion-rise w-full max-w-sm rounded-[32px] border border-white/70 bg-white/85 p-5 shadow-[0_22px_70px_-44px_rgba(19,55,50,0.75)] backdrop-blur sm:p-6">
 
         {/* Header */}
         <div className="mb-6 text-center">
-          <h1 className="text-lg font-semibold text-[#0F172A]">
+          <div className="motion-breathe mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#143b34] text-white shadow-[0_18px_48px_-32px_rgba(31,92,84,0.9)]">
+            <QrCode className="h-6 w-6" />
+          </div>
+          <h1 className="font-display text-2xl font-black text-[#17312d]">
             {clinicInfo?.name || "Join Queue"}
           </h1>
           {clinicInfo?.address && (
-            <p className="text-xs text-gray-400 mt-0.5">{clinicInfo.address}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{clinicInfo.address}</p>
           )}
-          <p className="text-sm text-gray-500 mt-2">Enter your details to get a token</p>
+          <p className="mt-2 text-sm text-muted-foreground">Enter your details to get a token</p>
         </div>
 
         <div className="space-y-4">
           {/* Name */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Full name</label>
+            <label className="mb-1 block text-xs font-bold text-primary">Full name</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Ravi Kumar"
-              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-[#0F172A] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00FFF0] transition-all duration-200 text-sm"
+              className="w-full rounded-2xl border border-primary/15 bg-[#fbfaf7] px-4 py-3 text-sm font-semibold text-foreground transition-all duration-200 placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
           </div>
 
           {/* Phone */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Mobile number</label>
+            <label className="mb-1 block text-xs font-bold text-primary">Mobile number</label>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
               placeholder="10-digit mobile number"
               type="tel"
               inputMode="numeric"
-              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-[#0F172A] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00FFF0] transition-all duration-200 text-sm"
+              className="w-full rounded-2xl border border-primary/15 bg-[#fbfaf7] px-4 py-3 text-sm font-semibold text-foreground transition-all duration-200 placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
             {phone.length > 0 && !phoneRegex.test(phone) && (
               <p className="text-xs text-red-500 mt-1">Enter a valid 10-digit mobile number</p>
@@ -327,7 +330,7 @@ const WalkinQueue = () => {
         <button
           onClick={handleJoin}
           disabled={!isValid || step === "loading"}
-          className="mt-8 w-full rounded-xl bg-[#00555A] px-4 py-3 text-sm font-medium text-white transition-all duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-black text-white shadow-[0_14px_28px_-18px_rgba(31,92,84,0.9)] transition-all duration-200 hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {step === "loading" ? (
             <span className="flex items-center justify-center gap-2">
@@ -338,7 +341,10 @@ const WalkinQueue = () => {
               Getting your token...
             </span>
           ) : (
-            "Get Token & Join Queue"
+            <>
+              <Ticket className="h-4 w-4" />
+              Get Token & Join Queue
+            </>
           )}
         </button>
       </div>

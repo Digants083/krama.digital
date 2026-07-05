@@ -1,0 +1,8 @@
+backend/
+graphify-out/
+backend/graphify-out/
+node_modules/
+.env
+.env.*
+*.log
+vite.*.log

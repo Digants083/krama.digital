@@ -2,16 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePatient } from "@/context/PatientContext";
 import {
+  CalendarPlus,
+  ChevronRight,
+  Clock,
+  ClipboardList,
   Hash,
-  CalendarCheck,
   Star,
+  type LucideIcon,
   User,
 } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
-import { formatDurationMinutes } from "@/lib/timeFormat";
+import { formatDurationMinutes, formatIsoClock, formatTimeRange } from "@/lib/timeFormat";
 
 type Appointment = {
   id: number;
+  clinic_id?: string;
   clinic_name: string;
   doctor_name: string;
   appointment_token: string;
@@ -30,6 +35,36 @@ type Appointment = {
   latest_eta?: string | null;
   active_delay_minutes?: number | null;
   session_status?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
+};
+
+const formatBookedDate = (date?: string | null) => {
+  if (!date) return "Not set";
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const cleanSessionTimeLabel = (time?: string | null) =>
+  time?.replace(/^(time|session)\s*\d+\s*/i, "").trim() || "";
+
+const parseSessionTimeRange = (sessionTime?: string | null) => {
+  if (!sessionTime) return "";
+  try {
+    const range = JSON.parse(sessionTime.replace(/'/g, '"'));
+    if (Array.isArray(range) && range.length >= 2) {
+      return formatTimeRange(range.map(Number));
+    }
+  } catch {
+    // Fall back to the raw session label below.
+  }
+  return "";
 };
 
 const PatientDashboard = () => {
@@ -66,15 +101,13 @@ const PatientDashboard = () => {
         if (user.email) {
           setPatientEmail(user.email);
           fetchAppointments(user.email);
-        } else if (typeof userStr === 'string' && userStr.includes('@')) {
-          // Handle case where user is stored as plain email string
+        } else if (typeof userStr === "string" && userStr.includes("@")) {
           setPatientEmail(userStr);
           fetchAppointments(userStr);
         } else {
           setLoading(false);
         }
       } catch (e) {
-        // Handle corrupted data - clear and redirect to login
         localStorage.removeItem("user");
         localStorage.removeItem("patient_email");
         localStorage.removeItem("patientData");
@@ -113,103 +146,198 @@ const PatientDashboard = () => {
     });
   };
 
+  const storedPatientData = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("patientData") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const storedUserData = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const patientName =
+    (profile.name && profile.name !== "Patient" ? profile.name.trim() : "") ||
+    storedPatientData.name?.trim?.() ||
+    storedUserData.name?.trim?.() ||
+    "Patient";
+  const nextAppointment = appointments[0] || null;
+  const bookedDateText = nextAppointment ? formatBookedDate(nextAppointment.date) : "No appointment booked yet";
+  const sessionSlotText =
+    parseSessionTimeRange(nextAppointment?.session_time) ||
+    cleanSessionTimeLabel(nextAppointment?.time) ||
+    "Session time pending";
+  const estimatedTimeText =
+    nextAppointment?.consultation_window ||
+    nextAppointment?.estimated_window_text ||
+    (nextAppointment?.predicted_eta ? formatIsoClock(nextAppointment.predicted_eta) : "") ||
+    "Live queue updates will appear here.";
+  const activeDelayMinutes = nextAppointment?.active_delay_minutes ?? 0;
+  const delayText = activeDelayMinutes > 0 ? `Delay ${formatDurationMinutes(activeDelayMinutes)}` : null;
+  const tokenText = nextAppointment?.appointment_token || "--";
+  const statusText = nextAppointment?.status || "Ready";
+  const fourSections = [
+    {
+      title: "Book appointment",
+      text: "Find a clinic and get a token.",
+      icon: CalendarPlus,
+      to: "/patient/find-clinics",
+      tone: "bg-primary text-white",
+    },
+    {
+      title: "See appointment",
+      text: nextAppointment ? "Open your token details." : "No appointment yet.",
+      icon: ClipboardList,
+      onClick: nextAppointment ? () => handleAppointmentClick(nextAppointment) : undefined,
+      tone: "bg-[#f6f1e8] text-primary",
+      disabled: !nextAppointment,
+    },
+    {
+      title: "Review",
+      text: "Share clinic feedback.",
+      icon: Star,
+      to: "/patient/reviews",
+      tone: "bg-[#ffc247] text-slate-950",
+    },
+  ];
+
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#f7f4ef]">
         <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee]">
-      <main className="section-container px-4 py-6 md:px-8 md:py-10">
-        <section className="rounded-[24px] bg-primary px-4 py-6 text-primary-foreground shadow-[0_24px_70px_-36px_rgba(31,92,84,0.9)] sm:rounded-[32px] sm:px-6 sm:py-8 md:px-8">
-          <div className="flex items-start justify-between gap-3 sm:gap-4">
+    <div className="min-h-screen bg-transparent">
+      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-4 px-4 pb-8 pt-5 sm:max-w-xl sm:px-6 md:max-w-2xl">
+        <header className="motion-rise flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary/70">Patient</p>
+            <h1 className="mt-1 truncate font-display text-3xl font-bold text-[#17312d]">{patientName}</h1>
+          </div>
+          <Link
+            to="/patient/profile"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-primary shadow-[0_16px_38px_-28px_rgba(19,55,50,0.7)]"
+            aria-label="Profile"
+          >
+            <User className="h-5 w-5" />
+          </Link>
+        </header>
+
+        <section className="motion-rise-delayed motion-shimmer overflow-hidden rounded-[30px] bg-[#143b34] p-4 text-white shadow-[0_26px_70px_-42px_rgba(31,92,84,0.95)]">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.18em] text-primary-foreground/70 sm:text-sm sm:tracking-[0.22em]">Patient Dashboard</p>
-              <h1 className="mt-2 truncate font-display text-3xl font-bold tracking-tight sm:mt-3 sm:text-4xl md:text-5xl">{profile.name}</h1>
-              <p className="mt-2 text-sm text-primary-foreground/78 sm:mt-3 sm:text-base">
-                {appointments.length > 0 ? "Your appointments are confirmed." : "Book a clinic visit and track it here."}
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">Appointment</p>
+              <h2 className="mt-2 truncate text-lg font-bold">
+                {nextAppointment ? nextAppointment.clinic_name : "No appointment booked"}
+              </h2>
+              <p className="mt-1 truncate text-sm text-white/70">
+                {nextAppointment ? nextAppointment.doctor_name || "Doctor pending" : "Book one when ready"}
               </p>
             </div>
-
-            <Link
-              to="/patient/profile"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20 sm:h-12 sm:w-12"
-              aria-label="Profile"
-            >
-              <User className="h-5 w-5" />
-            </Link>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold capitalize text-white/80">
+              {statusText}
+            </span>
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-8 sm:grid-cols-3 sm:gap-4">
-            <Link
-              to="/patient/find-clinics"
-              className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
-            >
-              <CalendarCheck className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
-              <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Book</p>
-              <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">New Appointment</p>
-            </Link>
-            {appointments.length > 0 ? (
-              <Link
-                to="/confirmation"
-                state={{
-                  token: appointments[0].appointment_token,
-                  clinic: appointments[0].clinic_name,
-                  doctor: appointments[0].doctor_name,
-                  date: appointments[0].date,
-                  time: appointments[0].time,
-                  sessionName: appointments[0].session_name,
-                  sessionTime: appointments[0].session_time,
-                  sessionId: appointments[0].session_id,
-                  address: appointments[0].address || "",
-                  consultation_window: appointments[0].consultation_window,
-                  estimated_window_text: appointments[0].estimated_window_text,
-                  estimated_wait_minutes: appointments[0].estimated_wait_minutes,
-                  earliest_eta: appointments[0].earliest_eta,
-                  predicted_eta: appointments[0].predicted_eta,
-                  latest_eta: appointments[0].latest_eta,
-                }}
-                className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
-              >
-                <Hash className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
-                <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Appointment</p>
-                <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">{appointments[0].appointment_token}</p>
-                {(appointments[0].consultation_window || appointments[0].estimated_window_text) && (
-                  <p className="mt-1 text-[11px] font-semibold leading-tight text-white/80">
-                    {appointments[0].consultation_window || appointments[0].estimated_window_text}
-                  </p>
-                )}
-                {appointments[0].active_delay_minutes ? (
-                  <p className="mt-1 text-[11px] font-semibold leading-tight text-[#ffd999]">
-                    Delay {formatDurationMinutes(appointments[0].active_delay_minutes)}
-                  </p>
-                ) : null}
-              </Link>
-            ) : (
-              <Link
-                to="/confirmation"
-                className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
-              >
-                <Hash className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
-                <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Appointment</p>
-                <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">Booked Appointment</p>
-              </Link>
-            )}
-            <Link
-              to="/patient/reviews"
-              className="rounded-[18px] bg-white/10 px-3 py-4 text-center transition hover:bg-white/20 sm:rounded-[22px] sm:px-6 sm:py-6"
-            >
-              <Star className="mx-auto h-6 w-6 sm:h-8 sm:w-8" />
-              <p className="mt-2 text-xs text-primary-foreground/70 sm:text-sm">Review</p>
-              <p className="mt-1 text-sm font-bold leading-tight text-white sm:text-xl">Write Feedback</p>
-            </Link>
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            <InfoMini icon={Hash} label="Token" value={tokenText} />
+            <InfoMini icon={Clock} label="Est time" value={estimatedTimeText} />
+            <InfoMini icon={Clock} label="Date" value={bookedDateText} helper={nextAppointment ? sessionSlotText : ""} />
           </div>
+
+          {delayText ? (
+            <p className="mt-3 inline-flex rounded-full bg-amber-300 px-3 py-1 text-xs font-black text-[#17312d]">
+              {delayText}
+            </p>
+          ) : null}
+        </section>
+
+        <section className="motion-rise-delayed grid grid-cols-2 gap-3">
+          {fourSections.map((item) => (
+            <DashboardAction key={item.title} {...item} />
+          ))}
         </section>
       </main>
     </div>
+  );
+};
+
+const InfoMini = ({
+  icon: Icon,
+  label,
+  value,
+  helper,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  helper?: string;
+}) => (
+  <div className="min-w-0 rounded-[18px] bg-[#f6f1e8] p-3 text-[#17312d]">
+    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-primary/75">
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{label}</span>
+    </div>
+    <p className="mt-2 line-clamp-2 min-h-9 text-sm font-black leading-tight">{value}</p>
+    {helper ? <p className="mt-1 truncate text-[11px] font-semibold text-slate-500">{helper}</p> : null}
+  </div>
+);
+
+const DashboardAction = ({
+  title,
+  text,
+  icon: Icon,
+  tone,
+  to,
+  onClick,
+  disabled,
+}: {
+  title: string;
+  text: string;
+  icon: LucideIcon;
+  tone: string;
+  to?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) => {
+  const content = (
+    <>
+      <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${tone}`}>
+        <Icon className="h-5 w-5" />
+      </span>
+      <span className="mt-4 block text-base font-black text-slate-950">{title}</span>
+      <span className="mt-1 block text-sm leading-5 text-slate-500">{text}</span>
+      <ChevronRight className="absolute right-3 top-3 h-5 w-5 text-slate-300" />
+    </>
+  );
+
+  const className =
+    "relative min-h-[152px] rounded-[26px] border border-white/70 bg-white/80 p-4 text-left shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur transition active:scale-[0.98] hover:-translate-y-0.5 hover:bg-white";
+
+  if (to) {
+    return (
+      <Link to={to} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`${className} ${disabled ? "opacity-65" : ""}`}
+    >
+      {content}
+    </button>
   );
 };
 

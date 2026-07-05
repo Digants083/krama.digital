@@ -48,6 +48,16 @@ class ClinicQuickBookEmailRequest(BaseModel):
     clinic_id: str
     email: EmailStr
 
+def _clinic_map_coordinates(clinic: Optional[Clinic]) -> tuple[Optional[str], Optional[str]]:
+    """Return the best available map pin for a clinic (clinic pin or admin-suggested pin)."""
+    if not clinic:
+        return None, None
+
+    latitude = clinic.latitude or clinic.admin_pinned_latitude
+    longitude = clinic.longitude or clinic.admin_pinned_longitude
+    return latitude, longitude
+
+
 def _clinic_today_str() -> str:
     return datetime.now(CLINIC_TIMEZONE).strftime("%Y-%m-%d")
 
@@ -4630,6 +4640,9 @@ async def get_patient_appointments_by_email(
 
             clinic = clinic_result.scalar_one_or_none()
 
+            clinic_latitude = None
+            clinic_longitude = None
+
             if clinic:
 
                 clinic_name = clinic.clinic_name
@@ -4643,6 +4656,7 @@ async def get_patient_appointments_by_email(
                     clinic.pincode
                 ]
                 full_formatted_address = ", ".join(filter(None, full_address_parts)) or clinic.address or ""
+                clinic_latitude, clinic_longitude = _clinic_map_coordinates(clinic)
 
             else:
                 full_formatted_address = ""
@@ -4696,6 +4710,10 @@ async def get_patient_appointments_by_email(
                 "clinic_name": clinic_name,
 
                 "address": full_formatted_address,
+
+                "latitude": clinic_latitude,
+
+                "longitude": clinic_longitude,
 
                 "patient_id": apt.patient_id,
 

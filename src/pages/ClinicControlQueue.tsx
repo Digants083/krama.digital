@@ -81,6 +81,18 @@ const ClinicControlQueue = () => {
   const [quickBookEmail, setQuickBookEmail] = useState("");
   const [sendingQuickBook, setSendingQuickBook] = useState(false);
 
+  const handlePrimaryQueueAction = async () => {
+    if (currentServing) {
+      const completed = await completePatient();
+      if (completed) {
+        localStorage.setItem("krama_pending_bill_patient", JSON.stringify(completed));
+        setMessage({ text: `${completed.patient_name} completed. Open Billing to create the bill.`, type: "success" });
+      }
+      return;
+    }
+    void nextPatient();
+  };
+
   useEffect(() => {
     if (!message) return;
     const timer = setTimeout(() => setMessage(null), 5000);
@@ -624,7 +636,7 @@ const ClinicControlQueue = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee]">
+    <div className="min-h-screen bg-transparent">
       {message && (
         <div
           className={`fixed right-4 top-20 z-50 rounded-full px-4 py-2 text-sm shadow-lg ${
@@ -634,21 +646,21 @@ const ClinicControlQueue = () => {
           {message.text}
         </div>
       )}
-      <header className="sticky top-0 z-50 border-b border-[#e6ded3] bg-[#fbfaf7]/85 shadow-sm backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-[#fbfaf7]/80 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 w-full max-w-md items-center justify-between gap-3 px-4 sm:max-w-xl sm:px-6 md:max-w-2xl lg:max-w-5xl">
           <div className="flex items-center gap-3">
-            <Link to="/clinic" className="rounded-lg bg-[#f0ede6] p-2 text-slate-600 transition-colors hover:bg-[#e6ded3]">
+            <Link to="/clinic" className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-primary shadow-[0_16px_38px_-30px_rgba(19,55,50,0.7)] transition active:scale-95">
               <ArrowLeft className="h-5 w-5" />
             </Link>
             <div>
-              <h1 className="text-xl font-bold text-slate-800">Queue Control</h1>
+              <h1 className="font-display text-xl font-bold text-[#17312d]">Queue Control</h1>
               <p className="text-xs text-slate-500">Manage your clinic's patient queue</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
-              className="rounded-lg border-[#00555A]/30 bg-[#fbfaf7] px-3 py-2 font-medium text-[#00555A] transition-all hover:bg-[#e9f6f1] sm:px-4"
+              className="rounded-2xl border-white/70 bg-white/80 px-3 py-2 font-bold text-primary shadow-[0_16px_38px_-30px_rgba(19,55,50,0.7)] transition hover:bg-white sm:px-4"
               onClick={() => setSendQuickBookOpen(true)}
             >
               <Mail className="h-4 w-4 sm:mr-2" />
@@ -656,7 +668,7 @@ const ClinicControlQueue = () => {
             </Button>
             <Button
               variant="outline"
-              className="rounded-lg border-[#d8d1c6] bg-[#fbfaf7] px-3 py-2 font-medium text-slate-600 transition-all hover:bg-[#f0ede6] sm:px-4"
+              className="rounded-2xl border-white/70 bg-white/80 px-3 py-2 font-bold text-slate-600 shadow-[0_16px_38px_-30px_rgba(19,55,50,0.7)] transition hover:bg-white sm:px-4"
               onClick={handleRefreshQueue}
             >
               <RefreshCw className="h-4 w-4 sm:mr-2" />
@@ -666,15 +678,15 @@ const ClinicControlQueue = () => {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-4 py-8">
+      <main className="mx-auto w-full max-w-md px-4 py-5 sm:max-w-xl sm:px-6 md:max-w-2xl lg:max-w-5xl lg:py-8">
         {/* Clinic Status Card */}
-        <div className={`sticky top-20 z-40 mb-6 flex flex-col gap-4 rounded-2xl border-2 p-5 shadow-lg backdrop-blur transition-all sm:flex-row sm:items-center sm:justify-between ${
+        <div className={`motion-rise sticky top-20 z-40 mb-5 flex flex-col gap-4 rounded-[28px] border p-4 shadow-[0_22px_70px_-48px_rgba(19,55,50,0.75)] backdrop-blur-xl transition-all sm:flex-row sm:items-center sm:justify-between ${
             isClinicActive 
               ? "bg-gradient-to-r from-green-50 to-white border-green-200" 
               : "bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] border-[#e6ded3]"
           }`}>
             <div className="flex items-center gap-4">
-              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isClinicActive ? 'bg-green-100' : 'bg-slate-100'}`}>
+              <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${isClinicActive ? 'bg-green-100' : 'bg-slate-100'}`}>
                 {isClinicActive ? (
                   <div className="w-4 h-4 bg-green-500 rounded-full animate-pulse"></div>
                 ) : (
@@ -682,7 +694,7 @@ const ClinicControlQueue = () => {
                 )}
               </div>
               <div>
-                <span className={`text-lg font-bold ${isClinicActive ? "text-green-700" : "text-slate-600"}`}>
+                <span className={`text-base font-black ${isClinicActive ? "text-green-700" : "text-slate-600"}`}>
                   {isClinicActive ? "Clinic is Live" : "Clinic is Offline"}
                 </span>
                 <p className="text-sm text-slate-500">{isClinicActive ? "Accepting patients" : "Not accepting patients"}</p>
@@ -693,7 +705,7 @@ const ClinicControlQueue = () => {
                 onClick={handleActivate}
                 disabled={Boolean(startDisabledReason)}
                 title={startDisabledReason || "Start clinic"}
-                className={`min-w-28 flex-1 rounded-lg px-6 py-2.5 font-medium shadow-md transition-all sm:flex-none ${
+                className={`min-w-28 flex-1 rounded-2xl px-5 py-2.5 font-bold shadow-md transition-all sm:flex-none ${
                   startDisabledReason
                     ? "bg-slate-200 text-slate-500 hover:bg-slate-200 hover:translate-y-0 shadow-none"
                     : "bg-green-500 hover:bg-green-600 text-white hover:shadow-lg"
@@ -706,7 +718,7 @@ const ClinicControlQueue = () => {
                 onClick={() => handleDeactivate(true)}
                 disabled={activating || !isClinicActive}
                 variant="outline"
-                className="min-w-28 flex-1 rounded-lg border-red-300 px-6 py-2.5 font-medium text-red-500 transition-all hover:bg-red-50 sm:flex-none"
+                className="min-w-28 flex-1 rounded-2xl border-red-300 px-5 py-2.5 font-bold text-red-500 transition-all hover:bg-red-50 sm:flex-none"
               >
                 <Square className="h-4 w-4 mr-2" />
                 Stop
@@ -715,15 +727,15 @@ const ClinicControlQueue = () => {
           </div>
 
           {doctors.length > 0 && (
-            <div className="mb-6 overflow-hidden rounded-2xl border border-[#d9eadf] bg-[#fbfaf7] shadow-sm">
-              <div className="flex items-start justify-between gap-3 border-b border-[#e6ded3] bg-gradient-to-r from-[#eef8f3] to-[#fbfaf7] px-4 py-4 sm:px-5">
-                <div className="flex min-w-0 items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#dff4ea] text-[#00555A]">
-                    <Users className="h-5 w-5" />
+            <div className="mb-4 overflow-hidden rounded-[22px] border border-white/70 bg-white/80 shadow-[0_18px_54px_-44px_rgba(19,55,50,0.7)] backdrop-blur">
+              <div className="flex items-center justify-between gap-3 border-b border-white/70 bg-[#f6f1e8] px-4 py-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white text-primary">
+                    <Users className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
-                    <h2 className="font-bold text-slate-900">Doctor Queue</h2>
-                    <p className="mt-1 max-w-[210px] text-xs leading-5 text-slate-500 sm:max-w-none">Control one doctor's queue at a time.</p>
+                    <h2 className="font-black text-slate-950">Doctor Queue</h2>
+                    <p className="mt-0.5 text-xs leading-4 text-slate-500">Control one queue at a time.</p>
                   </div>
                 </div>
                 {selectedDoctor && (
@@ -733,39 +745,32 @@ const ClinicControlQueue = () => {
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2.5 p-3 sm:gap-3 sm:p-4 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
                 {doctors.map((doctor) => (
                   <button
                     key={doctor.doctor_id}
                     type="button"
                     onClick={() => setSelectedDoctorId(doctor.doctor_id)}
-                    className={`group flex min-h-[132px] flex-col items-start justify-between rounded-xl border p-3 text-left transition-all sm:min-h-[112px] ${
+                    className={`group flex min-h-0 items-center gap-3 rounded-[18px] border px-3 py-2.5 text-left shadow-sm transition-all ${
                       selectedDoctorId === doctor.doctor_id
                         ? "border-[#00555A] bg-[#00555A] text-white shadow-[0_16px_34px_-24px_rgba(0,85,90,0.9)]"
                         : "border-[#d8d1c6] bg-white text-slate-800 hover:border-[#00555A]/60 hover:bg-[#f4fbf8]"
                     }`}
                   >
-                    <div className="flex w-full items-start justify-between gap-2">
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full sm:h-11 sm:w-11 ${
-                        selectedDoctorId === doctor.doctor_id ? "bg-white/18 text-white" : "bg-[#e1f5ee] text-[#00555A]"
-                      }`}>
-                        <Stethoscope className="h-5 w-5 sm:h-5 sm:w-5" />
-                      </div>
-                      {selectedDoctorId === doctor.doctor_id && <CheckCircle2 className="h-4 w-4 shrink-0 text-white/90" />}
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
+                      selectedDoctorId === doctor.doctor_id ? "bg-white/20 text-white" : "bg-[#e1f5ee] text-[#00555A]"
+                    }`}>
+                      <Stethoscope className="h-5 w-5" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <span className="block max-w-full truncate text-sm font-bold">{doctor.name}</span>
                       <span className={`mt-1 block truncate text-xs font-medium ${
                         selectedDoctorId === doctor.doctor_id ? "text-white/80" : "text-slate-500"
                       }`}>
                         {doctor.specialization || "General Practice"}
                       </span>
-                      <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold leading-4 ${
-                        selectedDoctorId === doctor.doctor_id ? "bg-white/18 text-white" : "bg-[#00555A]/8 text-[#00555A] group-hover:bg-[#00555A]/12"
-                      }`}>
-                        {selectedDoctorId === doctor.doctor_id ? "Active queue" : "Open queue"}
-                      </span>
                     </div>
+                    {selectedDoctorId === doctor.doctor_id && <CheckCircle2 className="h-4 w-4 shrink-0 text-white/90" />}
                   </button>
                 ))}
               </div>
@@ -773,12 +778,12 @@ const ClinicControlQueue = () => {
           )}
 
           {/* Time Slots Card */}
-          <div className="mb-6 overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-lg">
-            <div className="flex items-center gap-2 border-b border-[#e6ded3] bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] px-5 py-4">
-              <Calendar className="h-5 w-5 text-[#00555A]" />
-              <h2 className="font-semibold text-slate-800">Today's Time Slots</h2>
+          <div className="mb-4 overflow-hidden rounded-[22px] border border-white/70 bg-white/80 shadow-[0_18px_54px_-44px_rgba(19,55,50,0.7)] backdrop-blur">
+            <div className="flex items-center gap-2 border-b border-white/70 bg-[#f6f1e8] px-4 py-3">
+              <Calendar className="h-4 w-4 text-[#00555A]" />
+              <h2 className="font-black text-slate-950">Today's Time Slots</h2>
             </div>
-            <div className="p-5">
+            <div className="p-3">
               {loadingSlots ? (
                 <div className="text-center py-6">
                   <div className="animate-spin h-6 w-6 border-2 border-[#00555A] border-t-transparent rounded-full mx-auto"></div>
@@ -795,7 +800,7 @@ const ClinicControlQueue = () => {
                   </Link>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {sortedTimeSlots.map(({ slot, originalIndex }) => {
                     const slotId = slot.slot_id || originalIndex + 1;
                     const isCurrentlyAvailable = isSlotCurrentlyAvailable(slot, originalIndex);
@@ -807,7 +812,7 @@ const ClinicControlQueue = () => {
                         type="button"
                         key={slotId}
                         onClick={() => handleSlotSelect(slotId)}
-                        className={`border-2 rounded-xl p-4 transition-all ${
+                        className={`rounded-[18px] border px-3 py-3 text-left transition-all ${
                           currentSlotLabelId === slotId
                             ? "bg-gradient-to-r from-[#00555A]/10 to-white border-[#00555A] shadow-md"
                             : isCurrentlyAvailable
@@ -818,10 +823,10 @@ const ClinicControlQueue = () => {
                         }`}
                         disabled={!slot.is_open && !isExpired}
                       >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h3 className="font-semibold text-slate-800">{slot.slot_name.replace('Time ', 'Session ')}</h3>
-                            <p className="text-sm text-slate-500 font-medium">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="truncate font-bold text-slate-800">{slot.slot_name.replace('Time ', 'Session ')}</h3>
+                            <p className="text-sm font-medium text-slate-500">
                               {delayLabel && slot.delay_original_start_time && slot.delay_updated_start_time ? (
                                 <>
                                   <span className="line-through decoration-red-500/70 decoration-2 text-orange-700">{slot.delay_original_start_time}</span>
@@ -837,7 +842,7 @@ const ClinicControlQueue = () => {
                               </div>
                             )}
                           </div>
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isExpired ? 'bg-red-100 text-red-700' : isCurrentlyAvailable ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+                          <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${isExpired ? 'bg-red-100 text-red-700' : isCurrentlyAvailable ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
                             {isExpired ? 'Expired' : (isSlotClosed ? 'Not Available' : (isCurrentlyAvailable ? 'Available' : 'Unavailable'))}
                           </span>
                         </div>
@@ -850,33 +855,33 @@ const ClinicControlQueue = () => {
           </div>
 
           {/* Stats Cards */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-5 text-center shadow-lg">
-              <div className="bg-slate-100 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
+          <div className="mb-5 grid grid-cols-3 gap-2 sm:gap-4">
+            <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 text-center shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur sm:p-5">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-2xl bg-[#f6f1e8]">
                 <Users className="h-5 w-5 text-slate-600" />
               </div>
               <p className="text-xs text-slate-500 font-medium mb-1">In Queue</p>
-              <p className="text-3xl font-bold text-slate-800">{queue.length}</p>
+              <p className="text-2xl font-black sm:text-3xl text-slate-800">{queue.length}</p>
               {currentSlotLabelId && (
                 <p className="text-xs text-slate-400 mt-1">Slot {currentSlotLabelId}</p>
               )}
             </div>
-            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-5 text-center shadow-lg">
-              <div className="bg-[#FFC107]/20 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
+            <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 text-center shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur sm:p-5">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-2xl bg-[#fff4cf]">
                 <ArrowRightCircle className="h-5 w-5 text-[#FFC107]" />
               </div>
               <p className="text-xs text-slate-500 font-medium mb-1">Completed</p>
-              <p className="text-3xl font-bold text-[#FFC107]">{completedCount}</p>
+              <p className="text-2xl font-black sm:text-3xl text-[#FFC107]">{completedCount}</p>
               {currentSlotLabelId && (
                 <p className="text-xs text-slate-400 mt-1">Slot {currentSlotLabelId}</p>
               )}
             </div>
-            <div className="rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] p-5 text-center shadow-lg">
-              <div className="bg-[#00555A]/10 w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2">
+            <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 text-center shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur sm:p-5">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-2xl bg-[#f6f1e8]">
                 <Clock className="h-5 w-5 text-[#00555A]" />
               </div>
               <p className="text-xs text-slate-500 font-medium mb-1">Now Serving</p>
-              <p className="text-3xl font-bold text-[#00555A]">{currentServing ? 1 : 0}</p>
+              <p className="text-2xl font-black sm:text-3xl text-[#00555A]">{currentServing ? 1 : 0}</p>
               {currentSlotLabelId && (
                 <p className="text-xs text-slate-400 mt-1">Slot {currentSlotLabelId}</p>
               )}
@@ -884,7 +889,7 @@ const ClinicControlQueue = () => {
           </div>
 
           {/* Current Patient Card */}
-          <div className="mb-6 overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-lg">
+          <div className="mb-5 overflow-hidden rounded-[26px] border border-white/70 bg-white/80 shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur">
             <div className="bg-gradient-to-r from-[#00555A] to-[#006e78] px-6 py-4">
               <p className="text-white font-semibold text-center">
                 {currentServing ? "Now Serving" : queue.length > 0 ? "Next to Serve" : "No Patient"}
@@ -894,7 +899,7 @@ const ClinicControlQueue = () => {
               {currentServing ? (
                 <>
                   <div className="text-6xl font-extrabold text-slate-800 mb-4">{currentServing.token}</div>
-                  <div className="rounded-xl border-2 border-green-200 bg-gradient-to-r from-green-50 to-[#fbfaf7] p-4">
+                  <div className="rounded-[20px] border border-green-200 bg-gradient-to-r from-green-50 to-[#fbfaf7] p-4">
                     <div className="flex items-center justify-center gap-2 flex-wrap mb-2">
                       <p className="font-semibold text-slate-800 text-lg">
                         {currentServing.patientName}
@@ -912,7 +917,7 @@ const ClinicControlQueue = () => {
               ) : queue.length > 0 ? (
                 <>
                   <div className="text-6xl font-extrabold text-slate-800 mb-4">{queue[0].token}</div>
-                  <div className="rounded-xl border-2 border-[#00555A]/20 bg-gradient-to-r from-[#00555A]/5 to-[#f0ede6] p-4">
+                  <div className="rounded-[20px] border border-[#00555A]/20 bg-gradient-to-r from-[#00555A]/5 to-[#f0ede6] p-4">
                     <div className="flex items-center justify-center gap-2 flex-wrap mb-2">
                       <p className="font-semibold text-slate-800 text-lg">
                         {queue[0].name}
@@ -934,14 +939,14 @@ const ClinicControlQueue = () => {
           </div>
 
           {/* Action Buttons */}
-          <div className="mb-4 flex gap-3">
+          <div className="mb-4 grid gap-2 sm:flex sm:gap-3">
             <Button
-              className={`h-10 flex-1 rounded-xl px-3 text-sm font-semibold shadow-sm transition-all duration-200 hover:opacity-90 hover:shadow-md ${
+              className={`h-11 flex-1 rounded-2xl px-3 text-sm font-bold shadow-sm transition-all duration-200 hover:opacity-90 hover:shadow-md ${
                 currentServing
                   ? "bg-[#FFC107] text-[#0F172A]"
                   : "bg-[#00555A] text-white hover:bg-[#00494F]"
               }`}
-              onClick={() => currentServing ? completePatient() : nextPatient()}
+              onClick={handlePrimaryQueueAction}
               disabled={
                 (!currentServing && queue.length === 0) ||
                 (!currentServing && queue.length > 0 && !canServeInCurrentSlot())
@@ -953,7 +958,7 @@ const ClinicControlQueue = () => {
             {currentServing && (
               <Button
                 variant="outline"
-                className="h-10 flex-1 rounded-xl border-[#00555A]/30 px-3 text-sm font-semibold text-[#00555A] transition-all duration-200 hover:bg-[#00555A]/10"
+                className="h-11 flex-1 rounded-2xl border-[#00555A]/30 px-3 text-sm font-bold text-[#00555A] transition-all duration-200 hover:bg-[#00555A]/10"
                 onClick={giveReportForCurrentPatient}
                 disabled={reportingToken === currentServing.token}
               >
@@ -963,7 +968,7 @@ const ClinicControlQueue = () => {
             )}
               <Button
                 variant="outline"
-                className="h-10 flex-1 rounded-xl border-slate-300 px-3 text-sm font-semibold text-slate-600 transition-all duration-200 hover:bg-slate-100"
+                className="h-11 flex-1 rounded-2xl border-slate-300 px-3 text-sm font-bold text-slate-600 transition-all duration-200 hover:bg-slate-100"
                 onClick={() => skipPatient()}
                 disabled={queue.length < 2 || !canServeInCurrentSlot()}
               >
@@ -973,8 +978,8 @@ const ClinicControlQueue = () => {
           </div>
 
           {/* Waiting Queue */}
-          <div className="overflow-hidden rounded-2xl border border-[#e6ded3] bg-[#fbfaf7] shadow-md">
-            <div className="flex items-center gap-2 border-b border-[#e6ded3] bg-gradient-to-r from-[#f0ede6] to-[#fbfaf7] px-4 py-3">
+          <div className="overflow-hidden rounded-[26px] border border-white/70 bg-white/80 shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur">
+            <div className="flex items-center gap-2 border-b border-white/70 bg-[#f6f1e8] px-4 py-3">
               <Users size={16} className="text-[#00555A]" />
               <h2 className="text-sm font-semibold text-slate-800 sm:text-base">Waiting Queue</h2>
               {typeof currentSlotLabelId === "number" && (
@@ -1008,7 +1013,7 @@ const ClinicControlQueue = () => {
                   {queue.map((p, i) => (
                     <div
                       key={p.token}
-                      className={`grid grid-cols-[1fr_auto] items-center gap-2 rounded-xl border px-3 py-2.5 transition-all hover:shadow-sm ${
+                      className={`grid grid-cols-[1fr_auto] items-center gap-2 rounded-[18px] border px-3 py-2.5 transition-all hover:shadow-sm ${
                         p.source === "walkin"
                           ? "border-[#FFC107]/30 bg-gradient-to-r from-[#FFC107]/10 to-white"
                           : "border-transparent bg-slate-50"
@@ -1075,7 +1080,7 @@ const ClinicControlQueue = () => {
       </main>
 
       <Dialog open={sendQuickBookOpen} onOpenChange={setSendQuickBookOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="rounded-[28px] border border-white/70 bg-[#fbfaf7] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Send Quick Book Link</DialogTitle>
             <DialogDescription>

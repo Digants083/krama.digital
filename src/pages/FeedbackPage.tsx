@@ -106,66 +106,69 @@ const FeedbackPage = () => {
   const messageRemaining = messageMaxLength - messageLength;
 
   const inputClass = (hasError: boolean) =>
-    `w-full rounded-lg border bg-background/80 px-4 py-3 text-sm text-foreground outline-none transition focus:ring-2 ${
+    `w-full rounded-2xl border bg-[#fbfaf7] px-4 py-3 text-sm font-semibold text-foreground outline-none transition placeholder:text-muted-foreground focus:ring-2 ${
       hasError
         ? "border-destructive/60 focus:border-destructive focus:ring-destructive/15"
-        : "border-border focus:border-primary focus:ring-primary/15"
+        : "border-primary/15 focus:border-primary focus:ring-primary/15"
     }`;
 
   return (
-    <div className="min-h-screen bg-background sm:bg-[linear-gradient(180deg,hsl(var(--secondary))_0%,hsl(var(--background))_40%,hsl(var(--background))_100%)]">
-      <header className="border-b border-primary/10 bg-background/80 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
+    <div className="krama-ambient min-h-screen">
+      <header className="border-b border-white/60 bg-white/70 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <button
             onClick={() => navigate(-1)}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card/85 text-muted-foreground shadow-sm transition hover:border-primary/30 hover:text-primary"
+            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-primary shadow-[0_16px_38px_-30px_rgba(19,55,50,0.7)] transition hover:-translate-y-0.5 hover:bg-white"
             aria-label="Go back"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <h1 className="font-display text-xl font-bold text-foreground">Feedback</h1>
+            <h1 className="font-display text-xl font-black text-[#17312d]">Feedback</h1>
             <p className="hidden text-xs text-muted-foreground sm:block">Share what worked, what did not, and what should improve.</p>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-4 px-4 py-5 sm:gap-6 sm:py-8 lg:grid-cols-[0.86fr_1.14fr] lg:py-12">
-        <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm sm:rounded-2xl sm:border-primary/15 sm:bg-primary sm:shadow-[0_24px_70px_-38px_rgba(18,80,70,0.75)] lg:sticky lg:top-24 lg:self-start">
-          <div className="p-5 text-foreground sm:p-8 sm:text-primary-foreground">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:h-11 sm:w-11 sm:bg-white/12 sm:text-primary-foreground">
-            <MessageSquare className="h-5 w-5" />
-          </div>
-          <h2 className="mt-4 font-display text-2xl font-bold leading-tight sm:mt-5 sm:text-3xl">Help Krama grow.</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-white">
-            Tell us what felt good, confusing, or slow. Short feedback is enough.
-          </p>
-          <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground sm:mt-6 sm:space-y-3 sm:border-white/10 sm:pt-5 sm:text-white">
-            <div className="flex gap-3">
-              <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
-              <span>Issues, suggestions, and rough ideas help.</span>
+      <main className="mx-auto grid max-w-6xl gap-5 px-4 py-6 sm:gap-6 sm:px-6 sm:py-8 lg:grid-cols-[0.95fr_1.05fr] lg:py-12">
+        <section className="motion-rise overflow-hidden rounded-[34px] border border-white/70 bg-[#143b34] text-white shadow-[0_30px_90px_-48px_rgba(19,55,50,0.95)] lg:sticky lg:top-24 lg:self-start">
+          <div className="relative min-h-[360px]">
+            <img
+              src="/krama-hero-cartoon-reception.png"
+              alt="Cartoon clinic reception"
+              className="absolute inset-0 h-full w-full object-cover object-center"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#10251f] via-[#10251f]/68 to-[#10251f]/8" />
+            <div className="relative z-10 flex min-h-[360px] flex-col justify-end p-5 sm:p-8">
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/12 text-white backdrop-blur">
+                <MessageSquare className="h-5 w-5" />
+              </div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-[#f6d8c4]">Krama feedback</p>
+              <h2 className="mt-3 max-w-md font-display text-4xl font-black leading-tight">
+                Help the clinic flow feel easier.
+              </h2>
+              <p className="mt-3 max-w-md text-sm leading-6 text-white/78">
+                Share what felt confusing, slow, or missing in booking, token tracking, queue updates, or clinic tools.
+              </p>
             </div>
-            <div className="flex gap-3">
-              <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary sm:text-white" />
-              <span>Specific notes are easier to fix.</span>
-            </div>
           </div>
-          </div>
-          <div className="hidden grid-cols-2 border-t border-white/10 bg-white/[0.07] text-primary-foreground sm:grid">
-            <div className="border-r border-white/10 p-5">
-              <p className="text-2xl font-bold">10 AM</p>
-              <p className="mt-1 text-xs text-white">Support starts</p>
+          <div className="grid gap-3 border-t border-white/10 bg-[#10251f] p-4 sm:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+              <CheckCircle className="h-4 w-4 text-[#f6d8c4]" />
+              <p className="mt-3 text-sm font-bold">Tell us the rough screen</p>
+              <p className="mt-1 text-xs leading-5 text-white/62">A page name or short note is enough.</p>
             </div>
-            <div className="p-5">
-              <p className="text-2xl font-bold">4 PM</p>
-              <p className="mt-1 text-xs text-white">Daily help window</p>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+              <CheckCircle className="h-4 w-4 text-[#f6d8c4]" />
+              <p className="mt-3 text-sm font-bold">Suggest the fix</p>
+              <p className="mt-1 text-xs leading-5 text-white/62">Even a rough idea helps shape Krama.</p>
             </div>
           </div>
         </section>
 
         <section>
         {submitStatus === "success" && (
-          <div className="mb-4 flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/5 p-4">
+          <div className="mb-4 flex items-start gap-3 rounded-2xl border border-primary/25 bg-white/85 p-4 shadow-[0_16px_44px_-36px_rgba(19,55,50,0.65)] backdrop-blur">
             <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
             <div>
               <p className="font-semibold text-foreground">Feedback submitted</p>
@@ -175,7 +178,7 @@ const FeedbackPage = () => {
         )}
 
         {submitStatus === "error" && (
-          <div className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/25 bg-destructive/5 p-4">
+          <div className="mb-4 flex items-start gap-3 rounded-2xl border border-destructive/25 bg-white/85 p-4 shadow-[0_16px_44px_-36px_rgba(19,55,50,0.65)] backdrop-blur">
             <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-destructive" />
             <div>
               <p className="font-semibold text-foreground">Submission failed</p>
@@ -184,12 +187,12 @@ const FeedbackPage = () => {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-border bg-card/90 shadow-sm sm:rounded-2xl sm:shadow-[0_24px_70px_-45px_rgba(18,80,70,0.65)]">
-          <div className="border-b border-border bg-secondary/35 px-4 py-4 sm:bg-[linear-gradient(135deg,hsl(var(--card))_0%,hsl(var(--secondary))_100%)] sm:px-6 sm:py-5">
-            <h2 className="font-display text-xl font-bold text-foreground sm:text-2xl">Send feedback</h2>
+        <div className="motion-rise-delayed overflow-hidden rounded-[32px] border border-white/70 bg-white/85 shadow-[0_24px_70px_-45px_rgba(18,80,70,0.65)] backdrop-blur">
+          <div className="border-b border-[#eadfce] bg-[#fbfaf7] px-5 py-5 sm:px-6">
+            <h2 className="font-display text-2xl font-black text-[#17312d]">Send feedback</h2>
             <p className="mt-1 text-sm text-muted-foreground">A few details help us understand the exact experience.</p>
           </div>
-          <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:space-y-5 sm:p-6">
+          <form onSubmit={handleSubmit} className="space-y-4 p-5 sm:space-y-5 sm:p-6">
             <div>
               <label className="mb-2 block text-sm font-semibold text-foreground">
                 <div className="flex items-center gap-2">
@@ -294,7 +297,7 @@ const FeedbackPage = () => {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-6 font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-6 font-black text-primary-foreground shadow-[0_16px_34px_-22px_rgba(31,92,84,0.9)] transition hover:-translate-y-0.5 hover:bg-primary/90"
             >
               {isSubmitting ? (
                 <>

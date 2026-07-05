@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { usePatient } from "@/context/PatientContext";
-import { CalendarDays, MapPin, Stethoscope, type LucideIcon } from "lucide-react";
+import { Clock3, MapPin, Stethoscope, Users } from "lucide-react";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 import { formatDurationMinutes, formatIsoClock } from "@/lib/timeFormat";
 
@@ -179,7 +179,6 @@ const AppointmentConfirmation = () => {
   const doctorName = state?.doctor || appointmentDetails?.doctor_name || "Available Doctor";
   const dateText = state?.date || appointmentDetails?.date || "";
   const timeText = state?.time || appointmentDetails?.time || "";
-  const displayTimeText = timeText.replace(/^(time|session)\s*\d+\s*/i, "").trim();
   const patientsAhead = queuePosition?.patients_ahead ?? 0;
   const estimatedWait = queuePosition?.estimated_wait_minutes ?? state?.estimated_wait_minutes ?? appointmentDetails?.estimated_wait_minutes ?? 0;
   const consultationWindow =
@@ -202,6 +201,9 @@ const AppointmentConfirmation = () => {
   const sessionStatusText = queuePosition?.session_status || appointmentDetails?.session_status || state?.session_status || "";
   const hasActiveDelay = Boolean(delayNotice || activeDelayMinutes > 0 || sessionStatusText.toLowerCase() === "delayed");
   const delayAmountText = activeDelayMinutes > 0 ? `+${formatDurationMinutes(activeDelayMinutes)}` : delayNotice || "Delayed";
+  const queuePositionText = queuePosition
+    ? `${queuePosition.queue_position || queuePosition.your_position} of ${queuePosition.total_in_queue}`
+    : null;
 
   useEffect(() => {
     if (!token || !clinicName || !doctorName || !dateText || !timeText) return;
@@ -252,78 +254,72 @@ const AppointmentConfirmation = () => {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
-      <div className="w-full max-w-md">
-        <div className="rounded-[36px] bg-primary p-8 text-white shadow-[0_28px_80px_-40px_rgba(31,92,84,0.9)]">
-          <p className="text-sm uppercase tracking-[0.28em] text-white/70">Your Token</p>
-          <p className="mt-4 font-display text-6xl font-bold tracking-tight">{token}</p>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#efe6d8] px-4 py-8">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_24%,rgba(31,92,84,0.18),transparent_26%),radial-gradient(circle_at_82%_20%,rgba(224,164,88,0.22),transparent_24%),linear-gradient(135deg,rgba(255,255,255,0.68),rgba(239,230,216,0.74))]" />
+      <div className="absolute left-0 top-0 h-full w-full opacity-45 blur-[2px]">
+        <div className="absolute left-[5%] top-[19%] h-28 w-20 rounded-t-full bg-[#153d38]/20" />
+        <div className="absolute left-[8%] top-[32%] h-32 w-28 rounded-[14px] bg-white/40" />
+        <div className="absolute right-[8%] top-[16%] h-36 w-16 rounded-t-full bg-[#1f5c54]/20" />
+        <div className="absolute bottom-[12%] right-[12%] h-28 w-36 rounded-[18px] bg-[#133732]/20" />
+        <div className="absolute bottom-[15%] left-[12%] h-16 w-40 rounded-[18px] bg-white/30" />
+      </div>
 
-          <div className="mt-8 grid grid-cols-2 gap-4">
-            <div className="rounded-[24px] bg-white/10 p-5">
-              <p className="text-sm text-white/70">Now serving</p>
-              <p className="mt-3 text-3xl font-bold">{nowServing}</p>
-            </div>
-            <div className="rounded-[24px] bg-white/10 p-5">
-              <p className="text-sm text-white/70">Estimated wait</p>
-              <p className="mt-3 text-3xl font-bold">{formatDurationMinutes(estimatedWait)}</p>
-            </div>
-          </div>
+      <div className="relative grid w-full max-w-5xl items-center gap-8 md:grid-cols-[minmax(280px,0.86fr)_minmax(300px,1fr)]">
+        <div className="mx-auto w-full max-w-[330px] rotate-[-4deg] rounded-[42px] border-[10px] border-[#171b18] bg-[#171b18] shadow-[0_34px_70px_-24px_rgba(20,28,24,0.72)] md:justify-self-end">
+          <div className="relative overflow-hidden rounded-[31px] bg-[#1f6a45] px-5 pb-5 pt-7 text-center text-white">
+            <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-white/20" />
+            <p className="font-display text-lg font-bold leading-none text-white/90">Your Token</p>
+            <p className="mt-1 text-xs font-medium text-white/72">You will be called shortly</p>
 
-          <div className="mt-4 rounded-[24px] bg-white/10 p-5">
-            <p className="text-sm text-white/70">Estimated Consultation Window</p>
-            <p className="mt-3 text-2xl font-bold leading-tight">{consultationWindow || "Calculating..."}</p>
-            {predictedConsultationTime && (
-              <p className="mt-2 text-sm font-semibold text-white/80">Predicted Consultation Time: {predictedConsultationTime}</p>
-            )}
-          </div>
-
-          <div className={`mt-4 grid gap-4 ${hasActiveDelay ? "grid-cols-2" : "grid-cols-1"}`}>
-            <div className="rounded-[24px] bg-white/10 p-5">
-              <p className="text-sm text-white/70">Patients ahead</p>
-              <p className="mt-3 text-3xl font-bold">{patientsAhead}</p>
-            </div>
-            {hasActiveDelay && (
-              <div className="rounded-[24px] bg-white/10 p-5">
-                <p className="text-sm text-white/70">Delay update</p>
-                <p className="mt-3 text-3xl font-bold">{delayAmountText}</p>
+            <div className="mt-5 rounded-[16px] bg-[#f6f1e8] px-4 py-5 text-[#1d5b40] shadow-[0_16px_34px_-24px_rgba(0,0,0,0.65)]">
+              <p className="font-display text-6xl font-bold leading-none tracking-wide">{token}</p>
+              <div className="mt-3 flex items-center justify-center gap-1.5 text-xs font-bold text-[#276348]">
+                <Users className="h-3.5 w-3.5" />
+                <span>{patientsAhead} {patientsAhead === 1 ? "person" : "people"} ahead of you</span>
               </div>
-            )}
+              {queuePositionText ? (
+                <p className="mt-1 text-[11px] font-semibold text-[#64836e]">Position {queuePositionText}</p>
+              ) : null}
+            </div>
+
+            <div className="mx-4 mt-4 rounded-[10px] bg-[#e6ecd9] px-4 py-3 text-[#265844]">
+              <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold">
+                <Clock3 className="h-3.5 w-3.5" />
+                <span>Estimated waiting time</span>
+              </div>
+              <p className="mt-1 text-sm font-black">{formatDurationMinutes(estimatedWait)}</p>
+              {predictedConsultationTime ? (
+                <p className="mt-1 text-[11px] font-semibold text-[#6b826f]">Around {predictedConsultationTime}</p>
+              ) : null}
+            </div>
+
+            <p className="mt-5 text-xs font-semibold text-white/72">Please wait for your turn.</p>
+            <MiniWaitingRoom />
           </div>
         </div>
 
-        <div className="mt-5 rounded-[28px] border border-border/70 bg-white p-6 shadow-sm">
-          <div className="space-y-4">
-            <DetailRow icon={MapPin} label="Clinic" value={clinicName} subvalue={clinicAddress} />
-            <DetailRow icon={Stethoscope} label="Doctor" value={doctorName} />
-            <DetailRow icon={CalendarDays} label="Appointment" value={dateText} subvalue={displayTimeText} />
-            <div className="grid grid-cols-2 gap-4 rounded-[20px] bg-secondary/60 p-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Token</p>
-                <p className="mt-1 text-lg font-bold text-foreground">{token}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Position</p>
-                <p className="mt-1 text-lg font-bold text-foreground">
-                  {queuePosition ? `${queuePosition.queue_position || queuePosition.your_position} / ${queuePosition.total_in_queue}` : "1 / 1"}
-                </p>
-              </div>
-            </div>
-            <div className="rounded-[20px] bg-secondary/60 p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Queue Status</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{sessionStatusText || "Active"}</p>
-            </div>
-            <div className="rounded-[20px] bg-primary/5 p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Consultation Window</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{consultationWindow || "Calculating..."}</p>
-              {predictedConsultationTime && (
-                <p className="mt-1 text-sm font-semibold text-primary">Predicted Consultation Time: {predictedConsultationTime}</p>
-              )}
-            </div>
-          </div>
-        </div>
+        <div className="mx-auto w-full max-w-md rounded-[28px] border border-white/50 bg-white/80 p-5 shadow-[0_26px_70px_-42px_rgba(19,49,45,0.65)] backdrop-blur-md">
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#1f5c54]/70">Appointment confirmed</p>
+          <h1 className="mt-2 font-display text-3xl font-bold leading-tight text-[#17312d]">Keep this token open on your phone.</h1>
 
-        <div className="mt-5">
-          <Button variant="outline" className="w-full" onClick={() => navigate("/patient")}>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <TokenStat label="Now serving" value={nowServing} />
+            <TokenStat label="Window" value={consultationWindow || "Calculating"} />
+          </div>
+
+          {hasActiveDelay ? (
+            <div className="mt-3 rounded-[14px] border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-700">Delay</p>
+              <p className="mt-1 text-lg font-black text-[#17312d]">{delayAmountText}</p>
+            </div>
+          ) : null}
+
+          <div className="mt-5 space-y-4 border-t border-[#e6ded3] pt-5">
+            <InfoRow icon={MapPin} label="Clinic" title={clinicName} detail={clinicAddress} />
+            <InfoRow icon={Stethoscope} label="Doctor" title={doctorName} />
+          </div>
+
+          <Button variant="outline" className="mt-5 h-12 w-full rounded-[16px] border-[#d8ccbd] bg-white" onClick={() => navigate("/patient")}>
             Back to Dashboard
           </Button>
         </div>
@@ -332,24 +328,60 @@ const AppointmentConfirmation = () => {
   );
 };
 
-const DetailRow = ({
-  icon: Icon,
+const TokenStat = ({
   label,
   value,
-  subvalue,
+  icon: Icon,
 }: {
-  icon: LucideIcon;
   label: string;
   value: string;
-  subvalue?: string;
+  icon?: typeof Users;
+}) => (
+  <div className="rounded-[14px] bg-[#f6f1e8] px-4 py-3">
+    <div className="flex items-center gap-1.5">
+      {Icon ? <Icon className="h-3.5 w-3.5 text-[#1f5c54]/60" /> : null}
+      <p className="text-xs font-bold uppercase tracking-wide text-[#6d7d73]">{label}</p>
+    </div>
+    <p className="mt-1 text-lg font-black leading-tight text-[#17312d]">{value}</p>
+  </div>
+);
+
+const InfoRow = ({
+  icon: Icon,
+  label,
+  title,
+  detail,
+}: {
+  icon: typeof MapPin;
+  label: string;
+  title: string;
+  detail?: string;
 }) => (
   <div className="flex items-start gap-3">
-    <Icon className="mt-0.5 h-5 w-5 text-primary" />
-    <div>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="font-semibold text-foreground">{value}</p>
-      {subvalue ? <p className="text-sm text-muted-foreground">{subvalue}</p> : null}
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#1f5c54]/10">
+      <Icon className="h-5 w-5 text-[#1f5c54]" />
+    </span>
+    <div className="min-w-0">
+      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-0.5 font-bold text-[#17312d]">{title}</p>
+      {detail ? <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{detail}</p> : null}
     </div>
+  </div>
+);
+
+const MiniWaitingRoom = () => (
+  <div className="relative mx-auto mt-5 h-20 w-full max-w-[220px] overflow-hidden rounded-b-[18px] bg-[#e8f0dc]">
+    <div className="absolute bottom-0 left-0 right-0 h-5 bg-[#cbd7bd]" />
+    <div className="absolute bottom-5 left-5 h-2 w-32 rounded-full bg-[#819b80]/50" />
+    <div className="absolute bottom-7 left-4 h-8 w-16 rounded-[8px] bg-[#2f7a62]/30" />
+    <div className="absolute bottom-7 left-9 h-10 w-6 rounded-t-full bg-[#17423c]" />
+    <div className="absolute bottom-[46px] left-10 h-4 w-4 rounded-full bg-[#d7a16d]" />
+    <div className="absolute bottom-7 left-[70px] h-9 w-6 rounded-t-full bg-[#d99b54]" />
+    <div className="absolute bottom-[45px] left-[72px] h-4 w-4 rounded-full bg-[#5f3d2b]" />
+    <div className="absolute bottom-6 right-10 h-12 w-3 rounded-t-full bg-[#7ea077]" />
+    <div className="absolute bottom-6 right-7 h-9 w-3 rounded-t-full bg-[#b8cdb0]" />
+    <div className="absolute bottom-5 right-4 h-10 w-5 rounded-t-[10px] bg-[#6f8d74]" />
+    <div className="absolute bottom-5 right-[74px] h-14 w-12 rounded-t-full bg-white/30" />
   </div>
 );
 

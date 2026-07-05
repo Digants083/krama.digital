@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef } from "react";
+import { apiUrl } from "@/lib/api";
 
 type QueueItem = {
   token: string;
@@ -125,6 +126,14 @@ type WalkinResult = {
   session_status?: string | null;
 };
 
+type CompletedPatient = {
+  id: number;
+  clinic_id: string;
+  token?: string;
+  patient_name: string;
+  patient_phone?: string;
+};
+
 type QueueContextType = {
   queue: QueueItem[];
   currentToken: number;
@@ -136,7 +145,7 @@ type QueueContextType = {
   activeSlotId: number | null;
   viewingSlotId: number | null;
   nextPatient: () => Promise<void>;
-  completePatient: () => Promise<void>;
+  completePatient: () => Promise<CompletedPatient | null>;
   skipPatient: () => Promise<void>;
   fetchQueueStats: (clinicId: string) => void;
   fetchQueueForClinic: (clinicId: string, slotId?: number | null, preserveStartTime?: Date, doctorId?: string | null) => Promise<QueueSnapshot | null>;
@@ -152,8 +161,6 @@ export const useQueue = () => {
   if (!ctx) throw new Error("useQueue must be used inside QueueProvider");
   return ctx;
 };
-
-const API_BASE = "/api";
 
 export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -179,7 +186,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         params.set("doctor_id", doctorId);
       }
 
-      const response = await fetch(`${API_BASE}/auth/appointments/today?${params.toString()}`);
+      const response = await fetch(apiUrl(`/api/auth/appointments/today?${params.toString()}`));
       if (!response.ok) return null;
 
       const data = await response.json();
@@ -252,7 +259,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
       let nextCompletedCount = 0;
       let nextSkippedCount = 0;
-      const statsResponse = await fetch(`${API_BASE}/auth/queue/history/stats?clinic_id=${clinicId}${typeof slotId === "number" ? `&slot_id=${slotId}` : ""}${doctorId ? `&doctor_id=${encodeURIComponent(doctorId)}` : ""}`);
+      const statsResponse = await fetch(apiUrl(`/api/auth/queue/history/stats?clinic_id=${clinicId}${typeof slotId === "number" ? `&slot_id=${slotId}` : ""}${doctorId ? `&doctor_id=${encodeURIComponent(doctorId)}` : ""}`));
       if (statsResponse.ok) {
         const statsData = await statsResponse.json();
         nextCompletedCount = statsData.total_patients_served || 0;
@@ -290,7 +297,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
   const fetchQueueStats = useCallback(async (clinicId: string) => {
     try {
-      const response = await fetch(`${API_BASE}/queue/stats/${clinicId}`);
+      const response = await fetch(apiUrl(`/api/queue/stats/${clinicId}`));
       if (response.ok) {
         const data = await response.json();
         setQueueStats(data);
@@ -303,7 +310,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
 
   const addWalkinToQueue = useCallback(
     async (payload: WalkinPayload): Promise<WalkinResult> => {
-      const res = await fetch(`${API_BASE}/auth/queue/join`, {
+      const res = await fetch(apiUrl("/api/auth/queue/join"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -367,7 +374,7 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
     if (queue.length > 0) {
       const patient = queue[0];
       try {
-        const response = await fetch(`${API_BASE}/auth/clinic/serve-patient`, {
+        const response = await fetch(apiUrl("/api/auth/clinic/serve-patient"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -423,10 +430,10 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [queue, viewingSlotId, fetchQueueForClinic]);
 
-  const completePatient = useCallback(async () => {
+  const completePatient = useCallback(async (): Promise<CompletedPatient | null> => {
     if (currentServing && currentServing.appointmentId) {
       try {
-        const response = await fetch(`${API_BASE}/auth/clinic/finish-patient`, {
+        const response = await fetch(apiUrl("/api/auth/clinic/finish-patient"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -437,19 +444,22 @@ export const QueueProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (response.ok) {
+          const data = await response.json().catch(() => ({}));
           await fetchQueueForClinic(currentServing.clinicId || "", viewingSlotId, undefined, currentServing.doctor_id);
+          return data.completed || null;
         }
       } catch (error) {
         console.error("Error completing patient:", error);
       }
     }
+    return null;
   }, [currentServing, viewingSlotId, fetchQueueForClinic]);
 
   const skipPatient = useCallback(async () => {
     if (queue.length > 0) {
       const patient = queue[0];
       try {
-        const response = await fetch(`${API_BASE}/auth/clinic/skip-patient`, {
+        const response = await fetch(apiUrl("/api/auth/clinic/skip-patient"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
