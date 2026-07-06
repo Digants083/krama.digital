@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +10,7 @@ from app.database.models import CompletedAppointment
 router = APIRouter(prefix="/patient", tags=["patient-history"])
 
 
-def _clean_identifier(value: str | None) -> str:
+def _clean_identifier(value: Optional[str]) -> str:
     return (value or "").strip()
 
 
@@ -16,8 +18,8 @@ def _clean_identifier(value: str | None) -> str:
 async def get_patient_history(
     clinic_id: str,
     patient_id: str,
-    phone: str | None = Query(default=None),
-    email: str | None = Query(default=None),
+    phone: Optional[str] = Query(default=None),
+    email: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """

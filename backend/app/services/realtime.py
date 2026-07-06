@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/realtime", tags=["realtime"])
 _subscribers: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
 
 
-async def publish_queue_event(clinic_id: str, event_type: str, payload: dict | None = None) -> None:
+async def publish_queue_event(clinic_id: str, event_type: str, payload: Optional[dict] = None) -> None:
     """Fan out a lightweight invalidation event to connected clinic screens."""
     if not clinic_id:
         return
