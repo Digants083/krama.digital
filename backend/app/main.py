@@ -19,7 +19,7 @@ from app.database.schema_checks import ensure_required_schema
 
 install_starlette_router_compat()
 
-from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports, patient_history, sessions, billing, patient_reminders
+from app.routers import ai_transcription, auth, queue_endpoints, password_reset, admin, feedback, patient_reports, patient_history, patient_health, sessions, billing, patient_reminders, ehr
 from app.services.appointment_maintenance import cleanup_old_appointments
 from app.services.delay_jobs import scheduled_delay_jobs
 from app.services import realtime
@@ -634,10 +634,13 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(patient_reports.router, prefix="/api")
 app.include_router(patient_history.router, prefix="/api")
+app.include_router(patient_health.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(billing.router, prefix="/api")
 app.include_router(patient_reminders.router, prefix="/api")
 app.include_router(realtime.router, prefix="/api")
+app.include_router(ai_transcription.router, prefix="/api")
+app.include_router(ehr.router, prefix="/api")
 
 @app.get("/")
 async def root():

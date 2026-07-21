@@ -77,3 +77,15 @@ def scheduler_active_poll_seconds() -> int:
 
 def scheduler_idle_poll_seconds() -> int:
     return _env_int("SCHEDULER_IDLE_POLL_SECONDS", 300, minimum=60)
+
+
+def ollama_base_url() -> str:
+    return _env("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+
+
+def ehr_model_name() -> str:
+    return _env("EHR_MODEL", "gpt-oss:20b")
+
+
+def ehr_generation_timeout_seconds() -> int:
+    return _env_int("EHR_GENERATION_TIMEOUT_SECONDS", 600, minimum=60)

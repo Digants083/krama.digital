@@ -6,7 +6,9 @@ import {
   ChevronRight,
   Clock,
   ClipboardList,
+  FileHeart,
   Hash,
+  ShieldCheck,
   Star,
   type LucideIcon,
   User,
@@ -202,6 +204,20 @@ const PatientDashboard = () => {
       icon: Star,
       to: "/patient/reviews",
       tone: "bg-[#ffc247] text-slate-950",
+    },
+    {
+      title: "ABDM & records",
+      text: "Connect ABHA or upload reports.",
+      icon: ShieldCheck,
+      to: "/patient/health-records",
+      tone: "bg-[#dceeff] text-[#174b7a]",
+    },
+    {
+      title: "Your summary",
+      text: "See every clinic visit in one place.",
+      icon: FileHeart,
+      to: "/patient/health-summary",
+      tone: "bg-[#e1f5ee] text-[#1a5c4a]",
     },
   ];
 

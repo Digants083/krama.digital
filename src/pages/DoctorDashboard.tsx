@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRightCircle, CalendarDays, CheckCircle2, Clock, Megaphone, RefreshCw, Stethoscope, Users } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, ArrowRightCircle, CalendarDays, CheckCircle2, Clock, FileText, Languages, Megaphone, Mic, RefreshCw, Sparkles, Stethoscope, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useQueue } from "@/context/QueueContext";
 import { apiUrl } from "@/lib/api";
 import { formatDelayedStartTime, formatDelayLabel } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
+import { ConsultationPatient, saveConsultationRecording } from "@/lib/consultationRecording";
 
 function formatElapsed(seconds: number) {
   const mins = Math.floor(seconds / 60);
@@ -250,6 +251,174 @@ const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history,
           <p className="mt-3 text-sm font-bold text-[#202825]">First visit to this clinic</p>
         </div>
       )}
+    </div>
+  );
+});
+
+const AiEmrSummaryCard = memo(function AiEmrSummaryCard({ history, isLoading, error, hasPatient = true }: { history: PatientHistory | null; isLoading: boolean; error: string | null; hasPatient?: boolean }) {
+  const visitCount = history?.visit_count || 0;
+  const lastVisit = history?.last_visit ? formatVisitDate(history.last_visit) : null;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#cdebdc] bg-[#f2fbf7]">
+      <div className="flex items-center justify-between gap-2 border-b border-[#dceee7] px-3 py-3">
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-[#1a5c4a] text-white"><Sparkles className="h-4 w-4" /></span>
+          <div>
+            <p className="text-sm font-bold text-[#17312d]">AI EMR Summary</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5d7770]">Frontend preview</p>
+          </div>
+        </div>
+        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-[#1a5c4a]">Not generated</span>
+      </div>
+      <div className="p-3">
+        {!hasPatient ? (
+          <p className="text-sm leading-5 text-[#58645f]">Select a patient from the queue to prepare their EMR summary.</p>
+        ) : isLoading ? (
+          <p className="text-sm font-semibold text-[#58645f]">Preparing patient context...</p>
+        ) : error ? (
+          <p className="text-sm font-semibold text-[#58645f]">EMR context is unavailable.</p>
+        ) : history?.is_returning ? (
+          <div className="space-y-3">
+            <p className="text-sm leading-5 text-[#40514b]">
+              Returning patient with <b>{visitCount} completed clinic visit{visitCount === 1 ? "" : "s"}</b>{lastVisit ? `; last seen ${lastVisit}` : ""}.
+            </p>
+            <div className="rounded-xl bg-white/80 p-3">
+              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#1a5c4a]"><FileText className="h-3.5 w-3.5" /> Clinical context</p>
+              <p className="mt-1.5 text-xs leading-5 text-[#68736f]">Diagnoses, medicines, allergies and report findings will appear after approved EMR records and the AI model are connected.</p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm leading-5 text-[#58645f]">No earlier Karma clinic record found. New approved consultation details will build this summary.</p>
+        )}
+      </div>
+    </div>
+  );
+});
+
+function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; patient?: ConsultationPatient }) {
+  const navigate = useNavigate();
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const startedAtRef = useRef(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [recordingError, setRecordingError] = useState("");
+
+  useEffect(() => {
+    if (!isRecording) return;
+    const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [isRecording]);
+
+  useEffect(() => () => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  const startRecording = async () => {
+    if (!enabled || !patient) return;
+    setRecordingError("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setRecordingError("Audio recording is not supported in this browser. Use Chrome or Edge over HTTPS.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      const preferredType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = preferredType ? new MediaRecorder(stream, { mimeType: preferredType }) : new MediaRecorder(stream);
+      streamRef.current = stream;
+      recorderRef.current = recorder;
+      chunksRef.current = [];
+      startedAtRef.current = Date.now();
+      setElapsedSeconds(0);
+      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onerror = () => setRecordingError("The recording stopped unexpectedly. Please try again.");
+      recorder.onstop = () => {
+        const durationSeconds = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setIsRecording(false);
+        if (!blob.size) {
+          setRecordingError("No audio was captured. Check the microphone and try again.");
+          return;
+        }
+        saveConsultationRecording({ blob, durationSeconds, patient, recordedAt: new Date().toISOString() });
+        navigate("/doctor-dashboard/consultation-transcript");
+      };
+      recorder.start(1000);
+      setIsRecording(true);
+    } catch (error) {
+      setRecordingError(error instanceof DOMException && error.name === "NotAllowedError" ? "Microphone permission was denied. Allow microphone access and try again." : "Karma could not open the microphone. Please try again.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  };
+
+  return (
+    <div className="rounded-2xl bg-[#17312d] p-3 text-white">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold">Voice Assistant</p>
+          <p className="text-[11px] text-white/55">Sarvam voice-to-text · Doctor + patient</p>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${isRecording ? "bg-red-400/20 text-red-200" : "bg-white/10 text-white/70"}`}>{isRecording ? formatElapsed(elapsedSeconds) : "Ready"}</span>
+      </div>
+
+      <div className="mt-4 flex justify-center">
+        <span className={`grid h-20 w-20 place-items-center rounded-full border-4 ${isRecording ? "border-red-300/35 bg-red-400 text-[#421b1b]" : "border-white/10 bg-white/10 text-[#9de1ca]"}`}>
+          <Mic className={`h-9 w-9 ${isRecording ? "animate-pulse" : ""}`} />
+        </span>
+      </div>
+
+      <div className="mt-3 flex items-center gap-1.5 overflow-hidden">
+        <Languages className="h-3.5 w-3.5 shrink-0 text-[#9de1ca]" />
+        <p className="truncate text-[11px] font-semibold text-white/65">Hindi · Kannada · Tamil · English</p>
+      </div>
+
+      {isRecording ? (
+        <div className="mt-3 rounded-xl bg-white/10 p-3">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
+            <p className="text-xs font-bold">Consultation recording</p>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-4 text-white/55">Doctor and patient audio is being captured. Stop when the consultation is complete.</p>
+        </div>
+      ) : null}
+
+      {recordingError ? <p className="mt-3 rounded-xl bg-red-400/15 p-2.5 text-[11px] leading-4 text-red-100">{recordingError}</p> : null}
+
+      <button
+        type="button"
+        onClick={isRecording ? stopRecording : startRecording}
+        disabled={!enabled}
+        className={`mt-3 w-full rounded-xl px-3 py-2.5 text-xs font-black transition disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 ${isRecording ? "bg-red-400 text-[#421b1b]" : "bg-[#9de1ca] text-[#17312d]"}`}
+      >
+        {!enabled ? "Select patient to begin" : isRecording ? "Stop and review transcript" : "Start consultation recording"}
+      </button>
+    </div>
+  );
+}
+
+const PatientAiPanel = memo(function PatientAiPanel({ history, isLoading, error, patient }: { history: PatientHistory | null; isLoading: boolean; error: string | null; patient: ConsultationPatient }) {
+  return (
+    <div className="grid gap-3">
+      <VisitHistorySidebarCard history={history} isLoading={isLoading} error={error} />
+      <AiEmrSummaryCard history={history} isLoading={isLoading} error={error} />
+      <VoiceAssistantCard patient={patient} />
+    </div>
+  );
+});
+
+const EmptyPatientAiPanel = memo(function EmptyPatientAiPanel() {
+  return (
+    <div className="mt-4 grid gap-3 text-left">
+      <AiEmrSummaryCard history={null} isLoading={false} error={null} hasPatient={false} />
+      <VoiceAssistantCard patient={{ name: "Voice transcription test" }} />
     </div>
   );
 });
@@ -1203,13 +1372,14 @@ export default function KramaDoctorDashboard() {
                   </div>
 
                   <div className="mt-4">
-                    <VisitHistorySidebarCard history={patientHistory} isLoading={isHistoryLoading} error={historyError} />
+                    <PatientAiPanel history={patientHistory} isLoading={isHistoryLoading} error={historyError} patient={{ id: activePatient.patient_id || undefined, name: activePatient.name, token: activePatient.token, phone: activePatient.phone, email: activePatient.patient_email, clinicId, doctorId: selectedDoctorId, appointmentId: activePatient.appointmentId }} />
                   </div>
                 </div>
               ) : (
                 <div className="py-7 text-center">
                   <p className="mb-3 text-5xl font-extrabold text-[#d2ccc1]">--</p>
                   <p className="text-sm text-[#77756f]">No patients in queue.</p>
+                  <EmptyPatientAiPanel />
                 </div>
               )}
             </div>
@@ -1298,12 +1468,13 @@ export default function KramaDoctorDashboard() {
                     <p className="text-sm text-[#77756f]">{activePatient.token}</p>
                   </div>
                 </div>
-                <div className="grid gap-3">
-                  <VisitHistorySidebarCard history={patientHistory} isLoading={isHistoryLoading} error={historyError} />
-                </div>
+                <PatientAiPanel history={patientHistory} isLoading={isHistoryLoading} error={historyError} patient={{ id: activePatient.patient_id || undefined, name: activePatient.name, token: activePatient.token, phone: activePatient.phone, email: activePatient.patient_email, clinicId, doctorId: selectedDoctorId, appointmentId: activePatient.appointmentId }} />
               </div>
             ) : (
-              <p className="text-sm text-[#77756f]">Select a patient from the waiting queue to view details.</p>
+              <div>
+                <p className="text-sm text-[#77756f]">Select a patient from the waiting queue to view details.</p>
+                <EmptyPatientAiPanel />
+              </div>
             )}
           </div>
         </aside>

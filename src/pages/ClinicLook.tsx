@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Search, Calendar, Mail, Phone, UserCircle, Eye } from "lucide-react";
+import { ArrowLeft, Calendar, Mail, Phone, UserCircle, Eye, FileText, Loader2, ShieldCheck } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 interface PatientSearchResult {
   appointment_token: string;
@@ -14,6 +15,23 @@ interface PatientSearchResult {
   time: string;
   status: string;
 }
+
+interface EhrEncounter {
+  encounter_id: string;
+  status: string;
+  doctor_id?: string | null;
+  ehr_data: Record<string, unknown>;
+  patient_summary: Record<string, unknown>;
+  approved_at?: string | null;
+  created_at: string;
+}
+
+interface PatientEhrData {
+  patient: { patient_id: string; name: string; phone: string; blood_group?: string | null };
+  encounters: EhrEncounter[];
+}
+
+const displayList = (value: unknown) => Array.isArray(value) && value.length ? value.join(", ") : "Not recorded";
 
 const ClinicLook = () => {
   const [clinicProfile, setClinicProfile] = useState<any>(null);
@@ -29,6 +47,9 @@ const ClinicLook = () => {
   const [searchResults, setSearchResults] = useState<PatientSearchResult[]>([]);
   const [searchCount, setSearchCount] = useState(0);
   const [searching, setSearching] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [ehrData, setEhrData] = useState<PatientEhrData | null>(null);
+  const [ehrLoading, setEhrLoading] = useState(false);
 
   // Get clinic ID from localStorage
   const getClinicId = () => {
@@ -92,6 +113,31 @@ const ClinicLook = () => {
     }
   };
 
+  const viewEhr = async (selectedPatient: PatientSearchResult) => {
+    const clinicId = getClinicId();
+    if (!clinicId) return;
+    if (selectedPatientId === selectedPatient.patient_id) {
+      setSelectedPatientId("");
+      setEhrData(null);
+      return;
+    }
+    setSelectedPatientId(selectedPatient.patient_id);
+    setEhrData(null);
+    setEhrLoading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(selectedPatient.patient_id)}`));
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || "Could not load this patient's EHR");
+      setEhrData(payload);
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "Could not load this patient's EHR", type: "error" });
+      setSelectedPatientId("");
+    } finally {
+      setEhrLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-transparent">
       {/* Header */}
@@ -110,6 +156,8 @@ const ClinicLook = () => {
 
       <main className="mx-auto max-w-4xl px-4 py-6 sm:py-8">
         <h1 className="mb-5 text-2xl font-bold text-foreground sm:mb-6">Search Patients</h1>
+
+        {message ? <div className={`mb-4 rounded-2xl p-4 text-sm font-semibold ${message.type === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</div> : null}
 
         {/* Search Type Buttons */}
         <div className="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:gap-3">
@@ -259,9 +307,41 @@ const ClinicLook = () => {
                       {patient.status}
                     </span>
                   </div>
+                  <Button variant="outline" onClick={() => viewEhr(patient)} className="mt-3 w-full border-[#a9cfc0] bg-white text-[#1a5c4a] hover:bg-[#edf8f3]">
+                    {ehrLoading && selectedPatientId === patient.patient_id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                    {selectedPatientId === patient.patient_id ? "Hide EHR" : "View patient EHR"}
+                  </Button>
                 </div>
               ))}
             </div>
+
+            {selectedPatientId && ehrData ? (
+              <section className="mt-5 overflow-hidden rounded-[24px] border border-[#b9ddcf] bg-[#f4fbf8]">
+                <div className="border-b border-[#d5e9e1] p-4">
+                  <p className="flex items-center gap-2 font-bold text-[#17312d]"><ShieldCheck className="h-5 w-5" /> {ehrData.patient.name}'s EHR</p>
+                  <p className="mt-1 text-xs text-[#60766f]">Patient ID {ehrData.patient.patient_id} · Blood group {ehrData.patient.blood_group || "not recorded"}</p>
+                </div>
+                <div className="space-y-3 p-4">
+                  {ehrData.encounters.length ? ehrData.encounters.map((encounter) => {
+                    const ehr = encounter.ehr_data;
+                    return <article key={encounter.encounter_id} className="rounded-2xl bg-white p-4 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-black text-[#202825]">{new Date(encounter.approved_at || encounter.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</p>
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${encounter.status === "approved" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{encounter.status}</span>
+                      </div>
+                      <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                        <div><dt className="text-xs font-bold uppercase tracking-wide text-[#6b7d77]">Chief complaint</dt><dd className="mt-1 text-[#202825]">{String(ehr.chief_complaint || "Not recorded")}</dd></div>
+                        <div><dt className="text-xs font-bold uppercase tracking-wide text-[#6b7d77]">Diagnosis</dt><dd className="mt-1 text-[#202825]">{displayList(ehr.diagnoses)}</dd></div>
+                        <div><dt className="text-xs font-bold uppercase tracking-wide text-[#6b7d77]">Allergies</dt><dd className="mt-1 text-[#202825]">{displayList(ehr.allergies)}</dd></div>
+                        <div><dt className="text-xs font-bold uppercase tracking-wide text-[#6b7d77]">Medicines prescribed</dt><dd className="mt-1 text-[#202825]">{displayList(ehr.prescriptions)}</dd></div>
+                        <div><dt className="text-xs font-bold uppercase tracking-wide text-[#6b7d77]">Tests</dt><dd className="mt-1 text-[#202825]">{displayList(ehr.investigations)}</dd></div>
+                        <div><dt className="text-xs font-bold uppercase tracking-wide text-[#6b7d77]">Follow-up</dt><dd className="mt-1 text-[#202825]">{String(ehr.follow_up || "Not recorded")}</dd></div>
+                      </dl>
+                    </article>;
+                  }) : <div className="rounded-2xl bg-white p-6 text-center text-sm text-[#68736f]">No EHR has been created for this patient at this clinic yet.</div>}
+                </div>
+              </section>
+            ) : null}
           </div>
         )}
 
