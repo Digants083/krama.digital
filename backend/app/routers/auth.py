@@ -6232,7 +6232,7 @@ async def search_clinic_patients(
 
                 "status": apt.status,
 
-                "source": "appointment"
+                "source": getattr(apt, "source", "online")
 
             })
 

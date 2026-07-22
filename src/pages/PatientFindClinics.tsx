@@ -304,7 +304,6 @@ const PatientFindClinics = () => {
 
   const handleGPS = () => {
     setLocationLoading(true);
-    setMessage({ text: "Your browser may ask for location permission. Tap Allow to continue.", type: "success" });
 
     if (!navigator.geolocation) {
       setLocationLoading(false);
@@ -378,41 +377,42 @@ const PatientFindClinics = () => {
     : `No clinics found within ${SEARCH_RADIUS_KM} km for the selected category.`;
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur">
+    <div className="krama-ambient min-h-screen">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-white/75 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4">
           <Link
             to="/patient"
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground -ml-2"
+            className="-ml-2 flex items-center gap-2 rounded-full px-3 py-2 text-primary transition hover:bg-white/80"
           >
             <ArrowLeft className="h-5 w-5" />
-            <span className="text-sm font-medium">Dashboard</span>
+            <span className="text-sm font-bold">Dashboard</span>
           </Link>
-          <span className="font-semibold text-foreground">Find clinics</span>
+          <span className="font-display font-black text-[#17312d]">Find clinics</span>
         </div>
       </header>
 
       {message && (
         <div
-          className={`fixed top-16 right-4 z-50 rounded-lg px-6 py-3 text-white shadow-lg ${
-            message.type === "success" ? "bg-green-500" : "bg-red-500"
+          className={`fixed right-4 top-16 z-50 rounded-2xl px-4 py-3 text-sm font-bold text-white shadow-lg ${
+            message.type === "success" ? "bg-primary" : "bg-red-500"
           }`}
         >
           {message.text}
         </div>
       )}
 
-      <main className="mx-auto max-w-5xl px-4 py-5 sm:py-8">
-        <section>
+      <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-8">
+        <section className="motion-rise overflow-hidden rounded-[32px] border border-white/70 bg-white/80 p-5 shadow-[0_22px_70px_-46px_rgba(19,55,50,0.65)] backdrop-blur sm:p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-foreground">Find Clinics Near You</h1>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-primary/70">Patient search</p>
+              <h1 className="mt-2 font-display text-3xl font-black tracking-tight text-[#17312d]">Find Clinics Near You</h1>
               <p className="mt-1 text-sm leading-6 text-muted-foreground sm:text-base">
                 Nearby clinics first. Search works anywhere.
               </p>
             </div>
             {locationGranted && (
-              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary" title="Location enabled" aria-label="Location enabled">
+              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#f6f1e8] text-primary" title="Location enabled" aria-label="Location enabled">
                 <MapPin className="h-4 w-4" />
               </span>
             )}
@@ -420,19 +420,19 @@ const PatientFindClinics = () => {
         </section>
 
         {!locationGranted ? (
-          <div className="mt-10">
+          <div className="motion-rise-delayed mt-6">
             <LocationAccessCard onUseGPS={handleGPS} loading={locationLoading} />
           </div>
         ) : (
           <>
-            <div className="mt-4 space-y-3 sm:mt-6">
+            <div className="motion-rise-delayed mt-4 space-y-3 sm:mt-6">
               <div className="grid gap-3 sm:grid-cols-[1fr_16rem]">
                 <div className="flex-1">
                   <SearchBar value={search} onChange={setSearch} />
                 </div>
                 <div>
                   <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                    <SelectTrigger className="h-11 w-full rounded-2xl border-border bg-card px-4 font-semibold shadow-sm">
+                    <SelectTrigger className="h-12 w-full rounded-2xl border-white/70 bg-white/85 px-4 font-bold shadow-[0_16px_44px_-34px_rgba(19,55,50,0.7)] backdrop-blur">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
@@ -450,7 +450,7 @@ const PatientFindClinics = () => {
             <section className="mt-6 space-y-4" aria-label="Clinic list">
               {loading ? (
                 Array.from({ length: 3 }).map((_, index) => (
-                  <div key={index} className="rounded-xl border border-border p-5">
+                  <div key={index} className="rounded-[28px] border border-white/70 bg-white/70 p-5">
                     <Skeleton className="mb-3 h-5 w-48" />
                     <Skeleton className="mb-2 h-4 w-64" />
                     <Skeleton className="h-4 w-32" />
@@ -460,7 +460,7 @@ const PatientFindClinics = () => {
                 <>
                   {availableClinics.length > 0 && (
                     <div className="space-y-3">
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      <h2 className="text-sm font-black uppercase tracking-[0.16em] text-primary/70">
                         {isSearching ? "Available Matches" : "Available Nearby"}
                       </h2>
                       {availableClinics.map((clinic) => (
@@ -471,7 +471,7 @@ const PatientFindClinics = () => {
 
                   {unavailableClinics.length > 0 && (
                     <div className="space-y-3">
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      <h2 className="text-sm font-black uppercase tracking-[0.16em] text-primary/70">
                         {isSearching ? "Not Available Matches" : "Not Available Right Now"}
                       </h2>
                       {unavailableClinics.map((clinic) => (
@@ -481,7 +481,7 @@ const PatientFindClinics = () => {
                   )}
                 </>
               ) : (
-                <p className="py-12 text-center text-muted-foreground">
+                <p className="rounded-[28px] border border-white/70 bg-white/70 py-12 text-center text-muted-foreground">
                   {emptyMessage}
                 </p>
               )}

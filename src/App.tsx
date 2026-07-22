@@ -16,6 +16,7 @@ const PatientWriteReview = lazy(() => import("./pages/PatientWriteReview"));
 const PatientProfile = lazy(() => import("./pages/PatientProfile"));
 const PatientHealthRecords = lazy(() => import("./pages/PatientHealthRecords"));
 const PatientHealthSummary = lazy(() => import("./pages/PatientHealthSummary"));
+const PatientSummaryDetail = lazy(() => import("./pages/PatientSummaryDetail"));
 const ClinicDashboard = lazy(() => import("./pages/ClinicDashboardNew"));
 const DoctorDashboard = lazy(() => import("./pages/DoctorDashboard"));
 const ConsultationTranscript = lazy(() => import("./pages/ConsultationTranscript"));
@@ -24,6 +25,8 @@ const ClinicManageTime = lazy(() => import("./pages/ClinicManageTime"));
 const ClinicLook = lazy(() => import("./pages/ClinicLook"));
 const ClinicProfile = lazy(() => import("./pages/ClinicProfile"));
 const ClinicBilling = lazy(() => import("./pages/ClinicBilling"));
+
+const EhrDocumentPage = lazy(() => import("./pages/EhrDocumentPage"));
 const ClinicDetails = lazy(() => import("./pages/ClinicDetails"));
 const BookAppointment = lazy(() => import("./pages/BookAppointment"));
 const AppointmentConfirmation = lazy(() => import("./pages/AppointmentConfirmation"));
@@ -109,6 +112,7 @@ function App() {
             <Route path="/patient/profile" element={<NoHeaderLayout><PatientProfile /></NoHeaderLayout>} />
             <Route path="/patient/health-records" element={<NoHeaderLayout><PatientHealthRecords /></NoHeaderLayout>} />
             <Route path="/patient/health-summary" element={<NoHeaderLayout><PatientHealthSummary /></NoHeaderLayout>} />
+            <Route path="/patient/summary/:encounterId" element={<NoHeaderLayout><PatientSummaryDetail /></NoHeaderLayout>} />
             <Route path="/clinic-details/:id" element={<NoHeaderLayout><ClinicDetails /></NoHeaderLayout>} />
             <Route path="/book/:clinicId/:doctorId" element={<NoHeaderLayout><BookAppointment /></NoHeaderLayout>} />
             <Route path="/confirmation" element={<NoHeaderLayout><AppointmentConfirmation /></NoHeaderLayout>} />
@@ -126,6 +130,7 @@ function App() {
             <Route path="/clinic/billing" element={<NoHeaderLayout><ClinicBilling /></NoHeaderLayout>} />
             <Route path="/clinic/profile" element={<NoHeaderLayout><ClinicProfile /></NoHeaderLayout>} />
             <Route path="/clinic/reports" element={<NoHeaderLayout><ClinicPatientReports /></NoHeaderLayout>} />
+            <Route path="/clinic/patients/:patientId/encounters/:encounterId/ehr" element={<NoHeaderLayout><EhrDocumentPage /></NoHeaderLayout>} />
             <Route
             path="/doctor-dashboard" element={<NoHeaderLayout><DoctorDashboard /></NoHeaderLayout>} />
             <Route path="/doctor-dashboard/consultation-transcript" element={<NoHeaderLayout><ConsultationTranscript /></NoHeaderLayout>} />

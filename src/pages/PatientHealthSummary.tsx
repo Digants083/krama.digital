@@ -1,39 +1,48 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { Apple, ArrowLeft, Building2, CalendarDays, ChevronDown, ClipboardList, ListChecks, Sparkles, Stethoscope } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { AlertTriangle, ArrowLeft, CalendarDays, FileText, Stethoscope } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/api";
 
-type Visit = {
-  id: number;
+interface MedicineItem {
+  medicine_name: string;
+  strength?: string | null;
+  dose?: string | null;
+  duration?: string | null;
+}
+
+interface VisitSummary {
+  reason_for_visit?: string | null;
+  what_the_doctor_assessed?: string | null;
+  medicines?: (string | MedicineItem)[];
+  tests?: string[];
+  diet_and_hydration_advice?: string[];
+  doctor_instructions?: string[];
+  follow_up?: string | null;
+  when_to_seek_help?: string[];
+}
+
+interface UnifiedVisit {
+  id: number | null;
+  encounter_id: string | null;
   clinic_name: string;
-  doctor_name?: string | null;
+  doctor_name: string | null;
   date: string;
   time: string;
-  diagnosis?: string | null;
-  notes?: string | null;
-  summary?: string | null;
+  visit_type: string;
   summary_status: string;
-};
+  summary: VisitSummary | null;
+  approved_at: string | null;
+}
 
-type SummaryData = {
-  overview: { total_visits: number; clinics_visited: number; approved_ehr_count: number; summary: string };
-  visits: Visit[];
-  ehr_summaries: Array<{
-    encounter_id: string;
-    clinic_name: string;
-    approved_at?: string | null;
-    summary: {
-      visit_overview?: string | null;
-      medicines?: string[];
-      tests?: string[];
-      diet_advice?: string[];
-      doctor_suggestions?: string[];
-      instructions?: string[];
-      follow_up?: string | null;
-      warning_signs?: string[];
-    };
-  }>;
-};
+interface SummaryData {
+  overview: {
+    total_visits: number;
+    clinics_visited: number;
+    approved_ehr_count: number;
+  };
+  visits: UnifiedVisit[];
+}
 
 const getPatientId = () => {
   try {
@@ -42,17 +51,20 @@ const getPatientId = () => {
   } catch { return ""; }
 };
 
-const visitDate = (value: string) => {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const formatDate = (dateStr: string) => {
+  try {
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  } catch { return dateStr; }
 };
 
 export default function PatientHealthSummary() {
+  const navigate = useNavigate();
   const patientId = useMemo(getPatientId, []);
   const [data, setData] = useState<SummaryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [openVisit, setOpenVisit] = useState<number | null>(null);
 
   useEffect(() => {
     if (!patientId) { setError("Please sign in again to view your summary."); setLoading(false); return; }
@@ -65,76 +77,144 @@ export default function PatientHealthSummary() {
     return () => controller.abort();
   }, [patientId]);
 
+  const viewSummary = (visit: UnifiedVisit) => {
+    if (!visit.encounter_id) return;
+    navigate(`/patient/summary/${encodeURIComponent(visit.encounter_id)}`);
+  };
+
+  const overview = data?.overview;
+  const visits = data?.visits || [];
+
   return (
     <div className="min-h-screen bg-transparent">
-      <main className="mx-auto flex w-full max-w-md flex-col gap-4 px-4 pb-8 pt-5 sm:max-w-xl sm:px-6 md:max-w-2xl">
+      <main className="mx-auto flex w-full max-w-md flex-col gap-5 px-4 pb-8 pt-5 sm:max-w-xl sm:px-6 md:max-w-2xl">
+        {/* Header */}
         <header className="flex items-center gap-3">
           <Link to="/patient" className="grid h-11 w-11 place-items-center rounded-2xl bg-white/80 text-[#17312d]" aria-label="Back"><ArrowLeft className="h-5 w-5" /></Link>
-          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-primary/70">Your health</p><h1 className="font-display text-2xl font-bold text-[#17312d]">Your summary</h1></div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary/70">Your health</p>
+            <h1 className="font-display text-2xl font-bold text-[#17312d]">Patient Summaries</h1>
+          </div>
         </header>
 
-        {loading ? <div className="rounded-[26px] bg-white/80 p-8 text-center text-sm text-slate-500">Preparing your visit history...</div> : error ? <div className="rounded-[26px] bg-red-50 p-5 text-sm font-semibold text-red-700">{error}</div> : data ? <>
-          <section className="rounded-[30px] bg-[#143b34] p-5 text-white">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.15em] text-white/60"><Sparkles className="h-4 w-4" /> Health overview</div>
-            <p className="mt-3 text-lg font-bold leading-7">{data.overview.summary}</p>
-            <div className="mt-5 grid grid-cols-3 gap-2">
-              <div className="rounded-2xl bg-white/10 p-3"><p className="text-2xl font-black">{data.overview.total_visits}</p><p className="text-xs text-white/65">Clinic visits</p></div>
-              <div className="rounded-2xl bg-white/10 p-3"><p className="text-2xl font-black">{data.overview.clinics_visited}</p><p className="text-xs text-white/65">Clinics visited</p></div>
-              <div className="rounded-2xl bg-white/10 p-3"><p className="text-2xl font-black">{data.overview.approved_ehr_count || 0}</p><p className="text-xs text-white/65">Approved summaries</p></div>
-            </div>
-          </section>
-
-          {data.ehr_summaries?.length ? <section className="rounded-[26px] border border-[#b9ddcf] bg-[#f4fbf8] p-5">
-            <div className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-[#1a5c4a]" /><h2 className="font-bold text-slate-950">Doctor-approved summaries</h2></div>
-            <p className="mt-1 text-xs leading-5 text-[#60766f]">Simple instructions from your approved clinic records. Follow the prescription shared by your doctor.</p>
-            <div className="mt-4 space-y-3">{data.ehr_summaries.map((record) => {
-              const summary = record.summary || {};
-              const groups = [
-                ["Medicines", summary.medicines || []],
-                ["Tests", summary.tests || []],
-                ["Other instructions", summary.instructions || []],
-                ["When to seek help", summary.warning_signs || []],
-              ] as const;
-              return <article key={record.encounter_id} className="rounded-2xl bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div><p className="font-bold text-[#202825]">{record.clinic_name}</p><p className="mt-0.5 text-xs text-[#77756f]">Approved {record.approved_at ? new Date(record.approved_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "by your doctor"}</p></div>
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800">Doctor approved</span>
+        {loading ? (
+          <div className="rounded-[26px] bg-white/80 p-8 text-center text-sm text-slate-500">Loading your visit history...</div>
+        ) : error ? (
+          <div className="rounded-[26px] bg-red-50 p-5 text-sm font-semibold text-red-700">{error}</div>
+        ) : data && visits.length === 0 ? (
+          <div className="rounded-[26px] bg-white/80 p-8 text-center">
+            <Stethoscope className="mx-auto h-8 w-8 text-slate-300" />
+            <p className="mt-3 text-sm text-slate-500">No completed clinic visits yet.</p>
+          </div>
+        ) : data ? (
+          <>
+            {/* Compact Health Overview */}
+            {overview ? (
+              <section className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-sm sm:flex-nowrap sm:gap-4">
+                <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#58716a]">Health Overview</span>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700">
+                  <span><strong className="text-[#1a5c4a]">{overview.total_visits}</strong> {overview.total_visits === 1 ? "visit" : "visits"}</span>
+                  <span className="hidden sm:inline text-slate-300">|</span>
+                  <span><strong className="text-[#1a5c4a]">{overview.clinics_visited}</strong> {overview.clinics_visited === 1 ? "clinic" : "clinics"}</span>
+                  <span className="hidden sm:inline text-slate-300">|</span>
+                  <span><strong className="text-[#1a5c4a]">{overview.approved_ehr_count}</strong> {overview.approved_ehr_count === 1 ? "summary" : "summaries"} available</span>
                 </div>
-                {summary.visit_overview ? <p className="mt-3 text-sm font-semibold leading-6 text-[#30443e]">{summary.visit_overview}</p> : null}
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-xl bg-amber-50 p-3 text-amber-900">
-                    <p className="flex items-center gap-2 text-xs font-black uppercase tracking-wide"><Apple className="h-4 w-4" />Diet & hydration</p>
-                    {summary.diet_advice?.length ? <ul className="mt-2 space-y-1 text-sm leading-5">{summary.diet_advice.map((item) => <li key={item}>• {item}</li>)}</ul> : <p className="mt-2 text-xs text-amber-800/65">No specific diet advice was recorded.</p>}
-                  </div>
-                  <div className="rounded-xl bg-[#edf8f3] p-3 text-[#1a5c4a]">
-                    <p className="flex items-center gap-2 text-xs font-black uppercase tracking-wide"><ListChecks className="h-4 w-4" />Doctor suggestions</p>
-                    {summary.doctor_suggestions?.length ? <ul className="mt-2 space-y-1 text-sm leading-5">{summary.doctor_suggestions.map((item) => <li key={item}>• {item}</li>)}</ul> : <p className="mt-2 text-xs text-[#1a5c4a]/65">No additional suggestions were recorded.</p>}
-                  </div>
-                </div>
-                <div className="mt-3 space-y-3">{groups.filter(([, items]) => items.length).map(([label, items]) => <div key={label}><p className="text-xs font-black uppercase tracking-wide text-[#1a5c4a]">{label}</p><ul className="mt-1 space-y-1 text-sm leading-5 text-[#40514b]">{items.map((item) => <li key={item}>• {item}</li>)}</ul></div>)}</div>
-                {summary.follow_up ? <div className="mt-3 rounded-xl bg-[#edf8f3] p-3"><p className="text-xs font-black uppercase tracking-wide text-[#1a5c4a]">Follow-up</p><p className="mt-1 text-sm text-[#30443e]">{summary.follow_up}</p></div> : null}
-              </article>;
-            })}</div>
-          </section> : null}
+              </section>
+            ) : null}
 
-          <section className="rounded-[26px] border border-white/70 bg-white/80 p-5">
-            <div className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-[#1a5c4a]" /><h2 className="font-bold text-slate-950">All clinic visits</h2></div>
-            {data.visits.length ? <div className="mt-4 space-y-3">{data.visits.map((visit) => {
-              const isOpen = openVisit === visit.id;
-              return <article key={visit.id} className="overflow-hidden rounded-2xl bg-[#f6f1e8]">
-                <button type="button" onClick={() => setOpenVisit(isOpen ? null : visit.id)} className="flex w-full items-center gap-3 p-4 text-left">
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-[#1a5c4a]"><Stethoscope className="h-5 w-5" /></span>
-                  <span className="min-w-0 flex-1"><span className="block truncate font-bold text-[#202825]">{visit.clinic_name}</span><span className="mt-1 flex items-center gap-1 text-xs text-[#77756f]"><CalendarDays className="h-3.5 w-3.5" />{visitDate(visit.date)}{visit.doctor_name ? ` · ${visit.doctor_name}` : ""}</span></span>
-                  <ChevronDown className={`h-5 w-5 text-slate-400 transition ${isOpen ? "rotate-180" : ""}`} />
-                </button>
-                {isOpen ? <div className="border-t border-[#e6ded3] px-4 pb-4 pt-3">
-                  {visit.summary ? <p className="text-sm leading-6 text-[#40514b]">{visit.summary}</p> : <p className="text-sm leading-6 text-[#77756f]">The visit is recorded. A clinical summary will appear after the doctor creates and approves it.</p>}
-                  {visit.diagnosis ? <p className="mt-3 text-xs font-bold uppercase tracking-wide text-[#1a5c4a]">Diagnosis recorded</p> : null}
-                </div> : null}
-              </article>;
-            })}</div> : <div className="mt-4 rounded-2xl bg-[#f6f1e8] p-5 text-center"><Building2 className="mx-auto h-6 w-6 text-slate-400" /><p className="mt-2 text-sm text-slate-500">No completed clinic visits yet.</p></div>}
-          </section>
-        </> : null}
+            {/* My Clinic Visits */}
+            <section>
+              <h2 className="flex items-center gap-2 text-base font-bold text-slate-950">
+                <CalendarDays className="h-4 w-4 text-[#1a5c4a]" /> My Clinic Visits
+              </h2>
+
+              <div className="mt-3 space-y-3">
+                {visits.map((visit, idx) => (
+                  <article key={visit.encounter_id || `visit-${visit.id || idx}`} className="overflow-hidden rounded-2xl border border-[#e6ded3] bg-white">
+                    <div className="p-4">
+                      {/* Header row */}
+                      <p className="text-xs font-bold uppercase tracking-wide text-[#58716a]">{formatDate(visit.date)}</p>
+                      <p className="mt-1 text-base font-bold text-[#202825]">
+                        {visit.doctor_name ? `Dr. ${visit.doctor_name.replace(/^Dr\.?\s*/i, "")}` : "Doctor"}
+                      </p>
+                      <p className="mt-0.5 text-sm text-[#77756f]">
+                        {visit.clinic_name}{visit.visit_type ? <span> \u2022 {visit.visit_type === "online" ? "Online consultation" : "In-clinic visit"}</span> : null}
+                      </p>
+
+                      {/* Status badge */}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {visit.summary_status === "available" ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Summary available
+                          </span>
+                        ) : visit.summary_status === "being_prepared" ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Summary being prepared
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 italic">No summary for this visit</span>
+                        )}
+                      </div>
+
+                      {/* Inline summary preview */}
+                      {visit.summary && visit.summary_status === "available" ? (
+                        <div className="mt-3 rounded-lg border border-[#d9eae2] bg-[#f4fbf8] p-3 text-sm">
+                          {visit.summary.reason_for_visit ? (
+                            <p className="text-xs font-semibold text-[#17312d]">
+                              <span className="uppercase tracking-wide text-[#58716a]">Reason: </span>
+                              {visit.summary.reason_for_visit}
+                            </p>
+                          ) : null}
+                          {visit.summary.what_the_doctor_assessed ? (
+                            <p className="mt-1.5 text-xs text-[#40514b]">
+                              <span className="font-semibold uppercase tracking-wide text-[#58716a]">Assessment: </span>
+                              {visit.summary.what_the_doctor_assessed.length > 120
+                                ? visit.summary.what_the_doctor_assessed.slice(0, 120) + "..."
+                                : visit.summary.what_the_doctor_assessed}
+                            </p>
+                          ) : null}
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#40514b]">
+                            {visit.summary.medicines?.length ? (
+                              <span><span className="font-semibold text-[#58716a]">Medicines:</span> {visit.summary.medicines.slice(0, 3).map((m) => typeof m === "object" ? m.medicine_name : String(m)).join(", ")}{visit.summary.medicines.length > 3 ? ` +${visit.summary.medicines.length - 3} more` : ""}</span>
+                            ) : null}
+                            {visit.summary.tests?.length ? (
+                              <span><span className="font-semibold text-[#58716a]">Tests:</span> {visit.summary.tests.slice(0, 2).join(", ")}{visit.summary.tests.length > 2 ? ` +${visit.summary.tests.length - 2} more` : ""}</span>
+                            ) : null}
+                            {visit.summary.follow_up ? (
+                              <span><span className="font-semibold text-[#58716a]">Follow-up:</span> {visit.summary.follow_up.length > 60 ? visit.summary.follow_up.slice(0, 60) + "..." : visit.summary.follow_up}</span>
+                            ) : null}
+                          </div>
+                          {visit.summary.when_to_seek_help?.length ? (
+                            <div className="mt-2 flex items-start gap-1.5 rounded bg-red-50 px-2 py-1.5 text-[11px] text-red-700">
+                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                              <span>Warning signs recorded — <button onClick={() => viewSummary(visit)} className="font-bold underline">see full summary</button></span>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {/* Action button */}
+                      {visit.summary_status === "available" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => viewSummary(visit)}
+                          className="mt-3 w-full border-[#a9cfc0] bg-white text-[#1a5c4a] hover:bg-[#edf8f3] sm:w-auto"
+                        >
+                          <FileText className="mr-1.5 h-3.5 w-3.5" /> View Full Summary
+                        </Button>
+                      ) : visit.summary_status === "being_prepared" ? (
+                        <Button variant="outline" size="sm" disabled className="mt-3 opacity-50 sm:w-auto">
+                          <FileText className="mr-1.5 h-3.5 w-3.5" /> View Summary
+                        </Button>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </>
+        ) : null}
       </main>
     </div>
   );
