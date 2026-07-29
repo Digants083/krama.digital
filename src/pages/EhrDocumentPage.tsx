@@ -1,8 +1,10 @@
-import { useEffect, useState, useMemo, useRef, type ReactNode } from "react";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { isValidElement, useEffect, useState, useMemo, useRef, type ReactNode } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Printer, Download, Loader2, ShieldCheck, FileText, Stethoscope, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Printer, Download, Loader2, ShieldCheck, Stethoscope, AlertTriangle } from "lucide-react";
 import { apiUrl } from "@/lib/api";
+import { medicationMealCode, medicationWhenToTake } from "@/lib/medicationDisplay";
+import { EMPTY_ASSESSMENT_MESSAGE, EMPTY_PLAN_MESSAGE, hasAssessmentContent as assessmentHasContent, hasPlanContent as planHasContent } from "@/lib/soapPresentation";
 
 interface EhrEncounter {
   encounter_id: string;
@@ -46,7 +48,8 @@ interface PatientEhrData {
 }
 
 function isSoapFormat(data: Record<string, unknown>): boolean {
-  return !!(data.schema_version || data.subjective || data.visit_details);
+  const sv = data.schema_version;
+  return !!(sv === "1.0" || sv === "1.1" || data.subjective || data.visit_details);
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -54,21 +57,39 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 function hasValue(value: unknown): boolean {
   if (value == null || value === "") return false;
+  // A rendered React node is already display-ready. Never recursively walk
+  // its internal element/fiber object as though it were clinical JSON.
+  if (isValidElement(value)) return true;
   if (typeof value === "boolean") return true;
   if (typeof value === "number") return true;
   if (Array.isArray(value)) return value.some(hasValue);
   if (typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).some(hasValue);
+    const obj = value as Record<string, unknown>;
+    if ("value" in obj) return obj.value != null && String(obj.value).trim() !== "";
+    if ("systolic" in obj || "diastolic" in obj) return obj.systolic != null || obj.diastolic != null;
+    return Object.values(obj).some(hasValue);
   }
   return String(value).trim().length > 0;
 }
 
+function hasObjectContent(value: unknown, ...keys: string[]): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const obj = value as Record<string, unknown>;
+  return keys.length === 0
+    ? Object.values(obj).some((v) => hasValue(v) && v !== false)
+    : keys.some((k) => {
+        const v = obj[k];
+        if (typeof v === "boolean") return v === true;
+        return hasValue(v);
+      });
+}
+
 function isImportantField(field: string): boolean {
   const important = [
-    "chief_complaints", "history_of_present_illness", "symptoms",
-    "clinical_impression", "diagnosis_status", "provisional_diagnoses",
-    "confirmed_diagnoses", "prescriptions", "follow_up",
-    "allergies", "current_medicines", "vitals",
+    "chief_complaints", "history_of_present_illness",
+    "clinical_impression", "diagnoses", "medications",
+    "follow_up", "allergies", "current_medications",
+    "vitals", "advice", "warning_signs", "referral",
   ];
   return important.includes(field);
 }
@@ -106,6 +127,9 @@ const PAGE_CSS = `
     .ehr-action-bar, .no-print { display: none !important; }
     .ehr-page-wrapper { max-width: none !important; padding: 0 !important; margin: 0 !important; background: #fff !important; }
     .ehr-document { overflow: visible !important; max-width: none !important; box-shadow: none !important; border: none !important; border-radius: 0 !important; margin: 0 !important; }
+    .ehr-print-page-2-start, .ehr-print-page-3-start { break-before: page !important; page-break-before: always !important; }
+    [data-ehr-header], [data-ehr-section] > div:first-child, table, tr { break-inside: avoid; page-break-inside: avoid; }
+    [data-ehr-section] { margin-top: 0 !important; }
     .print-only { display: block !important; }
   }
   .print-only { display: none; }
@@ -113,6 +137,7 @@ const PAGE_CSS = `
 
 function renderClinicalValue(value: unknown, depth = 0): ReactNode {
   if (!hasValue(value)) return null;
+  if (isValidElement(value)) return value;
   if (typeof value === "boolean") return <span>{value ? "Yes" : "No"}</span>;
   if (typeof value === "number" || typeof value === "string") {
     return <span>{String(value)}</span>;
@@ -218,53 +243,6 @@ function renderFieldWide(label: string, value: unknown): ReactNode {
   return <div className="sm:col-span-2">{node}</div>;
 }
 
-function renderSymptomsTable(symptoms: unknown): ReactNode {
-  if (!hasValue(symptoms)) return null;
-  if (Array.isArray(symptoms)) {
-    const items = symptoms.filter(hasValue);
-    if (items.length === 0) return null;
-    const isSimple = items.every((i) => typeof i === "string" || typeof i === "number");
-    if (isSimple) {
-      return renderClinicalValue(symptoms);
-    }
-    return (
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr className="border-b border-slate-300 bg-slate-50">
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Symptom</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Duration</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Severity</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, i) => {
-              if (typeof item === "object" && item !== null) {
-                const o = item as Record<string, unknown>;
-                return (
-                  <tr key={i} className="border-b border-slate-100">
-                    <td className="px-3 py-2 font-medium">{String(o.name || o.symptom_name || o.symptom || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.duration || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.severity || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.source || "")}</td>
-                  </tr>
-                );
-              }
-              return (
-                <tr key={i} className="border-b border-slate-100">
-                  <td colSpan={4} className="px-3 py-2">{String(item)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-  return renderClinicalValue(symptoms);
-}
-
 function renderVitalsGrid(vitals: unknown): ReactNode {
   if (!hasValue(vitals)) return null;
   if (typeof vitals === "object" && !Array.isArray(vitals)) {
@@ -280,13 +258,15 @@ function renderVitalsGrid(vitals: unknown): ReactNode {
           if (typeof val === "object" && val !== null) {
             const v = val as Record<string, unknown>;
             if ("value" in v && "unit" in v) {
-              displayValue = `${String(v.value)}${v.unit ? " " + String(v.unit) : ""}`;
+              const raw = v.value;
+              displayValue = raw != null ? `${String(raw)}${v.unit ? " " + String(v.unit) : ""}` : "";
             } else if ("systolic" in v || "diastolic" in v) {
-              const sys = hasValue(v.systolic) ? String(v.systolic) : "-";
-              const dia = hasValue(v.diastolic) ? String(v.diastolic) : "-";
-              displayValue = `${sys}/${dia}`;
+              const sys = hasValue(v.systolic) ? String(v.systolic) : "";
+              const dia = hasValue(v.diastolic) ? String(v.diastolic) : "";
+              displayValue = sys || dia ? `${sys}/${dia}` : "";
             } else if ("value" in v) {
-              displayValue = String(v.value);
+              const raw = v.value;
+              displayValue = raw != null ? String(raw) : "";
             } else {
               displayValue = Object.values(v).filter(hasValue).join(", ");
             }
@@ -294,10 +274,11 @@ function renderVitalsGrid(vitals: unknown): ReactNode {
           } else {
             displayValue = String(val);
           }
+          if (!displayValue) return null;
           return (
             <div key={key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div className="text-[10px] font-bold uppercase tracking-wide text-[#58716a]">{label}</div>
-              <div className="mt-0.5 text-base font-bold text-slate-800">{displayValue || "\u2014"}</div>
+              <div className="mt-0.5 text-base font-bold text-slate-800">{displayValue}</div>
               {source ? <div className="mt-0.5 text-[10px] text-slate-500">Source: {source}</div> : null}
             </div>
           );
@@ -308,63 +289,40 @@ function renderVitalsGrid(vitals: unknown): ReactNode {
   return renderClinicalValue(vitals);
 }
 
-function renderPrescriptionsTable(prescriptions: unknown): ReactNode {
-  if (!hasValue(prescriptions)) return null;
-  if (Array.isArray(prescriptions)) {
-    const items = prescriptions.filter(hasValue);
+function renderChiefComplaintsTable(complaints: unknown): ReactNode {
+  if (!hasValue(complaints)) return null;
+  if (Array.isArray(complaints)) {
+    const items = complaints.filter(hasValue);
     if (items.length === 0) return null;
-    const hasDetails = items.some(
-      (i) => typeof i === "object" && i !== null && ("dose" in i || "frequency" in i || "strength" in i || "duration" in i)
-    );
-    if (!hasDetails) {
-      return renderClinicalValue(prescriptions);
-    }
+    const isSimple = items.every((i) => typeof i === "string" || typeof i === "number");
+    if (isSimple) return renderClinicalValue(complaints);
     return (
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="border-b border-slate-300 bg-slate-50">
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Medicine</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Strength</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Dose</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Morning</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Afternoon</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Night</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Meal</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Timing</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Frequency</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Duration</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">PRN</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Indication</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Instructions</th>
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Current symptom</th>
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Severity</th>
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Course</th>
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Since / duration</th>
             </tr>
           </thead>
           <tbody>
             {items.map((item, i) => {
               if (typeof item === "object" && item !== null) {
                 const o = item as Record<string, unknown>;
-                const schedule = (o.schedule && typeof o.schedule === "object" && !Array.isArray(o.schedule) ? o.schedule as Record<string, unknown> : {}) as Record<string, unknown>;
                 return (
                   <tr key={i} className="border-b border-slate-100">
-                    <td className="px-3 py-2 font-medium">{String(o.medicine_name || o.name || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.strength || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.dose || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(schedule.morning || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(schedule.afternoon || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(schedule.night || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.meal_timing || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.specific_timing || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.frequency || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.duration || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{o.as_needed ? "Yes" : ""}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.indication || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.additional_instructions || "")}</td>
+                    <td className="px-3 py-2 font-medium">{String(o.complaint || "")}</td>
+                    <td className="px-3 py-2 text-slate-600">{String(o.severity || "\u2014")}</td>
+                    <td className="px-3 py-2 text-slate-600">{String(o.course || "\u2014")}</td>
+                    <td className="px-3 py-2 text-slate-600">{String(o.duration || "\u2014")}</td>
                   </tr>
                 );
               }
               return (
                 <tr key={i} className="border-b border-slate-100">
-                  <td colSpan={13} className="px-3 py-2 italic text-slate-400">{String(item)}</td>
+                  <td colSpan={4} className="px-3 py-2">{String(item)}</td>
                 </tr>
               );
             })}
@@ -373,12 +331,108 @@ function renderPrescriptionsTable(prescriptions: unknown): ReactNode {
       </div>
     );
   }
-  return renderClinicalValue(prescriptions);
+  return renderClinicalValue(complaints);
 }
 
-function EhrSection({ title, code, children }: { title: string; code?: string; children: ReactNode }) {
+function renderCurrentMedicationsTable(medications: unknown): ReactNode {
+  if (!hasValue(medications)) return null;
+  if (Array.isArray(medications)) {
+    const items = medications.filter(hasValue);
+    if (items.length === 0) return null;
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="border-b border-slate-300 bg-slate-50">
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Medicine</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, i) => {
+              if (typeof item === "object" && item !== null) {
+                const o = item as Record<string, unknown>;
+                return (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="px-3 py-2 font-medium">{String(o.name || "")}</td>
+                  </tr>
+                );
+              }
+              return (
+                <tr key={i} className="border-b border-slate-100">
+                  <td className="px-3 py-2 italic text-slate-400">{String(item)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return renderClinicalValue(medications);
+}
+
+function renderDiagnosesTable(diagnoses: unknown): ReactNode {
+  if (!hasValue(diagnoses)) return null;
+  if (Array.isArray(diagnoses)) {
+    const items = diagnoses.filter(hasValue);
+    if (items.length === 0) return null;
+    const isSimple = items.every((i) => typeof i === "string" || typeof i === "number");
+    if (isSimple) return renderClinicalValue(diagnoses);
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="border-b border-slate-300 bg-slate-50">
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Diagnosis</th>
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Status</th>
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, i) => {
+              if (typeof item === "object" && item !== null) {
+                const o = item as Record<string, unknown>;
+                const status = String(o.status || "");
+                const statusBadge = status === "confirmed" ? "bg-emerald-100 text-emerald-800" :
+                                   status === "provisional" ? "bg-amber-100 text-amber-800" :
+                                   status === "differential" ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-800";
+                return (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="px-3 py-2 font-medium">{String(o.name || "")}</td>
+                    <td className="px-3 py-2">
+                      {status ? <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${statusBadge}`}>{status}</span> : null}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600 font-mono text-[10px]">{String(o.code || "")}</td>
+                  </tr>
+                );
+              }
+              return (
+                <tr key={i} className="border-b border-slate-100">
+                  <td colSpan={3} className="px-3 py-2">{String(item)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return renderClinicalValue(diagnoses);
+}
+
+function renderPlanMedicationsTable(medications: unknown): ReactNode {
+  if (!hasValue(medications)) return null;
+  if (Array.isArray(medications)) {
+    const items = medications.filter(hasValue);
+    if (items.length === 0) return null;
+    return <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[680px] border-collapse text-xs"><thead><tr className="bg-[#edf7f3] text-[#365c51]"><th className="px-3 py-2 text-left font-black">Medicine</th><th className="px-3 py-2 text-left font-black">Dosage</th><th className="px-3 py-2 text-left font-black">When to take</th><th className="px-3 py-2 text-left font-black">AF / BF</th><th className="px-3 py-2 text-left font-black">Duration</th></tr></thead><tbody>{items.map((item, i) => { if (!item || typeof item !== "object") return <tr key={i}><td colSpan={5} className="px-3 py-2">{String(item)}</td></tr>; const rx = item as Record<string, unknown>; const when = medicationWhenToTake(rx); const meal = medicationMealCode(rx); return <tr key={i} className="border-t border-slate-200"><td className="px-3 py-2 font-bold">{String(rx.medicine_name || rx.name || "Medicine")}</td><td className="px-3 py-2">{String(rx.dose || "—")}</td><td className="px-3 py-2">{when || "—"}</td><td className="px-3 py-2 font-bold">{meal || "—"}</td><td className="px-3 py-2">{String(rx.duration || "—")}</td></tr>; })}</tbody></table></div>;
+  }
+  return renderClinicalValue(medications);
+}
+
+function EhrSection({ title, code, children, className = "" }: { title: string; code?: string; children: ReactNode; className?: string }) {
   return (
-    <section data-ehr-section className="border-t-2 border-[#17312d] pt-3">
+    <section data-ehr-section className={`border-t-2 border-[#17312d] pt-3 ${className}`}>
       <div className="mb-4 flex items-center gap-2">
         {code ? <span className="grid h-7 w-7 place-items-center rounded-md bg-[#17312d] text-xs font-black text-white">{code}</span> : null}
         <h3 className="text-sm font-black uppercase tracking-[0.13em] text-[#17312d]">{title}</h3>
@@ -403,11 +457,11 @@ function ClinicalSnapshot({ encounter, patient }: { encounter: EhrEncounter; pat
   if (hasValue(subjective.history_of_present_illness)) items.push({ label: "HPI", value: subjective.history_of_present_illness });
   if (hasValue(objective.vitals)) items.push({ label: "Vitals", value: objective.vitals });
   if (hasValue(subjective.allergies)) items.push({ label: "Allergies", value: subjective.allergies });
-  if (hasValue(subjective.current_medicines)) items.push({ label: "Current medicines", value: subjective.current_medicines });
+  if (hasValue(subjective.current_medications)) items.push({ label: "Current medications", value: subjective.current_medications });
+  if (hasValue(subjective.family_history)) items.push({ label: "Family history", value: subjective.family_history });
+  if (hasValue(subjective.social_history)) items.push({ label: "Social history", value: subjective.social_history });
   if (hasValue(assessment.clinical_impression)) items.push({ label: "Impression", value: assessment.clinical_impression });
-  if (hasValue(assessment.provisional_diagnoses) || hasValue(assessment.confirmed_diagnoses)) {
-    items.push({ label: "Diagnosis", value: assessment.provisional_diagnoses || assessment.confirmed_diagnoses });
-  }
+  if (hasValue(assessment.confirmed_diagnosis) || hasValue(assessment.provisional_diagnosis)) items.push({ label: "Diagnosis", value: assessment.confirmed_diagnosis || assessment.provisional_diagnosis });
   if (hasValue(plan.follow_up)) items.push({ label: "Follow-up", value: plan.follow_up });
 
   if (items.length === 0) return null;
@@ -432,7 +486,6 @@ function ClinicalSnapshot({ encounter, patient }: { encounter: EhrEncounter; pat
 const EhrDocumentPage = () => {
   const { patientId, encounterId } = useParams<{ patientId: string; encounterId: string }>();
   const navigate = useNavigate();
-  const location = useLocation();
   const docRef = useRef<HTMLDivElement>(null);
 
   const [data, setData] = useState<PatientEhrData | null>(null);
@@ -483,7 +536,9 @@ const EhrDocumentPage = () => {
   }, [encounter]);
 
   const goBack = () => {
-    navigate("/clinic/look");
+    const params = new URLSearchParams(window.location.search);
+    const returnTo = params.get("return");
+    navigate(returnTo || "/clinic/look");
   };
 
   const printEhr = () => {
@@ -571,42 +626,23 @@ const EhrDocumentPage = () => {
   const hasSubjectiveContent = isSoap && (
     hasValue(subjective.chief_complaints) ||
     hasValue(subjective.history_of_present_illness) ||
-    hasValue(subjective.symptoms) ||
-    hasValue(subjective.associated_symptoms) ||
     hasValue(subjective.relevant_negatives) ||
     hasValue(subjective.medical_conditions) ||
-    hasValue(subjective.previous_surgeries) ||
     hasValue(subjective.allergies) ||
-    hasValue(subjective.current_medicines) ||
+    hasValue(subjective.current_medications) ||
     hasValue(subjective.family_history) ||
     hasValue(subjective.social_history)
   );
 
   const hasObjectiveContent = isSoap && (
     hasValue(objective.vitals) ||
-    hasValue(objective.examination_findings) ||
-    hasValue(objective.available_test_results)
+    hasObjectContent(objective.physical_examination, "general", "respiratory", "cardiovascular", "ent", "abdomen", "neurological", "other") ||
+    hasValue(objective.investigations)
   );
 
-  const hasAssessmentContent = isSoap && (
-    hasValue(assessment.clinical_impression) ||
-    hasValue(assessment.diagnosis_status) ||
-    hasValue(assessment.provisional_diagnoses) ||
-    hasValue(assessment.confirmed_diagnoses) ||
-    hasValue(assessment.differential_diagnoses)
-  );
+  const hasAssessmentContent = isSoap && assessmentHasContent(assessment);
 
-  const hasPlanContent = isSoap && (
-    hasValue(plan.prescriptions) ||
-    hasValue(plan.tests_ordered) ||
-    hasValue(plan.procedures) ||
-    hasValue(plan.treatment_advice) ||
-    hasValue(plan.diet_and_hydration_advice) ||
-    hasValue(plan.referrals) ||
-    hasValue(plan.follow_up) ||
-    hasValue(plan.warning_signs) ||
-    hasValue(plan.other_instructions)
-  );
+  const hasPlanContent = isSoap && planHasContent(plan);
 
   const legacyEntries = Object.entries(ehr).filter(
     ([key]) => !["schema_version", "visit_details", "approval", "subjective", "objective", "assessment", "plan", "additional_clinical_information", "private_doctor_notes"].includes(key)
@@ -616,7 +652,6 @@ const EhrDocumentPage = () => {
     <div className="min-h-screen bg-[#e8ecea]">
       <style>{PAGE_CSS}</style>
 
-      {/* Sticky Action Bar */}
       <div className="ehr-action-bar sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur shadow-sm">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-2 px-4 py-2.5">
           <Button onClick={goBack} variant="ghost" size="sm" className="shrink-0 text-slate-700 hover:bg-slate-100">
@@ -630,27 +665,6 @@ const EhrDocumentPage = () => {
               {pdfDownloading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
               {pdfDownloading ? "Preparing..." : "Download PDF"}
             </Button>
-            {!isApproved ? (
-              <Button variant="outline" size="sm" className="border-amber-300 bg-white text-amber-700 hover:bg-amber-50"
-                onClick={() => navigate("/doctor-dashboard/consultation-transcript", {
-                  state: {
-                    editEncounter: {
-                      encounterId,
-                      clinicId,
-                      patientId,
-                      patientName: patient.name,
-                      patientPhone: patient.phone,
-                      doctorId: encounter.doctor_id,
-                    }
-                  }
-                })}>
-                <FileText className="mr-1.5 h-3.5 w-3.5" /> Edit EHR
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" className="border-purple-300 bg-white text-purple-700 hover:bg-purple-50">
-                <FileText className="mr-1.5 h-3.5 w-3.5" /> Add Addendum
-              </Button>
-            )}
           </div>
         </div>
         {pdfError ? (
@@ -660,10 +674,8 @@ const EhrDocumentPage = () => {
         ) : null}
       </div>
 
-      {/* Document Container */}
       <div className="ehr-page-wrapper mx-auto max-w-4xl px-4 py-6 sm:py-8">
         <div ref={docRef} className="ehr-document mx-auto overflow-hidden rounded-sm border border-slate-300 bg-white text-slate-900 shadow-lg">
-          {/* Document Header */}
           <header data-ehr-header className="border-b-4 border-[#1a5c4a] bg-[#17312d] px-5 py-5 text-white sm:px-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -688,7 +700,6 @@ const EhrDocumentPage = () => {
           </header>
 
           <div className="space-y-6 px-5 py-5 sm:px-8">
-            {/* Patient and Visit Information */}
             <section className="grid gap-0 overflow-hidden rounded-lg border border-slate-300 sm:grid-cols-2">
               <div className="border-b border-slate-300 bg-slate-50 p-4 sm:border-b-0 sm:border-r">
                 <p className="text-[10px] font-black uppercase tracking-[0.13em] text-[#58716a]">Patient information</p>
@@ -713,44 +724,49 @@ const EhrDocumentPage = () => {
               </div>
             </section>
 
-            {/* Clinical Snapshot */}
             <ClinicalSnapshot encounter={encounter} patient={patient} />
 
-            {/* Full SOAP EHR */}
             {isSoap ? (
               <>
                 {hasSubjectiveContent ? (
-                  <EhrSection code="S" title="Subjective \u2014 Patient history">
+                  <EhrSection code="S" title="Subjective \u2014 Patient history" className="ehr-print-page-2-start">
                     <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                      {renderField("Chief complaints", subjective.chief_complaints)}
+                      {(() => {
+                        const node = renderChiefComplaintsTable(subjective.chief_complaints);
+                        if (!node) return isImportantField("chief_complaints") ? (
+                          <div className="border-b border-slate-200 pb-3 sm:col-span-2">
+                            <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Chief Complaints</dt>
+                            <dd className="mt-1.5 text-sm italic text-slate-400">No chief complaints recorded</dd>
+                          </div>
+                        ) : null;
+                        return (
+                          <div className="border-b border-slate-200 pb-3 sm:col-span-2">
+                            <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Chief Complaints</dt>
+                            <dd className="mt-1.5">{node}</dd>
+                          </div>
+                        );
+                      })()}
                       {renderField("History of present illness", subjective.history_of_present_illness)}
-                      <div className="sm:col-span-2">
-                        {(() => {
-                          const s = renderSymptomsTable(subjective.symptoms);
-                          if (!s && isImportantField("symptoms")) {
-                            return (
-                              <div className="border-b border-slate-200 pb-3">
-                                <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Symptoms</dt>
-                                <dd className="mt-1.5 text-sm italic text-slate-400">No symptoms recorded</dd>
-                              </div>
-                            );
-                          }
-                          return s ? (
-                            <div className="border-b border-slate-200 pb-3">
-                              <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Symptoms</dt>
-                              <dd className="mt-1.5">{s}</dd>
-                            </div>
-                          ) : null;
-                        })()}
-                      </div>
-                      {renderField("Associated symptoms", subjective.associated_symptoms)}
                       {renderField("Relevant negatives", subjective.relevant_negatives)}
                       {renderField("Medical conditions", subjective.medical_conditions)}
-                      {renderField("Previous surgeries", subjective.previous_surgeries)}
                       {renderField("Allergies", subjective.allergies)}
-                      {renderField("Current medicines", subjective.current_medicines)}
                       {renderField("Family history", subjective.family_history)}
                       {renderField("Social history", subjective.social_history)}
+                      {(() => {
+                        const node = renderCurrentMedicationsTable(subjective.current_medications);
+                        if (!node) return isImportantField("current_medications") ? (
+                          <div className="border-b border-slate-200 pb-3 sm:col-span-2">
+                            <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Current Medications</dt>
+                            <dd className="mt-1.5 text-sm italic text-slate-400">No current medications recorded</dd>
+                          </div>
+                        ) : null;
+                        return (
+                          <div className="border-b border-slate-200 pb-3 sm:col-span-2">
+                            <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Current Medications</dt>
+                            <dd className="mt-1.5">{node}</dd>
+                          </div>
+                        );
+                      })()}
                     </dl>
                   </EhrSection>
                 ) : null}
@@ -763,44 +779,38 @@ const EhrDocumentPage = () => {
                           <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Vitals and measurements</dt>
                           <dd className="mt-1.5">{renderVitalsGrid(objective.vitals)}</dd>
                         </div>
-                      ) : (
+                      ) : null}
+                      {hasObjectContent(objective.physical_examination, "general", "respiratory", "cardiovascular", "ent", "abdomen", "neurological", "other") ? (
                         <div className="border-b border-slate-200 pb-3">
-                          <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Vitals and measurements</dt>
-                          <dd className="mt-1.5 text-sm italic text-slate-400">No vitals recorded</dd>
+                          <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Physical Examination</dt>
+                          <dd className="mt-1.5">{renderClinicalValue(objective.physical_examination)}</dd>
                         </div>
-                      )}
-                      {renderField("Examination findings", objective.examination_findings)}
-                      {renderField("Available test results", objective.available_test_results)}
+                      ) : null}
+                      {renderField("Investigations", objective.investigations)}
                     </dl>
                   </EhrSection>
                 ) : null}
 
-                {hasAssessmentContent ? (
-                  <EhrSection code="A" title="Assessment \u2014 Clinical opinion">
+                <EhrSection code="A" title="Assessment \u2014 Clinical opinion" className="ehr-print-page-3-start">
+                  {hasAssessmentContent ? (
                     <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                       {renderField("Clinical impression", assessment.clinical_impression)}
-                      {renderField("Diagnosis status", assessment.diagnosis_status)}
-                      {renderField("Provisional diagnoses", assessment.provisional_diagnoses)}
-                      {renderField("Confirmed diagnoses", assessment.confirmed_diagnoses)}
-                      {renderFieldWide("Differential diagnoses", assessment.differential_diagnoses)}
+                      {renderField("Provisional diagnosis", assessment.provisional_diagnosis)}
+                      {renderField("Confirmed diagnosis", assessment.confirmed_diagnosis)}
+                      {renderField("Differential diagnoses", assessment.differential_diagnoses)}
+                      {renderFieldWide("Problems being managed", assessment.problems_being_managed)}
                     </dl>
-                  </EhrSection>
-                ) : null}
+                  ) : (
+                    <p className="text-sm italic text-slate-500">{EMPTY_ASSESSMENT_MESSAGE}</p>
+                  )}
+                </EhrSection>
 
-                {hasPlanContent ? (
-                  <EhrSection code="P" title="Plan \u2014 Treatment and follow-up">
+                <EhrSection code="P" title="Plan \u2014 Treatment and follow-up">
+                  {hasPlanContent ? (
                     <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                       <div className="sm:col-span-2">
                         {(() => {
-                          const p = renderPrescriptionsTable(plan.prescriptions);
-                          if (!p && isImportantField("prescriptions")) {
-                            return (
-                              <div className="border-b border-slate-200 pb-3">
-                                <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Prescriptions</dt>
-                                <dd className="mt-1.5 text-sm italic text-slate-400">No medicines prescribed</dd>
-                              </div>
-                            );
-                          }
+                          const p = renderPlanMedicationsTable(plan.prescriptions);
                           return p ? (
                             <div className="border-b border-slate-200 pb-3">
                               <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Prescriptions</dt>
@@ -812,14 +822,17 @@ const EhrDocumentPage = () => {
                       {renderField("Tests ordered", plan.tests_ordered)}
                       {renderField("Procedures", plan.procedures)}
                       {renderField("Treatment advice", plan.treatment_advice)}
-                      {renderField("Diet and hydration advice", plan.diet_and_hydration_advice)}
+                      {renderField("Diet & lifestyle advice", plan.diet_lifestyle_advice)}
+                      {renderField("Monitoring", plan.monitoring)}
                       {renderField("Referrals", plan.referrals)}
                       {renderField("Follow-up", plan.follow_up)}
                       {renderField("Warning signs", plan.warning_signs)}
-                      {renderField("Other instructions", plan.other_instructions)}
+                      {renderFieldWide("Other instructions", plan.other_instructions)}
                     </dl>
-                  </EhrSection>
-                ) : null}
+                  ) : (
+                    <p className="text-sm italic text-slate-500">{EMPTY_PLAN_MESSAGE}</p>
+                  )}
+                </EhrSection>
 
                 {hasValue(ehr.additional_clinical_information) ? (
                   <EhrSection title="Additional clinical information">
@@ -853,7 +866,6 @@ const EhrDocumentPage = () => {
               </EhrSection>
             )}
 
-            {/* Approval Footer */}
             <footer className="rounded-lg border border-[#b9ddcf] bg-[#f4fbf8] p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>

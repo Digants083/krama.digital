@@ -126,19 +126,22 @@ def _clean_medicines(value: Any) -> list[Any]:
             result.append({
                 "medicine_name": str(item["medicine_name"]).strip(),
                 "strength": str(item["strength"]).strip() if item.get("strength") else None,
+                "dosage_form": str(item["dosage_form"]).strip() if item.get("dosage_form") else None,
                 "dose": str(item["dose"]).strip() if item.get("dose") else None,
+                "route": str(item["route"]).strip() if item.get("route") else None,
                 "schedule": {
                     "morning": str(item["schedule"]["morning"]).strip() if isinstance(item.get("schedule"), dict) and item["schedule"].get("morning") else None,
                     "afternoon": str(item["schedule"]["afternoon"]).strip() if isinstance(item.get("schedule"), dict) and item["schedule"].get("afternoon") else None,
                     "night": str(item["schedule"]["night"]).strip() if isinstance(item.get("schedule"), dict) and item["schedule"].get("night") else None,
                 } if isinstance(item.get("schedule"), dict) else None,
-                "meal_timing": str(item["meal_timing"]).strip() if item.get("meal_timing") else None,
-                "specific_timing": str(item["specific_timing"]).strip() if item.get("specific_timing") else None,
+                "meal_timing": str(item.get("meal_timing") or item.get("meal_relation")).strip() if (item.get("meal_timing") or item.get("meal_relation")) else None,
+                "specific_timing": str(item.get("specific_timing") or item.get("timing")).strip() if (item.get("specific_timing") or item.get("timing")) else None,
                 "frequency": str(item["frequency"]).strip() if item.get("frequency") else None,
                 "duration": str(item["duration"]).strip() if item.get("duration") else None,
-                "as_needed": bool(item.get("as_needed", False)),
+                "action": str(item["action"]).strip() if item.get("action") else None,
+                "prn_condition": str(item["prn_condition"]).strip() if item.get("prn_condition") else None,
                 "indication": str(item["indication"]).strip() if item.get("indication") else None,
-                "additional_instructions": str(item["additional_instructions"]).strip() if item.get("additional_instructions") else None,
+                "instructions": str(item.get("instructions") or item.get("special_instruction")).strip() if (item.get("instructions") or item.get("special_instruction")) else None,
             })
         elif isinstance(item, str) and item.strip():
             result.append(item.strip())
@@ -147,34 +150,36 @@ def _clean_medicines(value: Any) -> list[Any]:
 
 def _normalize_summary(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        return {
-            "reason_for_visit": None, "what_the_doctor_assessed": None,
-            "medicines": [], "tests": [], "diet_and_hydration_advice": [],
-            "doctor_instructions": [], "follow_up": None, "when_to_seek_help": [],
-        }
-    new_keys = {"reason_for_visit", "what_the_doctor_assessed", "medicines", "tests",
-                "diet_and_hydration_advice", "doctor_instructions", "follow_up", "when_to_seek_help"}
-    if new_keys.intersection(raw.keys()):
-        return {
-            "reason_for_visit": _clean_text(raw.get("reason_for_visit")),
-            "what_the_doctor_assessed": _clean_text(raw.get("what_the_doctor_assessed")),
-            "medicines": _clean_medicines(raw.get("medicines", [])),
-            "tests": _clean_list(raw.get("tests", [])),
-            "diet_and_hydration_advice": _clean_list(raw.get("diet_and_hydration_advice", [])),
-            "doctor_instructions": _clean_list(raw.get("doctor_instructions", [])),
-            "follow_up": _clean_text(raw.get("follow_up")),
-            "when_to_seek_help": _clean_list(raw.get("when_to_seek_help", [])),
-        }
-    return {
-        "reason_for_visit": _clean_text(raw.get("visit_overview")),
-        "what_the_doctor_assessed": None,
-        "medicines": _clean_medicines(raw.get("medicines", [])),
-        "tests": _clean_list(raw.get("tests", [])),
-        "diet_and_hydration_advice": _clean_list(raw.get("diet_advice", [])),
-        "doctor_instructions": _clean_list(raw.get("doctor_suggestions", []) or raw.get("instructions", [])),
-        "follow_up": _clean_text(raw.get("follow_up")),
-        "when_to_seek_help": _clean_list(raw.get("warning_signs", [])),
-    }
+        return {}
+    result: dict[str, Any] = {}
+    visit = _clean_text(raw.get("visit_summary") or raw.get("what_the_doctor_assessed") or raw.get("visit_overview"))
+    if visit:
+        result["visit_summary"] = visit
+    medicines = _clean_medicines(raw.get("medicines", []))
+    if medicines:
+        result["medicines"] = medicines
+    for target, aliases in {
+        "tests": ("tests",),
+        "procedures": ("procedures",),
+        "diet_and_care": ("diet_and_care", "diet_and_hydration_advice", "diet_advice", "doctor_instructions"),
+        "monitoring": ("monitoring",),
+        "referrals": ("referrals",),
+        "other_instructions": ("other_instructions",),
+    }.items():
+        items: list[str] = []
+        for alias in aliases:
+            for item in _clean_list(raw.get(alias, [])):
+                if item not in items:
+                    items.append(item)
+        if items:
+            result[target] = items
+    warnings = raw.get("when_to_seek_help") or raw.get("warning_signs")
+    if isinstance(warnings, list) and warnings:
+        result["when_to_seek_help"] = warnings
+    follow_up = _clean_text(raw.get("follow_up"))
+    if follow_up:
+        result["follow_up"] = follow_up
+    return result
 
 
 @router.get("/summary")
@@ -241,13 +246,14 @@ async def get_patient_summary(patient_id: str = Query(...), db: AsyncSession = D
         unified.append({
             "id": visit.id,
             "encounter_id": enc.encounter_id if enc else None,
+            "clinic_id": visit.clinic_id,
             "clinic_name": clinic_names.get(visit.clinic_id, "Clinic"),
             "doctor_name": visit.doctor_name,
             "date": visit.date,
             "time": visit.time,
             "visit_type": apt.source if apt else "in-clinic",
-            "summary_status": "available" if has_summary else ("being_prepared" if enc else "not_available"),
-            "summary": summary if has_summary else None,
+            "summary_status": "available" if enc else "not_available",
+            "summary": summary if enc else None,
             "approved_at": enc.approved_at.isoformat() if enc and enc.approved_at else None,
         })
 
@@ -262,13 +268,14 @@ async def get_patient_summary(patient_id: str = Query(...), db: AsyncSession = D
         unified.append({
             "id": None,
             "encounter_id": enc.encounter_id,
+            "clinic_id": enc.clinic_id,
             "clinic_name": clinic_names.get(enc.clinic_id, "Clinic"),
             "doctor_name": apt.doctor_name if apt else "Doctor",
             "date": apt.date if apt else (enc.approved_at.strftime("%Y-%m-%d") if enc.approved_at else ""),
             "time": apt.time if apt else "",
             "visit_type": apt.source if apt else "in-clinic",
-            "summary_status": "available" if has_summary else "being_prepared",
-            "summary": summary if has_summary else None,
+            "summary_status": "available",
+            "summary": summary,
             "approved_at": enc.approved_at.isoformat() if enc.approved_at else None,
         })
 

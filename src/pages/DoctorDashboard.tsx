@@ -201,8 +201,12 @@ function VisitHistoryBadge({ isReturning }: { isReturning: boolean }) {
   );
 }
 
-function VisitHistoryDetails({ history }: { history: PatientHistory }) {
-  const previousVisits = history.previous_visits || [];
+function VisitHistoryDetails({ history, onViewEhr }: { history: PatientHistory; onViewEhr?: (visitId: number, visitDate: string) => void }) {
+  const allVisits = history.previous_visits || [];
+  const previousVisits = allVisits
+    .slice()
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 5);
   if (!previousVisits.length) return null;
 
   return (
@@ -212,7 +216,15 @@ function VisitHistoryDetails({ history }: { history: PatientHistory }) {
         {previousVisits.map((visit) => (
           <div key={visit.id} className="flex items-center justify-between border-t border-[#e6ded3] pt-2 first:border-t-0 first:pt-0">
             <p className="text-xs font-semibold text-[#58645f]">{formatVisitDate(visit.date)}</p>
-            <p className="text-xs font-semibold text-[#40514b]">Visited</p>
+            {onViewEhr && (
+              <button
+                type="button"
+                onClick={() => onViewEhr(visit.id, visit.date)}
+                className="flex items-center gap-1 rounded-full bg-[#1a5c4a] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#144d3e]"
+              >
+                <FileText className="h-3 w-3" /> View EHR
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -220,7 +232,7 @@ function VisitHistoryDetails({ history }: { history: PatientHistory }) {
   );
 }
 
-const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history, isLoading, error }: { history: PatientHistory | null; isLoading: boolean; error: string | null }) {
+const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history, isLoading, error, onViewEhr }: { history: PatientHistory | null; isLoading: boolean; error: string | null; onViewEhr?: (visitId: number, visitDate: string) => void }) {
   const isReturning = Boolean(history?.is_returning);
 
   return (
@@ -243,7 +255,7 @@ const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history,
           ) : (
             <p className="mt-3 text-sm font-bold text-[#202825]">First visit to this clinic</p>
           )}
-          <VisitHistoryDetails history={history} />
+          <VisitHistoryDetails history={history} onViewEhr={onViewEhr} />
         </div>
       ) : (
         <div>
@@ -255,46 +267,9 @@ const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history,
   );
 });
 
-const AiEmrSummaryCard = memo(function AiEmrSummaryCard({ history, isLoading, error, hasPatient = true }: { history: PatientHistory | null; isLoading: boolean; error: string | null; hasPatient?: boolean }) {
-  const visitCount = history?.visit_count || 0;
-  const lastVisit = history?.last_visit ? formatVisitDate(history.last_visit) : null;
 
-  return (
-    <div className="overflow-hidden rounded-2xl border border-[#cdebdc] bg-[#f2fbf7]">
-      <div className="flex items-center justify-between gap-2 border-b border-[#dceee7] px-3 py-3">
-        <div className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-xl bg-[#1a5c4a] text-white"><Sparkles className="h-4 w-4" /></span>
-          <div>
-            <p className="text-sm font-bold text-[#17312d]">AI EMR Summary</p>
-            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5d7770]">Frontend preview</p>
-          </div>
-        </div>
-        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-[#1a5c4a]">Not generated</span>
-      </div>
-      <div className="p-3">
-        {!hasPatient ? (
-          <p className="text-sm leading-5 text-[#58645f]">Select a patient from the queue to prepare their EMR summary.</p>
-        ) : isLoading ? (
-          <p className="text-sm font-semibold text-[#58645f]">Preparing patient context...</p>
-        ) : error ? (
-          <p className="text-sm font-semibold text-[#58645f]">EMR context is unavailable.</p>
-        ) : history?.is_returning ? (
-          <div className="space-y-3">
-            <p className="text-sm leading-5 text-[#40514b]">
-              Returning patient with <b>{visitCount} completed clinic visit{visitCount === 1 ? "" : "s"}</b>{lastVisit ? `; last seen ${lastVisit}` : ""}.
-            </p>
-            <div className="rounded-xl bg-white/80 p-3">
-              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#1a5c4a]"><FileText className="h-3.5 w-3.5" /> Clinical context</p>
-              <p className="mt-1.5 text-xs leading-5 text-[#68736f]">Diagnoses, medicines, allergies and report findings will appear after approved EMR records and the AI model are connected.</p>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm leading-5 text-[#58645f]">No earlier Karma clinic record found. New approved consultation details will build this summary.</p>
-        )}
-      </div>
-    </div>
-  );
-});
+
+
 
 function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; patient?: ConsultationPatient }) {
   const navigate = useNavigate();
@@ -334,7 +309,12 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
       startedAtRef.current = Date.now();
       setElapsedSeconds(0);
       recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
-      recorder.onerror = () => setRecordingError("The recording stopped unexpectedly. Please try again.");
+      recorder.onerror = () => {
+        setRecordingError("The recording stopped unexpectedly. Please try again.");
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setIsRecording(false);
+      };
       recorder.onstop = () => {
         const durationSeconds = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
@@ -348,7 +328,7 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
         saveConsultationRecording({ blob, durationSeconds, patient, recordedAt: new Date().toISOString() });
         navigate("/doctor-dashboard/consultation-transcript");
       };
-      recorder.start(1000);
+      recorder.start();
       setIsRecording(true);
     } catch (error) {
       setRecordingError(error instanceof DOMException && error.name === "NotAllowedError" ? "Microphone permission was denied. Allow microphone access and try again." : "Karma could not open the microphone. Please try again.");
@@ -356,7 +336,19 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
   };
 
   const stopRecording = () => {
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    try {
+      if (recorderRef.current?.state === "recording") {
+        recorderRef.current.stop();
+      } else {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setIsRecording(false);
+      }
+    } catch {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      setIsRecording(false);
+    }
   };
 
   return (
@@ -398,7 +390,7 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
         disabled={!enabled}
         className={`mt-3 w-full rounded-xl px-3 py-2.5 text-xs font-black transition disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 ${isRecording ? "bg-red-400 text-[#421b1b]" : "bg-[#9de1ca] text-[#17312d]"}`}
       >
-        {!enabled ? "Select patient to begin" : isRecording ? "Stop and review transcript" : "Start consultation recording"}
+        {!enabled ? "Select patient to begin" : isRecording ? "Stop and generate SOAP EHR" : "Start consultation recording"}
       </button>
     </div>
   );
@@ -407,8 +399,6 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
 const PatientAiPanel = memo(function PatientAiPanel({ history, isLoading, error, patient }: { history: PatientHistory | null; isLoading: boolean; error: string | null; patient: ConsultationPatient }) {
   return (
     <div className="grid gap-3">
-      <VisitHistorySidebarCard history={history} isLoading={isLoading} error={error} />
-      <AiEmrSummaryCard history={history} isLoading={isLoading} error={error} />
       <VoiceAssistantCard patient={patient} />
     </div>
   );
@@ -417,7 +407,6 @@ const PatientAiPanel = memo(function PatientAiPanel({ history, isLoading, error,
 const EmptyPatientAiPanel = memo(function EmptyPatientAiPanel() {
   return (
     <div className="mt-4 grid gap-3 text-left">
-      <AiEmrSummaryCard history={null} isLoading={false} error={null} hasPatient={false} />
       <VoiceAssistantCard patient={{ name: "Voice transcription test" }} />
     </div>
   );
@@ -499,6 +488,7 @@ const SwitchingOverlay = memo(function SwitchingOverlay({ show }: { show: boolea
 });
 
 export default function KramaDoctorDashboard() {
+  const navigate = useNavigate();
   const {
     queue,
     currentServing,
@@ -780,6 +770,26 @@ export default function KramaDoctorDashboard() {
       : null;
 
   const activePatientId = activePatient?.patient_id || "";
+
+  const viewEhr = useCallback(async (visitId: number, visitDate?: string) => {
+    const pid = activePatient?.patient_id;
+    if (!clinicId || !pid) return;
+    try {
+      const response = await fetch(apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(pid)}`));
+      if (!response.ok) return;
+      const payload = await response.json();
+      const encounters = Array.isArray(payload.encounters) ? payload.encounters : [];
+      const enc = encounters.find((e: any) =>
+        e.visit?.appointment_id === visitId || e.visit?.appointment_token === String(visitId)
+      ) || encounters.find((e: any) =>
+        visitDate && e.visit?.date === visitDate
+      );
+      if (!enc) return;
+      navigate(`/clinic/patients/${encodeURIComponent(pid)}/encounters/${encodeURIComponent(enc.encounter_id)}/ehr?return=${encodeURIComponent("/doctor-dashboard")}`);
+    } catch {
+      // silently fail
+    }
+  }, [clinicId, activePatient?.patient_id, navigate]);
 
   useEffect(() => {
     if (!clinicId || (!activePatientId && !activePatient?.phone && !activePatient?.patient_email)) {
@@ -1372,14 +1382,13 @@ export default function KramaDoctorDashboard() {
                   </div>
 
                   <div className="mt-4">
-                    <PatientAiPanel history={patientHistory} isLoading={isHistoryLoading} error={historyError} patient={{ id: activePatient.patient_id || undefined, name: activePatient.name, token: activePatient.token, phone: activePatient.phone, email: activePatient.patient_email, clinicId, doctorId: selectedDoctorId, appointmentId: activePatient.appointmentId }} />
+                    <VisitHistorySidebarCard history={patientHistory} isLoading={isHistoryLoading} error={historyError} onViewEhr={viewEhr} />
                   </div>
                 </div>
               ) : (
                 <div className="py-7 text-center">
                   <p className="mb-3 text-5xl font-extrabold text-[#d2ccc1]">--</p>
                   <p className="text-sm text-[#77756f]">No patients in queue.</p>
-                  <EmptyPatientAiPanel />
                 </div>
               )}
             </div>

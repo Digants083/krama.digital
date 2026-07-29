@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
+from html import unescape
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -18,6 +20,7 @@ from reportlab.platypus import (
     ListFlowable,
     ListItem,
     LongTable,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -79,6 +82,32 @@ def _has(value: Any) -> bool:
 
 def _txt(value: Any) -> str:
     return str(value).strip() if _has(value) else ""
+
+
+def _medicine_when_to_take(item: Mapping[str, Any]) -> str:
+    schedule = item.get("schedule", {})
+    timing = _txt(item.get("specific_timing") or item.get("timing")).lower()
+    if re.search(r"\b(?:breakfast|morning)\b", timing) or isinstance(schedule, Mapping) and _has(schedule.get("morning")):
+        return "Breakfast"
+    if re.search(r"\b(?:lunch|noon|afternoon)\b", timing) or isinstance(schedule, Mapping) and _has(schedule.get("afternoon")):
+        return "Lunch"
+    if re.search(r"\b(?:dinner|night)\b", timing) or isinstance(schedule, Mapping) and _has(schedule.get("night")):
+        return "Dinner"
+    return ""
+
+
+def _medicine_meal_code(item: Mapping[str, Any]) -> str:
+    text = _txt(
+        item.get("meal_timing")
+        or item.get("meal_relation")
+        or item.get("specific_timing")
+        or item.get("timing")
+    )
+    if re.search(r"\bafter\b", text, re.IGNORECASE):
+        return "AF"
+    if re.search(r"\bbefore\b", text, re.IGNORECASE):
+        return "BF"
+    return ""
 
 
 def _label(key: str) -> str:
@@ -381,14 +410,18 @@ def _build_clinical_summary(ehr_data: Mapping, styles: dict) -> list:
     assessment = ehr_data.get("assessment") or {}
     plan = ehr_data.get("plan") or {}
 
+    current_medications = [
+        item.get("name") if isinstance(item, Mapping) else item
+        for item in (subjective.get("current_medications") or [])
+    ]
     summary_items = [
         ("Chief complaint", subjective.get("chief_complaints")),
         ("HPI", subjective.get("history_of_present_illness")),
         ("Vitals", objective.get("vitals")),
         ("Allergies", subjective.get("allergies")),
         ("Impression", assessment.get("clinical_impression")),
-        ("Diagnosis", assessment.get("provisional_diagnoses") or assessment.get("confirmed_diagnoses")),
-        ("Medicines", subjective.get("current_medicines")),
+        ("Diagnosis", assessment.get("confirmed_diagnosis") or assessment.get("provisional_diagnosis")),
+        ("Medicines", current_medications),
         ("Follow-up", plan.get("follow_up")),
     ]
     active = [(label, val) for label, val in summary_items if _has(val)]
@@ -398,12 +431,16 @@ def _build_clinical_summary(ehr_data: Mapping, styles: dict) -> list:
     rows = [[Paragraph("CLINICAL SUMMARY", styles["section_title_sm"])]]
     row = []
     for i, (label, val) in enumerate(active):
-        rendered = _val_html(val)
-        if len(rendered) > 80:
-            rendered = rendered[:80] + "..."
+        # Snapshot cells must contain balanced ReportLab paragraph markup.
+        # Convert rich clinical HTML to plain text before shortening it so a
+        # truncation can never cut through an open <b> or <br/> tag.
+        rendered_html = _val_html(val)
+        rendered = unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", rendered_html))).strip()
+        if len(rendered) > 160:
+            rendered = rendered[:157].rstrip() + "..."
         cell = [
             Paragraph(label.upper(), styles["cs_label"]),
-            Paragraph(rendered or "\u2014", styles["cs_value"]),
+            Paragraph(escape(rendered) or "-", styles["cs_value"]),
         ]
         row.append(cell)
         if (i + 1) % 2 == 0 or i == len(active) - 1:
@@ -572,65 +609,26 @@ def _build_prescription_table(prescriptions: Any, styles: dict) -> list:
     if not has_details:
         return _field_block("Prescriptions", prescriptions, styles)
 
-    has_new_fields = any(
-        isinstance(p, Mapping) and ("schedule" in p or "meal_timing" in p or "specific_timing" in p)
-        for p in items
-    )
-
-    if has_new_fields:
-        header_row = [
-            Paragraph("Medicine", styles["table_header"]),
-            Paragraph("Dose", styles["table_header"]),
-            Paragraph("Schedule", styles["table_header"]),
-            Paragraph("Timing", styles["table_header"]),
-            Paragraph("Duration", styles["table_header"]),
-            Paragraph("Instructions", styles["table_header"]),
-        ]
-    else:
-        header_row = [
-            Paragraph("Medicine", styles["table_header"]),
-            Paragraph("Strength", styles["table_header"]),
-            Paragraph("Dose", styles["table_header"]),
-            Paragraph("Frequency", styles["table_header"]),
-            Paragraph("Duration", styles["table_header"]),
-            Paragraph("Instructions", styles["table_header"]),
-        ]
+    header_row = [
+        Paragraph("Medicine", styles["table_header"]),
+        Paragraph("Dosage", styles["table_header"]),
+        Paragraph("When to take", styles["table_header"]),
+        Paragraph("AF / BF", styles["table_header"]),
+        Paragraph("Duration", styles["table_header"]),
+    ]
     data_rows = []
     for item in items:
         if isinstance(item, Mapping):
             o = item
-            if has_new_fields:
-                schedule = o.get("schedule", {})
-                if isinstance(schedule, Mapping):
-                    sched_parts = [f"{k}: {v}" for k, v in [("Morn", schedule.get("morning")), ("Aft", schedule.get("afternoon")), ("Night", schedule.get("night"))] if v]
-                else:
-                    sched_parts = []
-                sched_str = "; ".join(sched_parts)
-                timing_parts = [str(o.get("meal_timing") or ""), str(o.get("specific_timing") or ""), str(o.get("frequency") or "")]
-                timing_parts = [p for p in timing_parts if p]
-                if o.get("as_needed"):
-                    timing_parts.append("As needed")
-                timing_str = "; ".join(timing_parts)
-                instr_parts = [str(o.get("indication") or ""), str(o.get("additional_instructions") or "")]
-                instr_parts = [p for p in instr_parts if p]
-                instr_str = "; ".join(instr_parts)
-                data_rows.append([
-                    Paragraph(escape(_txt(o.get("medicine_name")) or _txt(o.get("name")) or ""), styles["table_cell"]),
-                    Paragraph(escape(_txt(o.get("dose"))), styles["table_cell"]),
-                    Paragraph(escape(sched_str), styles["table_cell"]),
-                    Paragraph(escape(timing_str), styles["table_cell"]),
-                    Paragraph(escape(_txt(o.get("duration"))), styles["table_cell"]),
-                    Paragraph(escape(instr_str), styles["table_cell"]),
-                ])
-            else:
-                data_rows.append([
-                    Paragraph(escape(_txt(o.get("medicine_name")) or _txt(o.get("name")) or ""), styles["table_cell"]),
-                    Paragraph(escape(_txt(o.get("strength"))), styles["table_cell"]),
-                    Paragraph(escape(_txt(o.get("dose"))), styles["table_cell"]),
-                    Paragraph(escape(_txt(o.get("frequency"))), styles["table_cell"]),
-                    Paragraph(escape(_txt(o.get("duration"))), styles["table_cell"]),
-                    Paragraph(escape(_txt(o.get("instructions"))), styles["table_cell"]),
-                ])
+            when = _medicine_when_to_take(o)
+            meal = _medicine_meal_code(o)
+            data_rows.append([
+                Paragraph(escape(_txt(o.get("medicine_name")) or _txt(o.get("name")) or ""), styles["table_cell"]),
+                Paragraph(escape(_txt(o.get("dose"))), styles["table_cell"]),
+                Paragraph(escape(when), styles["table_cell"]),
+                Paragraph(escape(meal), styles["table_cell"]),
+                Paragraph(escape(_txt(o.get("duration"))), styles["table_cell"]),
+            ])
         else:
             data_rows.append([
                 Paragraph(escape(str(item)), styles["table_cell"]),
@@ -638,12 +636,11 @@ def _build_prescription_table(prescriptions: Any, styles: dict) -> list:
                 Paragraph("", styles["table_cell"]),
                 Paragraph("", styles["table_cell"]),
                 Paragraph("", styles["table_cell"]),
-                Paragraph("", styles["table_cell"]),
             ])
 
-    col_w = PAGE_W / 6
+    col_w = PAGE_W / 5
     all_rows = [header_row] + data_rows
-    table = LongTable(all_rows, colWidths=[col_w] * 6, hAlign="LEFT", splitByRow=1)
+    table = LongTable(all_rows, colWidths=[col_w] * 5, hAlign="LEFT", splitByRow=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), TABLE_HEADER),
         ("BOX", (0, 0), (-1, -1), 0.5, LINE),
@@ -658,6 +655,54 @@ def _build_prescription_table(prescriptions: Any, styles: dict) -> list:
     return [table, Spacer(1, 1.5 * mm)]
 
 
+def _build_compact_table(
+    title: str,
+    headers: list[str],
+    rows: list[list[str]],
+    col_widths: list[float],
+    styles: dict,
+) -> list:
+    if not rows:
+        return []
+    title_row = [Paragraph(title.upper(), styles["section_title_sm"])] + [""] * (len(headers) - 1)
+    header_row = [Paragraph(escape(header), styles["table_header"]) for header in headers]
+    data_rows = [
+        [Paragraph(escape(_txt(value)), styles["table_cell"]) for value in row]
+        for row in rows
+    ]
+    table = LongTable([title_row, header_row] + data_rows, colWidths=col_widths, hAlign="LEFT", splitByRow=1)
+    table.setStyle(TableStyle([
+        ("SPAN", (0, 0), (-1, 0)),
+        ("BACKGROUND", (0, 0), (-1, 1), TABLE_HEADER),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.2, GREEN),
+        ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+        ("INNERGRID", (0, 1), (-1, -1), 0.3, LINE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.3),
+    ]))
+    return [table, Spacer(1, 1.5 * mm)]
+
+
+def _build_chief_complaints_table(value: Any, styles: dict) -> list:
+    if not isinstance(value, (list, tuple)):
+        return _field_block("Chief complaints", value, styles)
+    rows: list[list[str]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            complaint = _txt(item.get("complaint") or item.get("name"))
+            if complaint:
+                rows.append([complaint, _txt(item.get("severity")), _txt(item.get("course")), _txt(item.get("duration"))])
+        elif _has(item):
+            rows.append([_txt(item), "", "", ""])
+    return _build_compact_table(
+        "Chief complaints", ["Current symptom", "Severity", "Course", "Since / duration"], rows,
+        [PAGE_W * 0.40, PAGE_W * 0.16, PAGE_W * 0.20, PAGE_W * 0.24], styles,
+    )
+
+
 def _section_fields(code: Optional[str], title: str, fields: list, styles: dict, vitals: bool = False) -> list:
     content = [KeepTogether(_section_header(code, title, styles))]
     content.append(Spacer(1, 1 * mm))
@@ -666,6 +711,8 @@ def _section_fields(code: Optional[str], title: str, fields: list, styles: dict,
         if label == "Vitals and measurements":
             blocks = _build_vitals_block(value, styles)
             content.extend(blocks)
+        elif label == "Chief complaints":
+            content.extend(_build_chief_complaints_table(value, styles))
         elif label == "Prescriptions":
             blocks = _build_prescription_table(value, styles)
             content.extend(blocks)
@@ -738,26 +785,32 @@ def build_ehr_pdf(
             ("S", "Subjective \u2014 Patient History", [
                 ("Chief complaints", subjective.get("chief_complaints")),
                 ("History of present illness", subjective.get("history_of_present_illness")),
-                ("Symptoms", subjective.get("symptoms")),
-                ("Associated symptoms", subjective.get("associated_symptoms")),
+                ("Relevant negatives", subjective.get("relevant_negatives")),
+                ("Medical conditions", subjective.get("medical_conditions")),
+                ("Allergies", subjective.get("allergies")),
+                ("Current medications", [item.get("name") if isinstance(item, Mapping) else item for item in (subjective.get("current_medications") or [])]),
+                ("Family history", subjective.get("family_history")),
+                ("Social history", subjective.get("social_history")),
             ]),
             ("O", "Objective \u2014 Clinical Findings", [
                 ("Vitals and measurements", objective.get("vitals")),
-                ("Examination findings", objective.get("examination_findings")),
-                ("Available test results", objective.get("available_test_results")),
+                ("Physical examination", objective.get("physical_examination")),
+                ("Available test results", objective.get("investigations")),
             ]),
             ("A", "Assessment \u2014 Clinical Opinion", [
                 ("Clinical impression", assessment.get("clinical_impression")),
-                ("Provisional diagnoses", assessment.get("provisional_diagnoses")),
-                ("Confirmed diagnoses", assessment.get("confirmed_diagnoses")),
+                ("Provisional diagnosis", assessment.get("provisional_diagnosis")),
+                ("Confirmed diagnosis", assessment.get("confirmed_diagnosis")),
                 ("Differential diagnoses", assessment.get("differential_diagnoses")),
+                ("Problems being managed", assessment.get("problems_being_managed")),
             ]),
             ("P", "Plan \u2014 Treatment and Follow-up", [
                 ("Prescriptions", plan.get("prescriptions")),
                 ("Tests ordered", plan.get("tests_ordered")),
                 ("Procedures", plan.get("procedures")),
                 ("Treatment advice", plan.get("treatment_advice")),
-                ("Diet and hydration advice", plan.get("diet_and_hydration_advice")),
+                ("Diet and lifestyle advice", plan.get("diet_lifestyle_advice")),
+                ("Monitoring", plan.get("monitoring")),
                 ("Referrals", plan.get("referrals")),
                 ("Follow-up", plan.get("follow_up")),
                 ("Warning signs", plan.get("warning_signs")),
@@ -765,11 +818,25 @@ def build_ehr_pdf(
             ]),
         ]
 
-        for code, title, fields in soap_sections:
+        # Page 1 is the clinic/patient snapshot. Page 2 starts Subjective and
+        # Objective. Page 3 starts Assessment and Plan. Long clinical content
+        # may continue naturally, but sections never begin on an earlier page.
+        story.append(PageBreak())
+        for index, (code, title, fields) in enumerate(soap_sections):
+            if index == 2:
+                story.append(PageBreak())
             active = [(label, val) for label, val in fields if _has(val)]
             if not active:
-                continue
-            story.append(Spacer(1, 2 * mm))
+                if code == "A":
+                    active = [("", "Awaiting doctor assessment.")]
+                elif code == "P":
+                    active = [("", "Awaiting doctor plan.")]
+                else:
+                    continue
+            if code in {"S", "A"}:
+                story.extend(_build_header(clinic, encounter, styles))
+            elif code in {"O", "P"}:
+                story.append(Spacer(1, 2 * mm))
             story.extend(_section_fields(code, title, active, styles))
 
         # Additional info
@@ -856,11 +923,15 @@ def build_ehr_pdf(
     return buffer.getvalue()
 
 
-def format_date(dt_str: Optional[str]) -> str:
-    if not dt_str:
+def format_date(dt_value: Any) -> str:
+    if not dt_value:
         return "Not recorded"
+    if isinstance(dt_value, datetime):
+        return dt_value.strftime("%d %b %Y, %I:%M %p").lstrip("0").replace(" 0", " ")
+    if isinstance(dt_value, date):
+        return dt_value.strftime("%d %b %Y").lstrip("0")
+    dt_str = str(dt_value)
     try:
-        from datetime import datetime
         d = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
         return d.strftime("%d %b %Y, %I:%M %p").lstrip("0").replace(" 0", " ")
     except (ValueError, TypeError):

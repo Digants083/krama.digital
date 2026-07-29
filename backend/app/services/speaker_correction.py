@@ -58,6 +58,85 @@ def standardize_speaker_labels(segments: list[dict]) -> list[dict]:
     return labeled
 
 
+def infer_consultation_speaker_roles(segments: list[dict]) -> list[dict]:
+    """Map diarized Speaker A/B labels to Doctor/Patient when evidence is strong.
+
+    Sarvam supplies stable diarization identities but not clinical roles. This
+    scores all turns for each identity, then assigns roles at the conversation
+    level. Existing explicit Doctor/Patient labels are always preserved. When a
+    role cannot be assigned safely the original label is retained.
+    """
+    standardized = standardize_speaker_labels([dict(segment) for segment in segments])
+    unknown_labels = []
+    grouped: dict[str, list[str]] = {}
+    for segment in standardized:
+        label = str(segment.get("speaker") or "Speaker").strip()
+        if label in {"Doctor", "Patient"}:
+            continue
+        if label not in grouped:
+            unknown_labels.append(label)
+            grouped[label] = []
+        grouped[label].append(str(segment.get("text") or ""))
+
+    if len(unknown_labels) < 2:
+        return standardized
+
+    # Diarization can create a short third identity for overlap, crosstalk, or
+    # a brief attendant interjection. Use the two substantial conversation
+    # identities for Doctor/Patient role assignment and leave minor identities
+    # untouched unless they were already explicitly labelled.
+    primary_labels = sorted(
+        unknown_labels,
+        key=lambda label: (
+            sum(len(text.split()) for text in grouped[label]),
+            len(grouped[label]),
+        ),
+        reverse=True,
+    )[:2]
+
+    doctor_patterns = [
+        r"\b(?:how long|since when|do you|did you|have you|are you|any allergies?)\b",
+        r"\b(?:i(?:'ll| will) prescribe|i advise|i recommend|take this|take one|start taking)\b",
+        r"\b(?:come back|follow up|return in|seek urgent|go to (?:the )?hospital)\b",
+        r"\b(?:let me examine|on examination|your diagnosis|this (?:is|looks like)|likely)\b",
+        r"\b(?:drink|eat|avoid|rest|monitor|check)\b.*\b(?:water|fluids|food|sugar|temperature|bp)\b",
+    ]
+    patient_patterns = [
+        r"\b(?:i have|i had|i am having|i feel|i felt|my |it started|i noticed)\b",
+        r"\b(?:for (?:one|two|three|four|five|six|seven|\d+) (?:day|days|week|weeks|month|months))\b",
+        r"\b(?:yes|no|yeah|haan|nahi|howdu|illa)(?:\b|\s+doctor\b)",
+        r"\b(?:i take|i am taking|i don't take|i do not take|allergic to)\b",
+        r"\b(?:hurts|pain|cough|feverish|dizzy|vomiting|breathing difficulty)\b",
+    ]
+
+    scores: dict[str, tuple[int, int]] = {}
+    for label, turns in grouped.items():
+        joined = " ".join(turns).lower()
+        doctor_score = sum(len(re.findall(pattern, joined, re.IGNORECASE)) for pattern in doctor_patterns)
+        patient_score = sum(len(re.findall(pattern, joined, re.IGNORECASE)) for pattern in patient_patterns)
+        scores[label] = (doctor_score, patient_score)
+
+    ranked_doctor = sorted(
+        primary_labels,
+        key=lambda label: (scores[label][0] - scores[label][1], scores[label][0]),
+        reverse=True,
+    )
+    doctor_label = ranked_doctor[0]
+    patient_label = ranked_doctor[1]
+    doctor_delta = scores[doctor_label][0] - scores[doctor_label][1]
+    patient_delta = scores[patient_label][1] - scores[patient_label][0]
+    if scores[doctor_label][0] < 1 or (doctor_delta < 1 and patient_delta < 1):
+        return standardized
+
+    mapping = {doctor_label: "Doctor", patient_label: "Patient"}
+    for segment in standardized:
+        label = str(segment.get("speaker") or "")
+        if label in mapping:
+            segment["original_speaker"] = label
+            segment["speaker"] = mapping[label]
+    return standardized
+
+
 def combine_consecutive_segments(segments: list[dict]) -> list[dict]:
     """
     Merge adjacent segments from the same speaker.

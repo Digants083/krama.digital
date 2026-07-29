@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle, Apple, ArrowLeft, Check, FileAudio, FlaskConical, ListChecks,
-  Loader2, Pill, RotateCcw, Save, ShieldCheck, Sparkles, Stethoscope, UserRound, Eye, EyeOff,
+  Loader2, Pill, RotateCcw, Save, ShieldCheck, Sparkles, Stethoscope, UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/api";
 import { clearConsultationRecording, getConsultationRecording } from "@/lib/consultationRecording";
+import { medicationMealCode, medicationWhenToTake } from "@/lib/medicationDisplay";
+import { EMPTY_ASSESSMENT_MESSAGE, EMPTY_PATIENT_SUMMARY_MESSAGE, EMPTY_PLAN_MESSAGE, hasAssessmentContent, hasPlanContent } from "@/lib/soapPresentation";
 
 type TranscriptSegment = {
   speaker: string;
@@ -20,20 +22,10 @@ type EhrEncounter = {
   status: "draft" | "approved";
   ehr_data: Record<string, unknown>;
   patient_summary: Record<string, unknown>;
+  patient_summary_preview?: Record<string, unknown>;
   model_name?: string;
   approved_at?: string | null;
 };
-
-const summaryFields = [
-  ["visit_overview", "What the doctor found", "text"],
-  ["medicines", "Medicines", "list"],
-  ["tests", "Tests", "list"],
-  ["diet_advice", "Diet and hydration advice", "list"],
-  ["doctor_suggestions", "Doctor suggestions", "list"],
-  ["instructions", "Other instructions", "list"],
-  ["follow_up", "Follow-up", "text"],
-  ["warning_signs", "When to seek help", "list"],
-] as const;
 
 function summaryList(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
@@ -81,7 +73,8 @@ function combineConsecutiveSpeakerTurns(input: TranscriptSegment[]) {
 }
 
 function isSoapFormat(data: Record<string, unknown>): boolean {
-  return !!(data.schema_version || data.subjective || data.visit_details);
+  const sv = data.schema_version;
+  return !!(sv === "1.0" || sv === "1.1" || data.subjective || data.visit_details);
 }
 
 function hasValue(value: unknown): boolean {
@@ -90,6 +83,18 @@ function hasValue(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasValue);
   if (typeof value === "object") return Object.values(value as Record<string, unknown>).some(hasValue);
   return String(value).trim().length > 0;
+}
+
+function hasObjectContent(value: unknown, ...keys: string[]): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const obj = value as Record<string, unknown>;
+  return keys.length === 0
+    ? Object.values(obj).some((v) => hasValue(v) && v !== false)
+    : keys.some((k) => {
+        const v = obj[k];
+        if (typeof v === "boolean") return v === true;
+        return hasValue(v);
+      });
 }
 
 function fieldLabel(key: string) {
@@ -123,17 +128,6 @@ function renderClinicalValue(value: unknown, depth = 0): ReactNode {
   return <div className={depth > 0 ? "ml-2 space-y-0.5" : "space-y-1"}>{entries.map(([k, v]) => { const rendered = renderClinicalValue(v, depth + 1); return rendered ? <div key={k}>{depth < 2 ? <div><span className="text-xs font-bold uppercase tracking-wide text-slate-500">{fieldLabel(k)}</span><div className="mt-0.5">{rendered}</div></div> : <div className="text-sm"><strong>{fieldLabel(k)}:</strong> {rendered}</div>}</div> : null; })}</div>;
 }
 
-function renderSymptomsTable(symptoms: unknown): ReactNode {
-  if (!hasValue(symptoms)) return null;
-  if (Array.isArray(symptoms)) {
-    const items = symptoms.filter(hasValue);
-    if (!items.length) return null;
-    if (items.every((i) => typeof i === "string" || typeof i === "number")) return renderClinicalValue(symptoms);
-    return <div className="overflow-x-auto"><table className="w-full border-collapse text-xs"><thead><tr className="border-b border-slate-300 bg-slate-50"><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Symptom</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Duration</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Severity</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Source</th></tr></thead><tbody>{items.map((item, i) => { if (typeof item === "object" && item !== null) { const o = item as Record<string, unknown>; return <tr key={i} className="border-b border-slate-100"><td className="px-3 py-2 font-medium">{String(o.name || o.symptom_name || o.symptom || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.duration || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.severity || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.source || "")}</td></tr>; } return <tr key={i} className="border-b border-slate-100"><td colSpan={4} className="px-3 py-2">{String(item)}</td></tr>; })}</tbody></table></div>;
-  }
-  return renderClinicalValue(symptoms);
-}
-
 function renderVitalsGrid(vitals: unknown): ReactNode {
   if (!hasValue(vitals)) return null;
   if (typeof vitals === "object" && !Array.isArray(vitals)) {
@@ -145,20 +139,101 @@ function renderVitalsGrid(vitals: unknown): ReactNode {
   return renderClinicalValue(vitals);
 }
 
-function renderPrescriptionsTable(prescriptions: unknown): ReactNode {
-  if (!hasValue(prescriptions)) return null;
-  if (Array.isArray(prescriptions)) {
-    const items = prescriptions.filter(hasValue);
-    if (!items.length) return null;
-    const hasDetails = items.some((i) => typeof i === "object" && i !== null && ("dose" in i || "frequency" in i || "strength" in i || "duration" in i));
-    if (!hasDetails) return renderClinicalValue(prescriptions);
-    return <div className="overflow-x-auto"><table className="w-full border-collapse text-xs"><thead><tr className="border-b border-slate-300 bg-slate-50"><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Medicine</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Strength</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Dose</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Frequency</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Duration</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Timing</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">PRN</th><th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Indication</th></tr></thead><tbody>{items.map((item, i) => { if (typeof item === "object" && item !== null) { const o = item as Record<string, unknown>; return <tr key={i} className="border-b border-slate-100"><td className="px-3 py-2 font-medium">{String(o.medicine_name || o.name || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.strength || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.dose || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.frequency || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.duration || "")}</td><td className="px-3 py-2 text-slate-600">{String(o.specific_timing || o.meal_timing || "")}</td><td className="px-3 py-2 text-slate-600">{o.as_needed ? "Yes" : ""}</td><td className="px-3 py-2 text-slate-600">{String(o.indication || "")}</td></tr>; } return <tr key={i} className="border-b border-slate-100"><td colSpan={8} className="px-3 py-2 italic text-slate-400">{String(item)}</td></tr>; })}</tbody></table></div>;
-  }
-  return renderClinicalValue(prescriptions);
+function EditableChiefComplaintsTable({ value, onChange }: { value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void }) {
+  const items = Array.isArray(value) ? value : [];
+  const update = (index: number, key: string, nextValue: string) => { const next = [...items]; next[index] = { ...next[index], [key]: nextValue }; onChange(next); };
+  const options = (current: unknown, values: string[]) => current && !values.includes(String(current)) ? [String(current), ...values] : values;
+  return <div className="space-y-3"><div className="overflow-x-auto rounded-xl border border-[#cbded7] bg-white"><table className="w-full min-w-[720px] table-fixed border-collapse text-left"><thead><tr className="bg-[#edf7f3] text-[11px] font-black text-[#315b4f]"><th className="w-[32%] px-3 py-2.5">Current symptom / complaint</th><th className="w-[19%] px-3 py-2.5">Severity</th><th className="w-[22%] px-3 py-2.5">Course</th><th className="w-[20%] px-3 py-2.5">Since / duration</th><th className="w-[7%] px-2 py-2.5"></th></tr></thead><tbody>{items.map((item, i) => <tr key={i} className="border-t border-[#dfeae6] hover:bg-[#fbfdfc]"><td className="px-2 py-1"><input aria-label="Current symptom or complaint" value={String(item.complaint || "")} onChange={(e) => update(i, "complaint", e.target.value)} placeholder="e.g. Fever" className="w-full border-0 bg-transparent px-1 py-1.5 text-xs font-black text-[#17312d] outline-none focus:ring-0" /></td><td className="border-l border-[#edf2f0] px-2 py-1"><select aria-label="Severity" value={String(item.severity || "")} onChange={(e) => update(i, "severity", e.target.value)} className="w-full border-0 bg-transparent px-1 py-1.5 text-xs text-[#40514b] outline-none focus:ring-0"><option value="">Not stated</option>{options(item.severity, ["mild", "moderate", "severe"]).map((v) => <option key={v} value={v}>{v}</option>)}</select></td><td className="border-l border-[#edf2f0] px-2 py-1"><select aria-label="Course" value={String(item.course || "")} onChange={(e) => update(i, "course", e.target.value)} className="w-full border-0 bg-transparent px-1 py-1.5 text-xs text-[#40514b] outline-none focus:ring-0"><option value="">Not stated</option>{options(item.course, ["continuous", "intermittent", "recurrent", "worsening", "improving", "stable"]).map((v) => <option key={v} value={v}>{v}</option>)}</select></td><td className="border-l border-[#edf2f0] px-2 py-1"><input aria-label="Since or duration" value={String(item.duration || "")} onChange={(e) => update(i, "duration", e.target.value)} placeholder="e.g. 1 week" className="w-full border-0 bg-transparent px-1 py-1.5 text-xs text-[#40514b] outline-none focus:ring-0" /></td><td className="border-l border-[#edf2f0] px-2 text-center"><button aria-label={`Remove complaint ${i + 1}`} onClick={() => onChange(items.filter((_, idx) => idx !== i))} className="rounded px-2 text-base text-slate-400 hover:bg-red-50 hover:text-red-600">&times;</button></td></tr>)}</tbody></table>{!items.length ? <p className="border-t border-[#dfeae6] px-4 py-4 text-center text-xs italic text-slate-500">No chief complaint was stated.</p> : null}</div><button onClick={() => onChange([...items, { complaint: "", severity: null, course: null, duration: null }])} className="rounded-lg border border-dashed border-[#8bbdab] px-3 py-1.5 text-xs font-black text-[#1a5c4a] hover:bg-[#edf7f3]">+ Add complaint</button></div>;
+}
+
+function EditableCurrentMedicationsTable({ value, onChange }: { value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void }) {
+  const items = Array.isArray(value) ? value : [];
+  const updateName = (index: number, name: string) => { const next = [...items]; next[index] = { ...next[index], name }; onChange(next); };
+  return <div className="space-y-3"><div className="overflow-hidden rounded-xl border border-[#cbded7] bg-white"><table className="w-full border-collapse text-left"><thead><tr className="bg-[#edf7f3] text-[11px] font-black text-[#315b4f]"><th className="px-3 py-2.5">Current medicine name</th><th className="w-12 px-2 py-2.5"></th></tr></thead><tbody>{items.map((item, i) => <tr key={i} className="border-t border-[#dfeae6] hover:bg-[#fbfdfc]"><td className="px-3 py-1.5"><input aria-label="Current medicine name" value={String(item.name || "")} onChange={(e) => updateName(i, e.target.value)} placeholder="Medicine name" className="w-full border-0 bg-transparent px-1 py-1.5 text-sm font-black text-[#17312d] outline-none focus:ring-0" /></td><td className="px-2 text-center"><button aria-label={`Remove current medicine ${i + 1}`} onClick={() => onChange(items.filter((_, idx) => idx !== i))} className="rounded px-2 text-base text-slate-400 hover:bg-red-50 hover:text-red-600">&times;</button></td></tr>)}</tbody></table>{!items.length ? <p className="border-t border-[#dfeae6] px-4 py-4 text-center text-xs italic text-slate-500">No current medicine was stated.</p> : null}</div><button onClick={() => onChange([...items, { name: "", strength: null, dose: null, frequency: null, timing: null, duration: null, source: "patient_reported" }])} className="rounded-lg border border-dashed border-[#8bbdab] px-3 py-1.5 text-xs font-black text-[#1a5c4a] hover:bg-[#edf7f3]">+ Add current medicine</button></div>;
+}
+
+function EditablePhysicalExamination({ value, onChange }: { value: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void }) {
+  const obj = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const fields = ["general", "respiratory", "cardiovascular", "ent", "abdomen", "neurological"];
+  return <div className="grid gap-3 md:grid-cols-2">{fields.map((field) => <label key={field} className="rounded-xl border border-[#d9e6e1] bg-[#fbfdfc] p-3"><span className="text-[10px] font-black uppercase tracking-[0.12em] text-[#315b4f]">{fieldLabel(field)}</span><textarea value={String(obj[field] || "")} onChange={(e) => onChange({ ...obj, [field]: e.target.value || null })} placeholder="Leave blank if not examined" rows={2} className="mt-1.5 w-full resize-none rounded-md border border-transparent bg-white px-2.5 py-2 text-sm leading-5 outline-none hover:border-slate-200 focus:border-[#68ad94]" /></label>)}<div className="rounded-xl border border-[#d9e6e1] bg-[#fbfdfc] p-3 md:col-span-2"><label className="text-[10px] font-black uppercase tracking-[0.12em] text-[#315b4f]">Other examination findings</label><div className="mt-1.5"><EditableList value={Array.isArray(obj.other) ? obj.other as string[] : []} onChange={(v) => onChange({ ...obj, other: v })} /></div></div></div>;
+}
+
+function EditableDiagnosesTable({ value, onChange }: { value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void }) {
+  const items = Array.isArray(value) ? value : [];
+  return <div className="space-y-2">{items.map((item, i) => <div key={i} className="flex flex-wrap gap-1.5 items-start"><input value={String(item.name || "")} onChange={(e) => { const next = [...items]; next[i] = { ...next[i], name: e.target.value }; onChange(next); }} placeholder="Diagnosis" className="w-36 rounded border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-[#9acdbb]" /><select value={String(item.status || "provisional")} onChange={(e) => { const next = [...items]; next[i] = { ...next[i], status: e.target.value }; onChange(next); }} className="rounded border border-slate-200 bg-white px-1 py-1 text-xs outline-none"><option value="confirmed">Confirmed</option><option value="provisional">Provisional</option><option value="differential">Differential</option></select><input value={String(item.code || "")} onChange={(e) => { const next = [...items]; next[i] = { ...next[i], code: e.target.value }; onChange(next); }} placeholder="Code" className="w-20 rounded border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-[#9acdbb]" /><button onClick={() => onChange(items.filter((_, idx) => idx !== i))} className="shrink-0 rounded p-1 text-slate-400 hover:text-red-500">&times;</button></div>)}<button onClick={() => onChange([...items, { name: "", status: "provisional", code: "", source: "clinician_documented" }])} className="mt-1 text-xs font-bold text-[#1a5c4a] hover:underline">+ Add diagnosis</button></div>;
+}
+
+function EditablePlanMedicationsTable({ value, onChange }: { value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void }) {
+  const items = Array.isArray(value) ? value : [];
+  const update = (index: number, key: string, nextValue: unknown) => { const next = [...items]; next[index] = { ...next[index], [key]: nextValue }; onChange(next); };
+  const compactField = (index: number, item: Record<string, unknown>, key: string, placeholder: string, strong = false) => <input aria-label={placeholder} value={String(item[key] || "")} onChange={(e) => update(index, key, e.target.value || null)} placeholder={placeholder} className={`w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-xs outline-none hover:border-slate-200 focus:border-[#68ad94] focus:bg-white ${strong ? "font-black text-[#17312d]" : "text-[#40514b]"}`} />;
+  const updateWhen = (index: number, value: string) => {
+    const schedule: Record<string, string | null> = { morning: null, afternoon: null, night: null };
+    if (value === "Breakfast") schedule.morning = "Breakfast";
+    if (value === "Lunch") schedule.afternoon = "Lunch";
+    if (value === "Dinner") schedule.night = "Dinner";
+    const next = [...items];
+    next[index] = { ...next[index], specific_timing: value || null, schedule };
+    onChange(next);
+  };
+
+  return <div className="space-y-3">
+    <div className="overflow-x-auto rounded-xl border border-[#cbded7] bg-white">
+      <table className="w-full min-w-[760px] table-fixed border-collapse text-left">
+        <thead><tr className="bg-[#edf7f3] text-[11px] font-black text-[#315b4f]"><th className="w-[25%] px-3 py-2.5">Medicine</th><th className="w-[20%] px-3 py-2.5">Dosage</th><th className="w-[20%] px-3 py-2.5">When to take</th><th className="w-[15%] px-3 py-2.5">AF / BF</th><th className="w-[20%] px-3 py-2.5">Duration</th></tr></thead>
+        <tbody>{items.map((item, i) => {
+          const selectedWhen = medicationWhenToTake(item);
+          return <tr key={i} className="border-t border-[#dfeae6] align-top hover:bg-[#fbfdfc]">
+            <td className="px-2 py-2">
+              {compactField(i, item, "medicine_name", "Medicine name", true)}
+              <div className="flex justify-end px-1.5 pt-1"><button aria-label={`Remove prescription ${i + 1}`} onClick={() => onChange(items.filter((_, idx) => idx !== i))} className="rounded px-2 py-0.5 text-base text-slate-400 hover:bg-red-50 hover:text-red-600">&times;</button></div>
+            </td>
+            <td className="border-l border-[#edf2f0] px-2 py-2">{compactField(i, item, "dose", "1 tablet / 5 ml")}</td>
+            <td className="border-l border-[#edf2f0] px-2 py-2"><select aria-label="When to take" value={selectedWhen} onChange={(e) => updateWhen(i, e.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-[#315b4f]"><option value="">-</option><option value="Breakfast">Breakfast</option><option value="Lunch">Lunch</option><option value="Dinner">Dinner</option></select></td>
+            <td className="border-l border-[#edf2f0] px-3 py-3"><select aria-label="AF or BF" value={medicationMealCode(item)} onChange={(e) => update(i, "meal_timing", e.target.value === "AF" ? "After food" : e.target.value === "BF" ? "Before food" : null)} className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-black text-[#315b4f]"><option value="">-</option><option value="AF">AF</option><option value="BF">BF</option></select></td>
+            <td className="border-l border-[#edf2f0] px-2 py-2">{compactField(i, item, "duration", "3 days")}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+      {!items.length ? <p className="border-t border-[#dfeae6] px-4 py-5 text-center text-xs italic text-slate-500">No prescription recorded. Add only medicines explicitly discussed.</p> : null}
+    </div>
+    <button onClick={() => onChange([...items, { medicine_name: "", strength: null, dosage_form: null, dose: null, route: null, frequency: null, schedule: { morning: null, afternoon: null, night: null }, specific_timing: null, meal_timing: null, duration: null, prn_condition: null, indication: null, instructions: null, action: null }])} className="rounded-lg border border-dashed border-[#8bbdab] px-4 py-2 text-xs font-black text-[#1a5c4a] hover:bg-[#edf7f3]">+ Add prescription</button>
+  </div>;
+}
+
+function renderPatientMedicines(value: unknown): ReactNode {
+  if (!Array.isArray(value) || !value.length) return null;
+  const medicines = value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item));
+  if (!medicines.length) return renderClinicalValue(value);
+  return <div className="overflow-x-auto rounded-lg border border-[#d9e8e2]"><table className="w-full min-w-[680px] border-collapse text-left text-xs"><thead><tr className="bg-[#edf7f3] text-[#365c51]"><th className="px-3 py-2 font-black">Medicine</th><th className="px-3 py-2 font-black">Dosage</th><th className="px-3 py-2 font-black">When to take</th><th className="px-3 py-2 font-black">AF / BF</th><th className="px-3 py-2 font-black">Duration</th></tr></thead><tbody>{medicines.map((medicine, index) => { const when = medicationWhenToTake(medicine); const meal = medicationMealCode(medicine); return <tr key={index} className="border-t border-[#e1ece8] bg-white align-top"><td className="px-3 py-2 font-bold text-[#17312d]">{String(medicine.medicine_name || "Medicine")}</td><td className="px-3 py-2 text-[#40514b]">{hasValue(medicine.dose) ? String(medicine.dose) : "—"}</td><td className="px-3 py-2 text-[#40514b]">{when || "—"}</td><td className="px-3 py-2 font-bold text-[#315b4f]">{meal || "—"}</td><td className="px-3 py-2 text-[#40514b]">{hasValue(medicine.duration) ? String(medicine.duration) : "—"}</td></tr>; })}</tbody></table></div>;
+}
+
+function renderPatientWarningSigns(value: unknown): ReactNode {
+  if (!Array.isArray(value) || !value.length) return null;
+  return <div className="space-y-2">{value.map((item, index) => {
+    const warning = asRecord(item);
+    const exactInstruction = hasValue(warning.raw_instruction)
+      ? String(warning.raw_instruction)
+      : typeof item === "string"
+        ? item
+        : [warning.condition, warning.action].filter(hasValue).map(String).join(" — ");
+    if (!exactInstruction) return null;
+    return <div key={index} className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><p className="font-semibold leading-5 text-amber-950">{exactInstruction}</p></div>;
+  })}</div>;
+}
+
+function EditableReferralObject({ value, onChange }: { value: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void }) {
+  const obj = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return <div className="space-y-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={obj.required === true} onChange={(e) => onChange({ ...obj, required: e.target.checked })} className="rounded border-slate-300" /><span className="font-bold">Referral required</span></label>{obj.required === true ? <><input value={String(obj.specialty || "")} onChange={(e) => onChange({ ...obj, specialty: e.target.value })} placeholder="Specialty" className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-[#9acdbb]" /><textarea value={String(obj.reason || "")} onChange={(e) => onChange({ ...obj, reason: e.target.value })} placeholder="Reason for referral" rows={2} className="mt-1 w-full resize-none rounded border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-[#9acdbb]" /></> : null}</div>;
+}
+
+function EditableFollowUpObject({ value, onChange }: { value: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void }) {
+  const obj = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return <div className="space-y-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={obj.required === true} onChange={(e) => onChange({ ...obj, required: e.target.checked })} className="rounded border-slate-300" /><span className="font-bold">Follow-up required</span></label>{obj.required === true ? <><input value={String(obj.timeframe || "")} onChange={(e) => onChange({ ...obj, timeframe: e.target.value })} placeholder="Timeframe (e.g. 2 weeks)" className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-[#9acdbb]" /><textarea value={String(obj.instructions || "")} onChange={(e) => onChange({ ...obj, instructions: e.target.value })} placeholder="Follow-up instructions" rows={2} className="mt-1 w-full resize-none rounded border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-[#9acdbb]" /></> : null}</div>;
 }
 
 function EhrSection({ title, code, children }: { title: string; code?: string; children: ReactNode }) {
-  return <section className="border-t-2 border-[#17312d] pt-3"><div className="mb-4 flex items-center gap-2">{code ? <span className="grid h-7 w-7 place-items-center rounded-md bg-[#17312d] text-xs font-black text-white">{code}</span> : null}<h3 className="text-sm font-black uppercase tracking-[0.13em] text-[#17312d]">{title}</h3></div>{children}</section>;
+  return <section className="overflow-hidden rounded-xl border border-slate-300 bg-white"><div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-5 py-3">{code ? <span className="grid h-7 w-7 place-items-center rounded-md bg-[#17312d] text-xs font-black text-white">{code}</span> : null}<h3 className="text-sm font-black uppercase tracking-[0.13em] text-[#17312d]">{title}</h3></div><div className="p-5">{children}</div></section>;
 }
 
 export default function ConsultationTranscript() {
@@ -171,7 +246,7 @@ export default function ConsultationTranscript() {
   const [isSavingEhr, setIsSavingEhr] = useState(false);
   const [ehrNotice, setEhrNotice] = useState("");
   const [error, setError] = useState("");
-  const [showTranscript, setShowTranscript] = useState(false);
+  const autoProcessingStarted = useRef(false);
 
   useEffect(() => {
     if (!recording) return;
@@ -181,7 +256,8 @@ export default function ConsultationTranscript() {
   }, [recording]);
 
   useEffect(() => {
-    if (recording && processingStage === "idle") {
+    if (recording && processingStage === "idle" && !autoProcessingStarted.current) {
+      autoProcessingStarted.current = true;
       transcribe();
     }
   }, [recording]);
@@ -316,8 +392,8 @@ export default function ConsultationTranscript() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || "Could not approve the EHR.");
-      setEhr(payload);
-      setEhrNotice("EHR approved and added to the patient record.");
+      clearConsultationRecording();
+      navigate("/doctor-dashboard");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not approve the EHR.");
     } finally {
@@ -335,6 +411,17 @@ export default function ConsultationTranscript() {
   const objective = (isSoap ? asRecord(ehr!.ehr_data.objective) : {}) as Record<string, unknown>;
   const assessment = (isSoap ? asRecord(ehr!.ehr_data.assessment) : {}) as Record<string, unknown>;
   const plan = (isSoap ? asRecord(ehr!.ehr_data.plan) : {}) as Record<string, unknown>;
+  const visitDetails = (isSoap ? asRecord(ehr!.ehr_data.visit_details) : {}) as Record<string, unknown>;
+  const displayedPatientSummary = ehr
+    ? ehr.status === "approved"
+      ? ehr.patient_summary
+      : {
+          ...(ehr.patient_summary_preview || {}),
+          // Plan is the single prescription source of truth. Rendering this
+          // live array prevents a stale or independently edited draft summary.
+          medicines: Array.isArray(plan.prescriptions) ? plan.prescriptions : [],
+        }
+    : {};
 
   if (!recording) {
     return (
@@ -351,53 +438,46 @@ export default function ConsultationTranscript() {
 
   return (
     <main className="min-h-screen bg-[#f5f0e7] px-4 py-6 md:px-8">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-[1500px]">
         <button type="button" onClick={discardAndReturn} className="inline-flex items-center gap-2 text-sm font-bold text-[#1a5c4a]">
           <ArrowLeft className="h-4 w-4" /> Doctor dashboard
         </button>
 
-        <div className="mt-5 overflow-hidden rounded-[30px] border border-white/80 bg-white/85 shadow-[0_24px_70px_-50px_rgba(18,64,54,0.7)]">
+        <div className="mt-5 overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-[0_24px_70px_-50px_rgba(18,64,54,0.7)]">
           <header className="border-b border-[#e5ded4] px-5 py-5 md:px-8">
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-[#1a5c4a]">Voice-to-English test</p>
-            <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-black tracking-tight text-[#202825] md:text-3xl">Consultation transcript</h1>
+                <h1 className="text-2xl font-black tracking-tight text-[#202825] md:text-3xl">Consultation EHR Review</h1>
                 <p className="mt-1 text-sm text-[#68736f]">{recording.patient.name}{recording.patient.token ? ` · ${recording.patient.token}` : ""} · {formatTime(recording.durationSeconds)}</p>
               </div>
-              <span className="rounded-full bg-[#edf8f3] px-3 py-1.5 text-xs font-bold text-[#1a5c4a]">Sarvam · Saaras v3</span>
+              {ehr ? <span className="rounded-full bg-amber-100 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-amber-800">{ehr.status}</span> : null}
             </div>
           </header>
 
-          <div className="grid gap-6 p-5 md:p-8 lg:grid-cols-[320px_1fr]">
-            <aside>
-              <div className="rounded-2xl bg-[#17312d] p-4 text-white">
-                <p className="text-sm font-bold">Recorded audio</p>
-                <p className="mt-1 text-xs text-white/55">Replay it before sending it for Sarvam transcription.</p>
-                {audioUrl && <audio className="mt-4 w-full" controls src={audioUrl} />}
+          <div className="space-y-5 p-5 md:p-8">
+            <aside className="flex flex-col gap-3 rounded-2xl border border-[#d9e4df] bg-[#f8fbf9] p-3 lg:flex-row lg:items-center">
+              <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="shrink-0"><p className="text-xs font-black uppercase tracking-wide text-[#365c51]">Consultation audio</p><p className="mt-0.5 text-xs text-[#6d7c77]">{formatTime(recording.durationSeconds)}</p></div>
+                {audioUrl && <audio className="h-10 w-full max-w-xl" controls src={audioUrl} />}
               </div>
 
               {processingStage === "transcribing" || processingStage === "generating" ? (
-                <div className="mt-4 rounded-2xl border border-[#e0e7e3] bg-white p-5 text-center shadow-sm">
-                  <Loader2 className="mx-auto h-8 w-8 animate-spin text-[#1a5c4a]" />
-                  <p className="mt-3 text-sm font-bold text-[#202825]">
+                <div className="flex items-center gap-2 rounded-xl border border-[#e0e7e3] bg-white px-4 py-2.5">
+                  <Loader2 className="h-5 w-5 animate-spin text-[#1a5c4a]" />
+                  <p className="text-sm font-bold text-[#202825]">
                     {processingStage === "transcribing" ? "Transcribing consultation..." : "Building EHR draft..."}
                   </p>
-                  <p className="mt-1 text-xs text-[#68736f]">This may take 1–2 minutes. Keep this page open.</p>
                 </div>
               ) : processingStage === "idle" && !ehr ? (
-                <div className="mt-4 rounded-2xl border border-[#eadfca] bg-[#fffaf0] p-4">
-                  <p className="text-sm font-bold text-[#5f4b24]">Ready to process</p>
-                  <p className="mt-1 text-xs leading-5 text-[#74684f]">Processing will start automatically.</p>
-                  <Button onClick={transcribe} className="mt-4 w-full bg-[#1a5c4a] hover:bg-[#144a3c]"><Sparkles className="mr-2 h-4 w-4" /> Start processing</Button>
-                </div>
+                <Button onClick={transcribe} className="bg-[#1a5c4a] hover:bg-[#144a3c]"><Sparkles className="mr-2 h-4 w-4" /> Start processing</Button>
               ) : null}
 
-              <button type="button" onClick={discardAndReturn} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[#d9d2c8] px-3 py-2.5 text-xs font-bold text-[#58645f]">
+              <button type="button" onClick={discardAndReturn} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#d9d2c8] bg-white px-3 py-2.5 text-xs font-bold text-[#58645f]">
                 <RotateCcw className="h-4 w-4" /> Discard and record again
               </button>
             </aside>
 
-            <section>
+            <section className="min-w-0">
               {error && (
                 <div className="mb-4 flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                   <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" /><p>{error}</p>
@@ -420,34 +500,6 @@ export default function ConsultationTranscript() {
                 </div>
               ) : ehr ? (
                 <div>
-                  {segments.length > 0 ? (
-                    <div className="mb-3 flex items-center justify-end">
-                      <button onClick={() => setShowTranscript(!showTranscript)} className="flex items-center gap-1 text-xs font-bold text-[#1a5c4a] hover:underline">
-                        {showTranscript ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        {showTranscript ? "Hide" : "Show"} transcript ({segments.length} segments)
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {showTranscript && segments.length > 0 ? (
-                    <div className="mb-4 overflow-hidden rounded-2xl border border-[#e5ded4] bg-white">
-                      <div className="border-b border-[#e5ded4] bg-[#fbfaf7] px-4 py-3">
-                        <p className="text-sm font-black text-[#202825]">Complete conversation</p>
-                      </div>
-                      <div className="divide-y divide-[#e5ded4]">
-                        {segments.map((segment, index) => (
-                          <div key={`${segment.start}-${index}`} className="p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[#40514b]"><UserRound className="h-4 w-4 text-[#1a5c4a]" />{segment.speaker}</p>
-                              <span className="text-[11px] font-bold text-[#8b8a84]">{formatTime(segment.start)}–{formatTime(segment.end)}</span>
-                            </div>
-                            <textarea value={segment.text} onChange={(event) => setSegments((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item))} className="mt-3 min-h-[72px] w-full resize-y rounded-xl border border-transparent bg-transparent p-2 text-sm leading-6 text-[#202825] outline-none focus:border-[#9acdbb] focus:bg-white" />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
                   {ehrNotice ? <p className="mb-4 rounded-xl bg-[#edf8f3] p-3 text-xs font-bold text-[#1a5c4a]">{ehrNotice}</p> : null}
 
                   {isSoap ? (
@@ -455,8 +507,8 @@ export default function ConsultationTranscript() {
                       <header className="border-b-4 border-[#1a5c4a] bg-[#17312d] px-5 py-5 text-white sm:px-8">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                           <div>
-                            <div className="flex items-center gap-2"><Stethoscope className="h-6 w-6 text-[#9de1ca]" /><h2 className="text-xl font-black tracking-tight">{recording.patient.name}</h2></div>
-                            <p className="mt-1 text-xs text-white/70">{recording.patient.clinicName || "Clinic"}</p>
+                            <div className="flex items-center gap-2"><Stethoscope className="h-6 w-6 text-[#9de1ca]" /><h2 className="text-xl font-black tracking-tight">{String(visitDetails.clinic_name || "Clinic")}</h2></div>
+                            <p className="mt-1 text-xs text-white/70">{visitDetails.doctor_name ? `Dr. ${String(visitDetails.doctor_name).replace(/^Dr\.?\s*/i, "")}` : "Doctor review"}</p>
                           </div>
                           <div className="sm:text-right">
                             <p className="text-[11px] font-black uppercase tracking-[0.2em] text-[#9de1ca]">Electronic Health Record</p>
@@ -467,11 +519,21 @@ export default function ConsultationTranscript() {
                       </header>
 
                       <div className="space-y-6 px-5 py-5 sm:px-8">
-                        <section className="grid gap-0 overflow-hidden rounded-lg border border-slate-300 sm:grid-cols-2">
-                          <div className="border-b border-slate-300 bg-slate-50 p-4 sm:border-b-0 sm:border-r">
+                        <section className="grid gap-0 overflow-hidden rounded-xl border border-slate-300 sm:grid-cols-2 xl:grid-cols-4">
+                          <div className="border-b border-slate-300 bg-slate-50 p-4 sm:border-r xl:border-b-0">
                             <p className="text-[10px] font-black uppercase tracking-[0.13em] text-[#58716a]">Patient</p>
                             <p className="mt-2 text-lg font-black">{recording.patient.name}</p>
                             <p className="mt-1 text-xs text-slate-600">{recording.patient.phone || ""}</p>
+                          </div>
+                          <div className="border-b border-slate-300 p-4 xl:border-b-0 xl:border-r">
+                            <p className="text-[10px] font-black uppercase tracking-[0.13em] text-[#58716a]">Doctor</p>
+                            <p className="mt-2 text-sm font-black">{visitDetails.doctor_name ? `Dr. ${String(visitDetails.doctor_name).replace(/^Dr\.?\s*/i, "")}` : "—"}</p>
+                          </div>
+                          <div className="border-b border-slate-300 bg-slate-50 p-4 sm:border-r xl:border-b-0">
+                            <p className="text-[10px] font-black uppercase tracking-[0.13em] text-[#58716a]">Clinic</p>
+                            <p className="mt-2 text-sm font-black">{String(visitDetails.clinic_name || "—")}</p>
+                            {hasValue(visitDetails.clinic_address) ? <p className="mt-1 text-xs leading-5 text-slate-600">{String(visitDetails.clinic_address)}</p> : null}
+                            {hasValue(visitDetails.clinic_phone) ? <p className="mt-1 text-xs font-semibold text-slate-700">{String(visitDetails.clinic_phone)}</p> : null}
                           </div>
                           <div className="p-4">
                             <p className="text-[10px] font-black uppercase tracking-[0.13em] text-[#58716a]">Visit</p>
@@ -480,26 +542,28 @@ export default function ConsultationTranscript() {
                           </div>
                         </section>
 
-                        {hasValue(subjective.chief_complaints) || hasValue(subjective.history_of_present_illness) || hasValue(subjective.symptoms) || hasValue(subjective.relevant_negatives) || hasValue(subjective.medical_conditions) || hasValue(subjective.allergies) || hasValue(subjective.current_medicines) || hasValue(subjective.family_history) ? (
+                        {hasValue(subjective.chief_complaints) || hasValue(subjective.history_of_present_illness) || hasValue(subjective.relevant_negatives) || hasValue(subjective.medical_conditions) || hasValue(subjective.allergies) || hasValue(subjective.current_medications) || hasValue(subjective.family_history) || hasValue(subjective.social_history) ? (
                           <EhrSection code="S" title="Subjective — Patient history">
                             <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                              {["chief_complaints", "history_of_present_illness", "symptoms", "relevant_negatives", "medical_conditions", "previous_surgeries", "allergies", "current_medicines", "family_history", "social_history"].map((field) => {
+                              {(["chief_complaints", "history_of_present_illness", "relevant_negatives", "medical_conditions", "allergies", "current_medications", "family_history", "social_history"] as const).map((field) => {
                                 const val = subjective[field];
-                                if (field === "symptoms") {
-                                  const rendered = renderSymptomsTable(val);
-                                  return <div key={field} className="sm:col-span-2">{rendered ? <div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Symptoms</dt><dd className="mt-1.5">{rendered}</dd></div> : <div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Symptoms</dt><dd className="mt-1.5"><textarea value="" onChange={() => {}} placeholder="No symptoms recorded" className="w-full resize-none rounded border-0 bg-transparent p-0 text-sm italic text-slate-400 outline-none focus:ring-0" /></dd></div>}</div>;
-                                }
                                 if (field === "chief_complaints") {
-                                  return <div key={field} className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Chief complaints</dt><dd className="mt-1.5">{typeof val === "string" ? <EditableText value={val} onChange={(v) => setSoapField(`subjective.${field}`, v)} /> : Array.isArray(val) ? <EditableList value={val} onChange={(v) => setSoapField(`subjective.${field}`, v)} /> : <textarea value="" onChange={() => {}} placeholder="Not mentioned" className="w-full resize-none rounded border-0 bg-transparent p-0 text-sm italic text-slate-400 outline-none focus:ring-0" />}</dd></div></div>;
+                                  return <div key={field} className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Chief complaints</dt><dd className="mt-1.5">{Array.isArray(val) ? <EditableChiefComplaintsTable value={val as Record<string, unknown>[]} onChange={(v) => setSoapField("subjective.chief_complaints", v)} /> : <textarea value="" onChange={() => {}} placeholder="Not mentioned" className="w-full resize-none rounded border-0 bg-transparent p-0 text-sm italic text-slate-400 outline-none focus:ring-0" />}</dd></div></div>;
+                                }
+                                if (field === "current_medications") {
+                                  return <div key={field} className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Current medications</dt><dd className="mt-1.5">{Array.isArray(val) ? <EditableCurrentMedicationsTable value={val as Record<string, unknown>[]} onChange={(v) => setSoapField("subjective.current_medications", v)} /> : <EditableList value={Array.isArray(val) ? val as string[] : []} onChange={(v) => setSoapField("subjective.current_medications", v)} />}</dd></div></div>;
+                                }
+                                if (field === "allergies") {
+                                  return <div key={field} className="sm:col-span-2"><div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><dt className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-amber-800"><AlertCircle className="h-4 w-4" /> Allergies</dt><dd className="mt-2"><EditableList value={Array.isArray(val) ? val as string[] : []} onChange={(v) => setSoapField("subjective.allergies", v)} /></dd><p className="mt-2 text-[10px] text-amber-800">Includes only allergies or allergy denials explicitly stated by the patient or caregiver.</p></div></div>;
                                 }
                                 if (field === "relevant_negatives") {
-                                  return <div key={field} className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Relevant negatives</dt><dd className="mt-1.5">{Array.isArray(val) ? <EditableList value={val} onChange={(v) => setSoapField(`subjective.${field}`, v)} /> : <textarea value="" onChange={() => {}} placeholder="No negatives recorded" className="w-full resize-none rounded border-0 bg-transparent p-0 text-sm italic text-slate-400 outline-none focus:ring-0" />}</dd></div></div>;
+                                  return <div key={field} className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Relevant negatives</dt><dd className="mt-1.5">{Array.isArray(val) ? <EditableList value={val as string[]} onChange={(v) => setSoapField(`subjective.${field}`, v)} /> : <textarea value="" onChange={() => {}} placeholder="No negatives recorded" className="w-full resize-none rounded border-0 bg-transparent p-0 text-sm italic text-slate-400 outline-none focus:ring-0" />}</dd></div></div>;
                                 }
-                                return hasValue(val) || field === "allergies" || field === "current_medicines" || field === "medical_conditions" ? (
+                                return hasValue(val) || field === "allergies" || field === "medical_conditions" || field === "family_history" || field === "social_history" ? (
                                   <div key={field} className={field === "history_of_present_illness" ? "sm:col-span-2" : ""}>
                                     <div className="border-b border-slate-200 pb-3">
                                       <dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">{fieldLabel(field)}</dt>
-                                      <dd className="mt-1.5">{Array.isArray(val) ? <EditableList value={val} onChange={(v) => setSoapField(`subjective.${field}`, v)} /> : <EditableText value={typeof val === "string" ? val : ""} onChange={(v) => setSoapField(`subjective.${field}`, v)} />}</dd>
+                                      <dd className="mt-1.5">{Array.isArray(val) ? <EditableList value={val as string[]} onChange={(v) => setSoapField(`subjective.${field}`, v)} /> : <EditableText value={typeof val === "string" ? val : ""} onChange={(v) => setSoapField(`subjective.${field}`, v)} />}</dd>
                                     </div>
                                   </div>
                                 ) : null;
@@ -508,45 +572,32 @@ export default function ConsultationTranscript() {
                           </EhrSection>
                         ) : null}
 
-                        {hasValue(objective.vitals) || hasValue(objective.examination_findings) ? (
+                        {hasValue(objective.vitals) || hasObjectContent(objective.physical_examination) || hasValue(objective.investigations) ? (
                           <EhrSection code="O" title="Objective — Clinical findings">
                             <div className="space-y-3">
                               {hasValue(objective.vitals) ? <div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Vitals and measurements</dt><dd className="mt-1.5">{renderVitalsGrid(objective.vitals)}</dd></div> : null}
-                              {hasValue(objective.examination_findings) ? <div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Examination findings</dt><dd className="mt-1.5"><EditableList value={objective.examination_findings as string[]} onChange={(v) => setSoapField("objective.examination_findings", v)} /></dd></div> : null}
-                              {hasValue(objective.available_test_results) ? <div><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Available test results</dt><dd className="mt-1.5"><EditableList value={objective.available_test_results as string[]} onChange={(v) => setSoapField("objective.available_test_results", v)} /></dd></div> : null}
+                              {hasObjectContent(objective.physical_examination) ? <div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Physical examination</dt><dd className="mt-1.5"><EditablePhysicalExamination value={objective.physical_examination as Record<string, unknown>} onChange={(v) => setSoapField("objective.physical_examination", v)} /></dd></div> : null}
+                              {hasValue(objective.investigations) ? <div><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Investigations</dt><dd className="mt-1.5"><EditableList value={objective.investigations as string[]} onChange={(v) => setSoapField("objective.investigations", v)} /></dd></div> : null}
                             </div>
                           </EhrSection>
                         ) : null}
 
-                        {hasValue(assessment.clinical_impression) || hasValue(assessment.provisional_diagnoses) || hasValue(assessment.confirmed_diagnoses) ? (
-                          <EhrSection code="A" title="Assessment — Clinical opinion">
-                            <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                              {(assessment.diagnosis_status ? <div className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Diagnosis status</dt><dd className="mt-1.5 text-sm font-bold">{String(assessment.diagnosis_status)}</dd></div></div> : null)}
-                              {["clinical_impression", "provisional_diagnoses", "confirmed_diagnoses", "differential_diagnoses"].map((field) => {
-                                const val = assessment[field];
-                                return hasValue(val) ? <div key={field} className={field === "differential_diagnoses" ? "sm:col-span-2" : ""}><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">{fieldLabel(field)}</dt><dd className="mt-1.5">{Array.isArray(val) ? <EditableList value={val as string[]} onChange={(v) => setSoapField(`assessment.${field}`, v)} /> : <EditableText value={typeof val === "string" ? val : ""} onChange={(v) => setSoapField(`assessment.${field}`, v)} />}</dd></div></div> : null;
-                              })}
-                            </div>
-                          </EhrSection>
-                        ) : null}
+                        <EhrSection code="A" title="Assessment — Clinical opinion">
+                          {!hasAssessmentContent(assessment) ? <p className="mb-3 text-sm italic text-slate-500">{EMPTY_ASSESSMENT_MESSAGE}</p> : null}
+                          <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                            <div className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Clinical impression</dt><dd className="mt-1.5"><EditableText value={typeof assessment.clinical_impression === "string" ? assessment.clinical_impression : ""} onChange={(v) => setSoapField("assessment.clinical_impression", v)} placeholder="Doctor may add an assessment" /></dd></div></div>
+                            {[["provisional_diagnosis", "Provisional diagnosis"], ["confirmed_diagnosis", "Confirmed diagnosis"], ["differential_diagnoses", "Differential diagnoses"], ["problems_being_managed", "Problems being managed"]].map(([field, label]) => <div key={field}><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">{label}</dt><dd className="mt-1.5"><EditableList value={Array.isArray(assessment[field]) ? assessment[field] as string[] : []} onChange={(v) => setSoapField(`assessment.${field}`, v)} /></dd></div></div>)}
+                          </div>
+                        </EhrSection>
 
-                        {hasValue(plan.prescriptions) || hasValue(plan.treatment_advice) || hasValue(plan.follow_up) || hasValue(plan.warning_signs) ? (
-                          <EhrSection code="P" title="Plan — Treatment and follow-up">
-                            <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                              {hasValue(plan.prescriptions) ? <div className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Prescriptions</dt><dd className="mt-1.5">{renderPrescriptionsTable(plan.prescriptions)}</dd></div></div> : null}
-                              {["tests_ordered", "procedures", "treatment_advice", "diet_and_hydration_advice", "referrals", "other_instructions"].map((field) => {
-                                const val = plan[field];
-                                return hasValue(val) ? <div key={field} className={field === "other_instructions" ? "sm:col-span-2" : ""}><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">{fieldLabel(field)}</dt><dd className="mt-1.5">{Array.isArray(val) ? <EditableList value={val as string[]} onChange={(v) => setSoapField(`plan.${field}`, v)} /> : <EditableText value={typeof val === "string" ? val : ""} onChange={(v) => setSoapField(`plan.${field}`, v)} />}</dd></div></div> : null;
-                              })}
-                              {hasValue(plan.follow_up) ? <div className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Follow-up</dt><dd className="mt-1.5">{typeof plan.follow_up === "object" ? <EditableText value={JSON.stringify(plan.follow_up, null, 2)} onChange={(v) => { try { setSoapField("plan.follow_up", JSON.parse(v)); } catch { setSoapField("plan.follow_up", v); } }} /> : <EditableText value={String(plan.follow_up || "")} onChange={(v) => setSoapField("plan.follow_up", v)} />}</dd></div></div> : null}
-                              {hasValue(plan.warning_signs) ? <div className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Warning signs</dt><dd className="mt-1.5">{typeof plan.warning_signs === "object" ? <EditableText value={JSON.stringify(plan.warning_signs, null, 2)} onChange={(v) => { try { setSoapField("plan.warning_signs", JSON.parse(v)); } catch { setSoapField("plan.warning_signs", v); } }} /> : <EditableList value={Array.isArray(plan.warning_signs) ? plan.warning_signs as string[] : []} onChange={(v) => setSoapField("plan.warning_signs", v)} />}</dd></div></div> : null}
-                            </div>
-                          </EhrSection>
-                        ) : null}
-
-                        {hasValue(ehr.ehr_data.additional_clinical_information) ? (
-                          <EhrSection title="Additional clinical information"><div className="grid gap-x-6 gap-y-3 sm:grid-cols-2"><div className="sm:col-span-2">{Array.isArray(ehr.ehr_data.additional_clinical_information) ? <EditableList value={ehr.ehr_data.additional_clinical_information as string[]} onChange={(v) => setSoapField("additional_clinical_information", v)} /> : <EditableText value={typeof ehr.ehr_data.additional_clinical_information === "string" ? ehr.ehr_data.additional_clinical_information : ""} onChange={(v) => setSoapField("additional_clinical_information", v)} />}</div></div></EhrSection>
-                        ) : null}
+                        <EhrSection code="P" title="Plan — Treatment and follow-up">
+                          {!hasPlanContent(plan) ? <p className="mb-3 text-sm italic text-slate-500">{EMPTY_PLAN_MESSAGE}</p> : null}
+                          <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                            <div className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Prescriptions</dt><dd className="mt-1.5"><EditablePlanMedicationsTable value={Array.isArray(plan.prescriptions) ? plan.prescriptions as Record<string, unknown>[] : []} onChange={(v) => setSoapField("plan.prescriptions", v)} /></dd></div></div>
+                            {[["tests_ordered", "Tests ordered"], ["procedures", "Procedures"], ["treatment_advice", "Treatment advice"], ["diet_lifestyle_advice", "Diet & lifestyle advice"], ["monitoring", "Monitoring"], ["referrals", "Referrals"], ["warning_signs", "Warning signs"], ["other_instructions", "Other instructions"]].map(([field, label]) => <div key={field} className={field === "warning_signs" || field === "other_instructions" ? "sm:col-span-2" : ""}><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">{label}</dt><dd className="mt-1.5"><EditableList value={Array.isArray(plan[field]) ? plan[field] as string[] : []} onChange={(v) => setSoapField(`plan.${field}`, v)} /></dd></div></div>)}
+                            <div className="sm:col-span-2"><div className="border-b border-slate-200 pb-3"><dt className="text-[10px] font-black uppercase tracking-[0.12em] text-[#58716a]">Follow-up</dt><dd className="mt-1.5"><EditableText value={typeof plan.follow_up === "string" ? plan.follow_up : ""} onChange={(v) => setSoapField("plan.follow_up", v)} placeholder="Doctor may add follow-up instructions" /></dd></div></div>
+                          </div>
+                        </EhrSection>
 
                         <footer className="rounded-lg border border-[#b9ddcf] bg-[#f4fbf8] p-4">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -554,9 +605,6 @@ export default function ConsultationTranscript() {
                               <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-[#1a5c4a]"><ShieldCheck className="h-4 w-4" /> Clinical approval</p>
                               <p className="mt-1 text-sm font-bold text-amber-700">DRAFT — Awaiting doctor review and approval</p>
                               <p className="mt-0.5 text-xs text-slate-600">This is not a signed final medical record</p>
-                            </div>
-                            <div className="text-left text-[10px] text-slate-500 sm:text-right">
-                              <p>Generated with {ehr.model_name || "clinical documentation system"}</p>
                             </div>
                           </div>
                         </footer>
@@ -567,7 +615,7 @@ export default function ConsultationTranscript() {
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d5e9e1] px-4 py-4">
                         <div>
                           <p className="flex items-center gap-2 text-sm font-black text-[#17312d]"><ShieldCheck className="h-4 w-4" /> Doctor review</p>
-                          <p className="mt-1 text-xs text-[#60766f]">{ehr.model_name || "gpt-oss:20b"} created this draft.</p>
+                          <p className="mt-1 text-xs text-[#60766f]">Review every field before approval.</p>
                         </div>
                         <span className="rounded-full px-3 py-1 text-xs font-black bg-amber-100 text-amber-800">Unapproved draft</span>
                       </div>
@@ -591,38 +639,11 @@ export default function ConsultationTranscript() {
 
                   <div className="mt-5 overflow-hidden rounded-2xl border border-[#b9ddcf] bg-[#f4fbf8]">
                     <div className="border-b border-[#d5e9e1] px-4 py-4">
-                      <p className="text-sm font-black text-[#17312d]">Patient summary</p>
-                      <p className="mt-1 text-xs text-[#60766f]">A simple version for the patient. They see it only after approval.</p>
+                      <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-black text-[#17312d]">Patient Summary{ehr.status === "draft" ? " Preview" : ""}</p>{ehr.status === "draft" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800">Draft</span> : null}</div>
+                      <p className="mt-1 text-xs text-[#60766f]">{ehr.status === "draft" ? "Generated from the current SOAP draft for doctor review. The patient receives the final version only after approval." : "A simple version of the doctor-approved SOAP record for the patient."}</p>
                     </div>
                     <div className="p-4">
-                      {typeof ehr.patient_summary.visit_overview === "string" && ehr.patient_summary.visit_overview ? <p className="rounded-xl bg-white p-3 text-sm font-semibold leading-6 text-[#30443e]">{ehr.patient_summary.visit_overview}</p> : null}
-                      <div className="mt-4 grid gap-3 md:grid-cols-2">
-                        {[
-                          { field: "medicines", title: "Medicines", icon: Pill, tone: "bg-blue-50 text-blue-800" },
-                          { field: "tests", title: "Tests", icon: FlaskConical, tone: "bg-violet-50 text-violet-800" },
-                          { field: "diet_advice", title: "Diet & hydration", icon: Apple, tone: "bg-amber-50 text-amber-800" },
-                          { field: "doctor_suggestions", title: "Doctor suggestions", icon: ListChecks, tone: "bg-[#edf8f3] text-[#1a5c4a]" },
-                        ].map(({ field, title, icon: Icon, tone }) => {
-                          const items = summaryList(ehr.patient_summary[field]);
-                          return <div key={field} className={`rounded-xl p-3 ${tone}`}>
-                            <p className="flex items-center gap-2 text-xs font-black uppercase tracking-wide"><Icon className="h-4 w-4" />{title}</p>
-                            {items.length ? <ul className="mt-2 space-y-1 text-sm leading-5">{items.map((item) => <li key={item}>• {item}</li>)}</ul> : <p className="mt-2 text-xs opacity-70">Not discussed.</p>}
-                          </div>;
-                        })}
-                      </div>
-                      <div className="mt-4 grid gap-3 md:grid-cols-2">
-                        {summaryFields.filter(([f]) => !["medicines", "tests", "diet_advice", "doctor_suggestions", "visit_overview"].includes(f)).map(([field, label, kind]) => (
-                          <label key={field} className={field === "instructions" || field === "follow_up" ? "md:col-span-2" : ""}>
-                            <span className="text-xs font-bold text-[#40514b]">{label}</span>
-                            <textarea
-                              value={editableValue(ehr.patient_summary[field], kind)}
-                              onChange={(event) => updateEhrField("patient_summary", field, kind, event.target.value)}
-                              placeholder="Not mentioned"
-                              className="mt-1 min-h-[82px] w-full rounded-xl border border-[#d5e3dd] bg-white p-3 text-sm leading-5 text-[#202825] outline-none focus:border-[#68ad94]"
-                            />
-                          </label>
-                        ))}
-                      </div>
+                      {!hasValue(displayedPatientSummary) ? <p className="rounded-xl bg-white p-4 text-sm text-[#40514b]">{EMPTY_PATIENT_SUMMARY_MESSAGE}</p> : <div className="grid gap-3 md:grid-cols-2">{[["visit_summary", "Visit Summary"], ["medicines", "Medicines"], ["tests", "Tests"], ["procedures", "Procedures"], ["diet_and_care", "Diet & Care"], ["monitoring", "Monitoring"], ["referrals", "Referrals"], ["other_instructions", "Other Doctor Instructions"], ["when_to_seek_help", "Warning Signs — When to Seek Help"], ["follow_up", "Follow-Up"]].map(([field, title]) => { const value = displayedPatientSummary[field]; if (!hasValue(value)) return null; return <section key={field} className={`rounded-xl bg-white p-3 ${field === "medicines" || field === "other_instructions" || field === "when_to_seek_help" || field === "follow_up" ? "md:col-span-2" : ""}`}><p className="text-xs font-black uppercase tracking-wide text-[#1a5c4a]">{title}</p><div className="mt-2 text-sm leading-6 text-[#30443e]">{field === "medicines" ? renderPatientMedicines(value) : field === "when_to_seek_help" ? renderPatientWarningSigns(value) : renderClinicalValue(value)}</div></section>; })}</div>}
                     </div>
                   </div>
 
@@ -642,13 +663,18 @@ export default function ConsultationTranscript() {
   );
 }
 
+function visibleTextRows(value: string, charactersPerLine = 105): number {
+  if (!value) return 2;
+  return Math.max(2, value.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0));
+}
+
 function EditableText({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return <textarea
     value={value || ""}
     onChange={(e) => onChange(e.target.value)}
     placeholder={placeholder || "Not mentioned"}
     className="w-full resize-none rounded border-0 bg-transparent p-0 text-sm leading-6 text-slate-800 outline-none focus:ring-0 focus:bg-white focus:border focus:border-[#9acdbb] focus:px-2 focus:py-1"
-    rows={Math.max(1, (value || "").split("\n").length)}
+    rows={visibleTextRows(value || "")}
   />;
 }
 
@@ -659,6 +685,6 @@ function EditableList({ value, onChange }: { value: string[]; onChange: (v: stri
     onChange={(e) => onChange(e.target.value.split("\n").map((s) => s.trim()).filter(Boolean))}
     placeholder="One item per line"
     className="w-full resize-none rounded border-0 bg-transparent p-0 text-sm leading-6 text-slate-800 outline-none focus:ring-0 focus:bg-white focus:border focus:border-[#9acdbb] focus:px-2 focus:py-1"
-    rows={Math.max(1, text.split("\n").length)}
+    rows={visibleTextRows(text)}
   />;
 }

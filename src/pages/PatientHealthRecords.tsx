@@ -1,6 +1,6 @@
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, FileText, Link2, ShieldCheck, Upload } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileText, Upload } from "lucide-react";
 import { apiUrl } from "@/lib/api";
 
 type HealthDocument = {
@@ -95,27 +95,9 @@ export default function PatientHealthRecords() {
           </Link>
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary/70">Health records</p>
-            <h1 className="font-display text-2xl font-bold text-[#17312d]">ABDM &amp; uploads</h1>
+            <h1 className="font-display text-2xl font-bold text-[#17312d]">Medical reports</h1>
           </div>
         </header>
-
-        <section className="rounded-[30px] bg-[#143b34] p-5 text-white shadow-[0_26px_70px_-42px_rgba(31,92,84,0.95)]">
-          <div className="flex items-start gap-3">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10"><ShieldCheck className="h-6 w-6" /></span>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.15em] text-white/60">ABHA status</p>
-              <h2 className="mt-1 text-xl font-bold">Not connected</h2>
-              <p className="mt-2 text-sm leading-5 text-white/70">Connect your ABHA to bring consented health records from ABDM into one place.</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setMessage("ABDM Sandbox setup is required before ABHA connection can be enabled.")}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-[#143b34]"
-          >
-            <Link2 className="h-4 w-4" /> Connect ABHA
-          </button>
-        </section>
 
         <section className="rounded-[26px] border border-white/70 bg-white/80 p-5">
           <div className="flex items-center gap-3">

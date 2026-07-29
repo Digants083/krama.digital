@@ -88,4 +88,19 @@ def ehr_model_name() -> str:
 
 
 def ehr_generation_timeout_seconds() -> int:
-    return _env_int("EHR_GENERATION_TIMEOUT_SECONDS", 600, minimum=60)
+    return _env_int("EHR_GENERATION_TIMEOUT_SECONDS", 900, minimum=60)
+
+
+def ehr_context_window_tokens() -> int:
+    # num_ctx is the combined prompt + response window. SOAP prompts include
+    # the transcript, schema, and retrieved documentation rules, so 8K is too
+    # small for ordinary multi-minute consultations.
+    return _env_int("EHR_CONTEXT_WINDOW_TOKENS", 32768, minimum=16384)
+
+
+def ehr_initial_output_tokens() -> int:
+    return _env_int("EHR_INITIAL_OUTPUT_TOKENS", 3072, minimum=2048)
+
+
+def ehr_max_output_tokens() -> int:
+    return _env_int("EHR_MAX_OUTPUT_TOKENS", 6144, minimum=4096)

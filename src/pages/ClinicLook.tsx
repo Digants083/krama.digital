@@ -159,13 +159,19 @@ const ClinicLook = () => {
         throw new Error(body.detail || "Could not load this patient's EHR");
       }
       const payload = await response.json();
-      // Find the encounter matching this visit
-      const enc = payload.encounters.find((e: Record<string, unknown>) =>
-        (e.visit?.appointment_token && e.visit.appointment_token === visit.appointment_token) ||
-        (e.visit?.date === visit.date && e.visit?.time === visit.time)
-      ) || payload.encounters.find((e: Record<string, unknown>) => {
-        const encDate = new Date(e.approved_at || e.created_at);
-        return encDate.toISOString().slice(0, 10) === visit.date;
+      const encounters = Array.isArray(payload.encounters) ? payload.encounters : [];
+      const normalizedTime = (value: unknown) => String(value || "").slice(0, 5);
+      // Match the stable token first. Historical appointments are removed from
+      // the live table, so their EHR falls back to the stored visit date/time.
+      const enc = encounters.find((e: any) =>
+        e.visit?.appointment_token && e.visit.appointment_token === visit.appointment_token
+      ) || encounters.find((e: any) =>
+        e.visit?.date === visit.date && normalizedTime(e.visit?.time) === normalizedTime(visit.time)
+      ) || encounters.find((e: any) => {
+        const storedDateTime = e.ehr_data?.visit_details?.visit_datetime;
+        return typeof storedDateTime === "string" &&
+          storedDateTime.slice(0, 10) === visit.date &&
+          normalizedTime(storedDateTime.split("T")[1]) === normalizedTime(visit.time);
       });
       if (!enc) {
         setMessage({ text: "No EHR recorded for this visit.", type: "error" });

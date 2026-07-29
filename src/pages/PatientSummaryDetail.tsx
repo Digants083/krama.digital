@@ -3,30 +3,36 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Printer, Download, Loader2, AlertTriangle, Stethoscope, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/api";
+import { medicationMealCode, medicationWhenToTake } from "@/lib/medicationDisplay";
 
 interface MedicineItem {
   medicine_name: string;
   strength?: string | null;
+  dosage_form?: string | null;
   dose?: string | null;
+  route?: string | null;
   schedule?: { morning?: string | null; afternoon?: string | null; night?: string | null } | null;
   meal_timing?: string | null;
   specific_timing?: string | null;
   frequency?: string | null;
   duration?: string | null;
-  as_needed?: boolean;
+  action?: string | null;
+  prn_condition?: string | null;
   indication?: string | null;
-  additional_instructions?: string | null;
+  instructions?: string | null;
 }
 
 interface VisitSummary {
-  reason_for_visit?: string | null;
-  what_the_doctor_assessed?: string | null;
+  visit_summary?: string | null;
   medicines?: (string | MedicineItem)[];
   tests?: string[];
-  diet_and_hydration_advice?: string[];
-  doctor_instructions?: string[];
+  procedures?: string[];
+  diet_and_care?: string[];
+  monitoring?: string[];
+  referrals?: string[];
+  other_instructions?: string[];
   follow_up?: string | null;
-  when_to_seek_help?: string[];
+  when_to_seek_help?: unknown[];
 }
 
 interface UnifiedVisit {
@@ -104,15 +110,17 @@ function SummaryContent({ summary, approved_at, doctor_name, clinic_name, visit_
 }) {
   const items: { label: string; value: unknown; type?: "text" | "list" | "warning" | "medicines" }[] = [];
 
-  if (summary.reason_for_visit) items.push({ label: "Reason for visit", value: summary.reason_for_visit, type: "text" });
-  if (summary.what_the_doctor_assessed) items.push({ label: "What the doctor found", value: summary.what_the_doctor_assessed, type: "text" });
+  if (summary.visit_summary) items.push({ label: "Visit Summary", value: summary.visit_summary, type: "text" });
   if (summary.medicines?.length) {
     const hasStructured = summary.medicines.some((m) => typeof m === "object");
     items.push({ label: "Medicines", value: summary.medicines, type: hasStructured ? "medicines" : "list" });
   }
   if (summary.tests?.length) items.push({ label: "Tests", value: summary.tests, type: "list" });
-  if (summary.diet_and_hydration_advice?.length) items.push({ label: "Diet and hydration advice", value: summary.diet_and_hydration_advice, type: "list" });
-  if (summary.doctor_instructions?.length) items.push({ label: "Doctor instructions", value: summary.doctor_instructions, type: "list" });
+  if (summary.procedures?.length) items.push({ label: "Procedures", value: summary.procedures, type: "list" });
+  if (summary.diet_and_care?.length) items.push({ label: "Diet & Care", value: summary.diet_and_care, type: "list" });
+  if (summary.monitoring?.length) items.push({ label: "Monitoring", value: summary.monitoring, type: "list" });
+  if (summary.referrals?.length) items.push({ label: "Referrals", value: summary.referrals, type: "list" });
+  if (summary.other_instructions?.length) items.push({ label: "Other Doctor Instructions", value: summary.other_instructions, type: "list" });
   if (summary.follow_up) items.push({ label: "Follow-up", value: summary.follow_up, type: "text" });
   if (summary.when_to_seek_help?.length) items.push({ label: "When to seek medical help", value: summary.when_to_seek_help, type: "warning" });
 
@@ -129,7 +137,7 @@ function SummaryContent({ summary, approved_at, doctor_name, clinic_name, visit_
       </div>
 
       {items.length === 0 ? (
-        <p className="text-sm italic text-slate-500">No details recorded for this visit.</p>
+        <p className="text-sm text-slate-500">No patient instructions were documented for this visit.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {items.map((item) => {
@@ -160,7 +168,7 @@ function SummaryContent({ summary, approved_at, doctor_name, clinic_name, visit_
               );
             }
             return (
-              <div key={item.label} className={item.label === "Reason for visit" || item.label === "What the doctor found" || item.label === "Follow-up" ? "sm:col-span-2 min-w-0" : "min-w-0"}>
+              <div key={item.label} className={item.label === "Visit Summary" || item.label === "Follow-up" ? "sm:col-span-2 min-w-0" : "min-w-0"}>
                 <p className="text-xs font-bold uppercase tracking-wide text-[#58716a]">{item.label}</p>
                 <p className="mt-0.5 text-sm leading-6 text-slate-800">{String(item.value)}</p>
               </div>
@@ -181,13 +189,20 @@ function renderListValue(value: unknown) {
         {items.map((item, i) => (
           <li key={i} className="flex items-start gap-2">
             <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a5c4a]" />
-            <span>{String(item)}</span>
+            <span>{formatInstruction(item)}</span>
           </li>
         ))}
       </ul>
     );
   }
   return <p className="mt-0.5 text-sm leading-6 text-slate-800">{String(value)}</p>;
+}
+
+function formatInstruction(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return String(value ?? "");
+  const item = value as Record<string, unknown>;
+  if (item.raw_instruction) return String(item.raw_instruction);
+  return [item.condition, item.action, item.urgency].filter(Boolean).map(String).join(" — ");
 }
 
 function renderMedicinesTable(value: unknown) {
@@ -200,35 +215,25 @@ function renderMedicinesTable(value: unknown) {
         <thead>
           <tr className="border-b border-slate-300 bg-slate-50">
             <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">Medicine</th>
-            <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">How much</th>
+            <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">Dosage</th>
             <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">When to take</th>
-            <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">How long</th>
-            <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">Important instruction</th>
+            <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">AF / BF</th>
+            <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-[#58716a]">Duration</th>
           </tr>
         </thead>
         <tbody>
           {medicines.map((m, i) => {
-            const howMuch = [m.strength, m.dose].filter(Boolean).join(" ");
-            const whenParts: string[] = [];
-            if (m.schedule) {
-              if (m.schedule.morning) whenParts.push(`Morning: ${m.schedule.morning}`);
-              if (m.schedule.afternoon) whenParts.push(`Afternoon: ${m.schedule.afternoon}`);
-              if (m.schedule.night) whenParts.push(`Night: ${m.schedule.night}`);
-            }
-            if (m.meal_timing) whenParts.push(m.meal_timing);
-            if (m.specific_timing) whenParts.push(m.specific_timing);
-            if (m.frequency) whenParts.push(m.frequency);
-            if (m.as_needed) whenParts.push("As needed (PRN)");
-            const when = whenParts.join("; ");
+            const howMuch = m.dose || "";
+            const when = medicationWhenToTake(m);
+            const meal = medicationMealCode(m);
             const howLong = m.duration || "";
-            const important = [m.indication, m.additional_instructions].filter(Boolean).join("; ");
             return (
               <tr key={i} className="border-b border-slate-100">
                 <td className="px-2 py-1.5 font-medium">{m.medicine_name}</td>
                 <td className="px-2 py-1.5 text-slate-600">{howMuch || "\u2014"}</td>
                 <td className="px-2 py-1.5 text-slate-600">{when || "\u2014"}</td>
+                <td className="px-2 py-1.5 font-semibold text-slate-600">{meal || "\u2014"}</td>
                 <td className="px-2 py-1.5 text-slate-600">{howLong || "\u2014"}</td>
-                <td className="px-2 py-1.5 text-slate-600">{important || "\u2014"}</td>
               </tr>
             );
           })}
@@ -398,40 +403,29 @@ const PatientSummaryDetail = () => {
 
 function buildPrintHtml(summary: VisitSummary): string {
   let html = "";
-  if (summary.reason_for_visit) html += `<h2>Reason for visit</h2><p>${summary.reason_for_visit}</p>`;
-  if (summary.what_the_doctor_assessed) html += `<h2>What the doctor found</h2><p>${summary.what_the_doctor_assessed}</p>`;
+  if (summary.visit_summary) html += `<h2>Visit Summary</h2><p>${escapeHtml(summary.visit_summary)}</p>`;
   if (summary.medicines?.length) {
     const hasStructured = summary.medicines.some((m) => typeof m === "object");
     if (hasStructured) {
       html += `<h2>Medicines</h2><table style="width:100%;border-collapse:collapse;font-size:10pt;"><thead><tr style="background:#edf3f0;">`;
       html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">Medicine</th>`;
-      html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">How much</th>`;
+      html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">Dosage</th>`;
       html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">When to take</th>`;
-      html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">How long</th>`;
-      html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">Important instruction</th>`;
+      html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">AF / BF</th>`;
+      html += `<th style="padding:4px 6px;text-align:left;font-weight:700;">Duration</th>`;
       html += `</tr></thead><tbody>`;
       for (const m of summary.medicines) {
         if (typeof m === "object" && m !== null) {
           const rx = m as MedicineItem;
-          const howMuch = [rx.strength, rx.dose].filter(Boolean).join(" ");
-          const whenParts: string[] = [];
-          if (rx.schedule) {
-            if (rx.schedule.morning) whenParts.push(`Morning: ${rx.schedule.morning}`);
-            if (rx.schedule.afternoon) whenParts.push(`Afternoon: ${rx.schedule.afternoon}`);
-            if (rx.schedule.night) whenParts.push(`Night: ${rx.schedule.night}`);
-          }
-          if (rx.meal_timing) whenParts.push(rx.meal_timing);
-          if (rx.specific_timing) whenParts.push(rx.specific_timing);
-          if (rx.frequency) whenParts.push(rx.frequency);
-          if (rx.as_needed) whenParts.push("As needed (PRN)");
-          const whenStr = whenParts.join("; ");
-          const important = [rx.indication, rx.additional_instructions].filter(Boolean).join("; ");
+          const howMuch = rx.dose || "";
+          const whenStr = medicationWhenToTake(rx);
+          const meal = medicationMealCode(rx);
           html += `<tr style="border-bottom:1px solid #ddd;">`;
           html += `<td style="padding:4px 6px;font-weight:600;">${escapeHtml(rx.medicine_name)}</td>`;
           html += `<td style="padding:4px 6px;">${escapeHtml(howMuch || "\u2014")}</td>`;
           html += `<td style="padding:4px 6px;">${escapeHtml(whenStr || "\u2014")}</td>`;
+          html += `<td style="padding:4px 6px;">${escapeHtml(meal || "\u2014")}</td>`;
           html += `<td style="padding:4px 6px;">${escapeHtml(rx.duration || "\u2014")}</td>`;
-          html += `<td style="padding:4px 6px;">${escapeHtml(important || "\u2014")}</td>`;
           html += `</tr>`;
         }
       }
@@ -441,11 +435,14 @@ function buildPrintHtml(summary: VisitSummary): string {
     }
   }
   if (summary.tests?.length) html += `<h2>Tests</h2><ul>${summary.tests.map((t) => `<li>${t}</li>`).join("")}</ul>`;
-  if (summary.diet_and_hydration_advice?.length) html += `<h2>Diet and hydration advice</h2><ul>${summary.diet_and_hydration_advice.map((d) => `<li>${d}</li>`).join("")}</ul>`;
-  if (summary.doctor_instructions?.length) html += `<h2>Doctor instructions</h2><ul>${summary.doctor_instructions.map((i) => `<li>${i}</li>`).join("")}</ul>`;
+  if (summary.procedures?.length) html += `<h2>Procedures</h2><ul>${summary.procedures.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  if (summary.diet_and_care?.length) html += `<h2>Diet &amp; Care</h2><ul>${summary.diet_and_care.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul>`;
+  if (summary.monitoring?.length) html += `<h2>Monitoring</h2><ul>${summary.monitoring.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`;
+  if (summary.referrals?.length) html += `<h2>Referrals</h2><ul>${summary.referrals.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  if (summary.other_instructions?.length) html += `<h2>Other Doctor Instructions</h2><ul>${summary.other_instructions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
   if (summary.follow_up) html += `<h2>Follow-up</h2><p>${summary.follow_up}</p>`;
   if (summary.when_to_seek_help?.length) {
-    html += `<div class="warning"><h2>When to seek medical help</h2><ul>${summary.when_to_seek_help.map((w) => `<li>${w}</li>`).join("")}</ul></div>`;
+    html += `<div class="warning"><h2>When to seek medical help</h2><ul>${summary.when_to_seek_help.map((w) => `<li>${escapeHtml(formatInstruction(w))}</li>`).join("")}</ul></div>`;
   }
   return html;
 }
