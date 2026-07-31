@@ -61,8 +61,8 @@ class EhrNormalizationTests(unittest.TestCase):
         self.assertEqual(
             result["subjective"]["chief_complaints"],
             [
-                {"complaint": "Fever", "severity": None, "course": None, "duration": None},
-                {"complaint": "Cough", "severity": None, "course": None, "duration": None},
+                {"complaint": "Fever", "duration": None},
+                {"complaint": "Cough", "duration": None},
             ],
         )
         self.assertNotIn("symptoms", result["subjective"])
@@ -82,20 +82,20 @@ class EhrNormalizationTests(unittest.TestCase):
         }
         result = _normalize_soap_ehr(raw)
         self.assertEqual(result["subjective"]["chief_complaints"], [
-            {"complaint": "Fever", "severity": "severe", "course": "continuous", "duration": "one week"},
-            {"complaint": "Headache", "severity": "mild", "course": "intermittent", "duration": "one week"},
-            {"complaint": "Throat infection", "severity": None, "course": None, "duration": None},
+            {"complaint": "Fever", "duration": "one week"},
+            {"complaint": "Headache", "duration": "one week"},
+            {"complaint": "Throat infection", "duration": None},
         ])
         self.assertNotIn("symptoms", result["subjective"])
 
-    def test_normalize_canonicalizes_slight_and_fluctuating_headache(self):
+    def test_normalize_removes_legacy_severity_and_course_fields(self):
         result = _normalize_soap_ehr({
             "subjective": {"chief_complaints": [{
                 "complaint": "Headache", "severity": "slight", "course": "fluctuating", "duration": None,
             }]}
         })
         self.assertEqual(result["subjective"]["chief_complaints"], [{
-            "complaint": "Headache", "severity": "mild", "course": "intermittent", "duration": None,
+            "complaint": "Headache", "duration": None,
         }])
 
     def test_normalize_soap_handles_empty_input(self):
@@ -245,7 +245,7 @@ class EhrPatientSummaryTests(unittest.TestCase):
         ehr = _empty_ehr()
         ehr["plan"]["treatment_advice"] = ["Drink warm fluids"]
         summary = _generate_patient_summary_from_soap(ehr)
-        self.assertIn("Drink warm fluids", summary["diet_and_care"])
+        self.assertEqual(summary["diet_and_care"], ["Care instructions: Drink warm fluids."])
 
     def test_summary_follow_up_from_plan(self):
         ehr = _empty_ehr()
@@ -447,7 +447,7 @@ class PerItemEvidenceTests(unittest.TestCase):
         result = _validate_and_fix_soap_coverage(ehr, transcript, ledger)
         self.assertEqual(
             result["subjective"]["allergies"],
-            ["There is a slight allergy from milk", "No known drug allergies"],
+            ["Milk allergy", "No known drug allergies"],
         )
 
     def test_family_and_social_history_are_exact_patient_clauses(self):
@@ -615,6 +615,42 @@ class PerItemEvidenceTests(unittest.TestCase):
             ["Condition Beta", "Condition Gamma"],
         )
         self.assertNotIn("much more", str(result["assessment"]).lower())
+
+    def test_assessment_handles_think_and_possibility_wording(self):
+        ehr = _empty_ehr()
+        transcript = (
+            "Doctor: I think this is viral infection, but there is a possibility "
+            "of dengue or malaria."
+        )
+        ledger = retrieve_soap_context(transcript)["evidence"]
+
+        result = _validate_and_fix_soap_coverage(ehr, transcript, ledger)
+
+        self.assertEqual(result["assessment"]["clinical_impression"], "viral infection")
+        self.assertEqual(result["assessment"]["provisional_diagnosis"], ["viral infection"])
+        self.assertEqual(result["assessment"]["differential_diagnoses"], ["dengue", "malaria"])
+
+    def test_warning_signs_are_complete_and_removed_from_diet(self):
+        ehr = _empty_ehr()
+        ehr["plan"]["diet_lifestyle_advice"] = [
+            "Drink warm fluids.",
+            "If fever reaches 105 F, go to the hospital.",
+        ]
+        ehr["plan"]["warning_signs"] = ["If fever reaches 105 F, go to the hospital."]
+        transcript = (
+            "Doctor: Drink warm fluids.\n"
+            "Doctor: If fever reaches 105 F, go to the hospital.\n"
+            "Doctor: If breathing difficulty develops, go to the hospital immediately."
+        )
+        ledger = retrieve_soap_context(transcript)["evidence"]
+
+        result = _validate_and_fix_soap_coverage(ehr, transcript, ledger)
+
+        self.assertEqual(result["plan"]["diet_lifestyle_advice"], ["Drink warm fluids."])
+        self.assertEqual(result["plan"]["warning_signs"], [
+            "If fever reaches 105 F, go to the hospital.",
+            "If breathing difficulty develops, go to the hospital immediately.",
+        ])
 
     def test_patient_only_warning_signs_removed(self):
         ehr = _empty_ehr()

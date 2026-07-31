@@ -301,10 +301,8 @@ function renderChiefComplaintsTable(complaints: unknown): ReactNode {
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="border-b border-slate-300 bg-slate-50">
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Current symptom</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Severity</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Course</th>
-              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Since / duration</th>
+              <th className="w-2/3 px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Complaint</th>
+              <th className="px-3 py-2 text-left font-bold uppercase tracking-wide text-[#58716a]">Duration</th>
             </tr>
           </thead>
           <tbody>
@@ -314,15 +312,13 @@ function renderChiefComplaintsTable(complaints: unknown): ReactNode {
                 return (
                   <tr key={i} className="border-b border-slate-100">
                     <td className="px-3 py-2 font-medium">{String(o.complaint || "")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.severity || "\u2014")}</td>
-                    <td className="px-3 py-2 text-slate-600">{String(o.course || "\u2014")}</td>
                     <td className="px-3 py-2 text-slate-600">{String(o.duration || "\u2014")}</td>
                   </tr>
                 );
               }
               return (
                 <tr key={i} className="border-b border-slate-100">
-                  <td colSpan={4} className="px-3 py-2">{String(item)}</td>
+                  <td colSpan={2} className="px-3 py-2">{String(item)}</td>
                 </tr>
               );
             })}

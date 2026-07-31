@@ -219,17 +219,15 @@
       "section": "S",
       "field": "subjective.chief_concerns",
       "speaker": ["patient", "caregiver"],
-      "purpose": "Capture each main reason for the visit with only explicitly spoken details.",
+      "purpose": "Capture each main reason for the visit as a concise complaint with its explicitly stated duration.",
       "include": [
         "Concern or symptom name",
-        "Duration when stated",
-        "Severity when stated",
-        "Progression or course when stated",
-        "Normalize slight or slightly as mild, and fluctuating, comes and goes, or on and off as intermittent"
+        "Duration when stated"
       ],
       "exclude": [
         "Diagnosis label",
         "Doctor advice or plan",
+        "Severity or course details, which belong in history of present illness",
         "Full HPI narrative",
         "Repeated duration inside the concern name"
       ],

@@ -285,32 +285,36 @@ def _build_plan_list(soap: dict[str, Any], field: str) -> list[str]:
 
 
 def _build_diet_and_care(soap: dict[str, Any]) -> list[str]:
-    """Combine patient-friendly diet and care advice from Plan.
-
-    Supports new format (plan.advice single array) first,
-    falls back to old format (plan.treatment_advice + plan.diet_and_hydration_advice).
-    """
+    """Summarize explicit Plan advice without adding clinical information."""
     plan = soap.get("plan") or {}
 
-    advice = plan.get("advice")
-    if isinstance(advice, list):
-        items = []
-        for item in advice:
-            text = _clean_str(item)
-            if text and text not in items:
-                items.append(text)
-        return items
+    def clean_unique(raw: Any, seen: set[str]) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        result: list[str] = []
+        for item in raw:
+            text = _clean_str(item).strip().rstrip(".;")
+            key = text.casefold()
+            if text and key not in seen:
+                seen.add(key)
+                result.append(text)
+        return result
 
-    items = []
-    for key in ("treatment_advice", "diet_lifestyle_advice", "diet_and_hydration_advice"):
-        raw = plan.get(key)
-        if isinstance(raw, list):
-            for item in raw:
-                text = _clean_str(item)
-                if text and text not in items:
-                    items.append(text)
+    seen: set[str] = set()
+    advice = clean_unique(plan.get("advice"), seen)
+    if advice:
+        return [f"Care and diet instructions: {'; '.join(advice)}."]
 
-    return items
+    care = clean_unique(plan.get("treatment_advice"), seen)
+    diet = clean_unique(plan.get("diet_lifestyle_advice"), seen)
+    diet.extend(clean_unique(plan.get("diet_and_hydration_advice"), seen))
+
+    summary: list[str] = []
+    if care:
+        summary.append(f"Care instructions: {'; '.join(care)}.")
+    if diet:
+        summary.append(f"Diet and lifestyle: {'; '.join(diet)}.")
+    return summary
 
 
 def _build_monitoring(soap: dict[str, Any]) -> list[str]:

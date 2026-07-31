@@ -92,7 +92,7 @@ class HybridSoapRoutingTests(unittest.TestCase):
 
 
 class HybridMedicationReconciliationTests(unittest.TestCase):
-    def test_explicit_complaint_severity_and_course_are_recovered(self):
+    def test_chief_complaint_keeps_only_complaint_and_duration(self):
         transcript = "Patient: My fever is severe and getting worse for two days."
         ehr = _empty_soap_ehr()
         ehr["subjective"]["chief_complaints"] = [{
@@ -106,8 +106,7 @@ class HybridMedicationReconciliationTests(unittest.TestCase):
         result = _validate_and_fix_soap_coverage(ehr, transcript, evidence)
 
         complaint = result["subjective"]["chief_complaints"][0]
-        self.assertEqual(complaint["severity"], "severe")
-        self.assertEqual(complaint["course"], "worsening")
+        self.assertEqual(complaint, {"complaint": "Fever", "duration": "two days"})
 
     def test_complaint_name_does_not_duplicate_severity_course_and_duration(self):
         transcript = "Patient: My fever is severe and getting worse for two days."
@@ -124,11 +123,11 @@ class HybridMedicationReconciliationTests(unittest.TestCase):
 
         complaint = result["subjective"]["chief_complaints"][0]
         self.assertEqual(complaint["complaint"], "Fever")
-        self.assertEqual(complaint["severity"], "severe")
-        self.assertEqual(complaint["course"], "worsening")
         self.assertEqual(complaint["duration"], "two days")
+        self.assertNotIn("severity", complaint)
+        self.assertNotIn("course", complaint)
 
-    def test_unspoken_complaint_severity_and_course_remain_blank(self):
+    def test_legacy_complaint_fields_are_not_returned(self):
         transcript = "Patient: I have fever for two days."
         ehr = _empty_soap_ehr()
         ehr["subjective"]["chief_complaints"] = [{
@@ -142,8 +141,7 @@ class HybridMedicationReconciliationTests(unittest.TestCase):
         result = _validate_and_fix_soap_coverage(ehr, transcript, evidence)
 
         complaint = result["subjective"]["chief_complaints"][0]
-        self.assertIsNone(complaint["severity"])
-        self.assertIsNone(complaint["course"])
+        self.assertEqual(complaint, {"complaint": "Fever", "duration": "two days"})
 
     def test_generic_after_food_is_recovered_for_prescription(self):
         transcript = "Doctor: Take Dolo 650 one tablet after food."
@@ -232,6 +230,15 @@ class HybridMedicationReconciliationTests(unittest.TestCase):
 
     def test_allergy_is_scoped_when_another_fact_precedes_it(self):
         transcript = "Patient: I have fever for two days and I have dust allergy."
+        ehr = _empty_soap_ehr()
+        evidence = retrieve_soap_context(transcript)["evidence"]
+
+        result = _validate_and_fix_soap_coverage(ehr, transcript, evidence)
+
+        self.assertEqual(result["subjective"]["allergies"], ["Dust allergy"])
+
+    def test_allergy_does_not_absorb_medical_conditions(self):
+        transcript = "Patient: I have type 2 diabetes and high BP and dust allergy."
         ehr = _empty_soap_ehr()
         evidence = retrieve_soap_context(transcript)["evidence"]
 

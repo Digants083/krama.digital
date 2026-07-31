@@ -694,12 +694,12 @@ def _build_chief_complaints_table(value: Any, styles: dict) -> list:
         if isinstance(item, Mapping):
             complaint = _txt(item.get("complaint") or item.get("name"))
             if complaint:
-                rows.append([complaint, _txt(item.get("severity")), _txt(item.get("course")), _txt(item.get("duration"))])
+                rows.append([complaint, _txt(item.get("duration"))])
         elif _has(item):
-            rows.append([_txt(item), "", "", ""])
+            rows.append([_txt(item), ""])
     return _build_compact_table(
-        "Chief complaints", ["Current symptom", "Severity", "Course", "Since / duration"], rows,
-        [PAGE_W * 0.40, PAGE_W * 0.16, PAGE_W * 0.20, PAGE_W * 0.24], styles,
+        "Chief complaints", ["Complaint", "Duration"], rows,
+        [PAGE_W * 0.68, PAGE_W * 0.32], styles,
     )
 
 

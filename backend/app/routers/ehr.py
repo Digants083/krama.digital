@@ -109,11 +109,9 @@ SOAP_EHR_JSON_SCHEMA = {
                             "items": {
                                 "type": "object",
                                 "additionalProperties": False,
-                                "required": ["complaint", "severity", "course", "duration"],
+                                "required": ["complaint", "duration"],
                                 "properties": {
                                     "complaint": {"type": "string"},
-                                    "severity": {"type": ["string", "null"]},
-                                    "course": {"type": ["string", "null"]},
                                     "duration": {"type": ["string", "null"]}
                                 }
                             }
@@ -372,38 +370,20 @@ def _normalize_chief_complaints(value: Any, legacy_symptoms: Any = None) -> list
             complaint = _clean_text(item.get("complaint") or item.get("name") or item.get("symptom"))
             if not complaint:
                 continue
-            severity = _clean_text(item.get("severity"))
-            course = _clean_text(item.get("course")) or _clean_text(item.get("frequency")) or _clean_text(item.get("character")) or _clean_text(item.get("progression"))
-            if severity:
-                severity_key = severity.casefold()
-                severity = {
-                    "slight": "mild", "slightly": "mild", "minor": "mild",
-                    "serious": "severe", "very bad": "severe",
-                }.get(severity_key, severity_key if severity_key in {"mild", "moderate", "severe"} else severity)
-            if course:
-                course_key = course.casefold()
-                course = {
-                    "fluctuating": "intermittent", "comes and goes": "intermittent",
-                    "on and off": "intermittent", "constant": "continuous",
-                    "persistent": "continuous", "getting worse": "worsening",
-                    "getting better": "improving",
-                }.get(course_key, course_key if course_key in {"continuous", "intermittent", "recurrent", "worsening", "improving", "stable"} else course)
             entry = {
                 "complaint": complaint,
-                "severity": severity,
-                "course": course,
                 "duration": _clean_text(item.get("duration")),
             }
         elif isinstance(item, str):
             text = _clean_text(item)
             if not text:
                 continue
-            entry = {"complaint": text, "severity": None, "course": None, "duration": None}
+            entry = {"complaint": text, "duration": None}
         else:
             continue
         existing = next((item for item in result if item["complaint"].casefold() == entry["complaint"].casefold()), None)
         if existing:
-            for field in ("severity", "course", "duration"):
+            for field in ("duration",):
                 if not existing.get(field) and entry.get(field):
                     existing[field] = entry[field]
         else:
@@ -1356,21 +1336,6 @@ def _medicine_context(name: str, transcript: str) -> str:
     return transcript[max(0, position - 120):min(len(transcript), position + len(name) + 160)]
 
 
-_COMPLAINT_SEVERITY_PATTERNS = (
-    (re.compile(r"\b(?:slight|slightly|minor|mild)\b", re.IGNORECASE), "mild"),
-    (re.compile(r"\bmoderate(?:ly)?\b", re.IGNORECASE), "moderate"),
-    (re.compile(r"\b(?:severe|severely|serious|very\s+bad|intense)\b", re.IGNORECASE), "severe"),
-)
-_COMPLAINT_COURSE_PATTERNS = (
-    (re.compile(r"\b(?:comes?\s+and\s+goes?|on\s+and\s+off|fluctuat\w*|intermittent)\b", re.IGNORECASE), "intermittent"),
-    (re.compile(r"\b(?:constant|continuous|continuously|persistent)\b", re.IGNORECASE), "continuous"),
-    (re.compile(r"\b(?:recurrent|recurring|keeps?\s+coming\s+back)\b", re.IGNORECASE), "recurrent"),
-    (re.compile(r"\b(?:worsen\w*|getting\s+worse|became\s+worse|increas\w*)\b", re.IGNORECASE), "worsening"),
-    (re.compile(r"\b(?:improv\w*|getting\s+better|became\s+better|decreas\w*)\b", re.IGNORECASE), "improving"),
-    (re.compile(r"\b(?:stable|unchanged|stayed\s+the\s+same)\b", re.IGNORECASE), "stable"),
-)
-
-
 def _concise_complaint_name(value: Any) -> Optional[str]:
     """Remove only explicit detail clauses that belong in adjacent fields."""
     text = (_clean_text(value) or "").strip(" ,.;")
@@ -1403,48 +1368,19 @@ def _validate_chief_complaint_details(
     value: Any,
     evidence_ledger: Optional[list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    """Recover explicit severity/course and remove unsupported model values."""
-    complaints = [dict(item) for item in (value or []) if isinstance(item, dict)]
-    if not evidence_ledger:
-        return complaints
-
-    patient_evidence = [
-        entry for entry in evidence_ledger
-        if entry.get("speaker") in {"patient", "caregiver"}
-        and not entry.get("is_question")
-        and not entry.get("superseded_by")
-    ]
-    for complaint in complaints:
-        original_name = _clean_text(complaint.get("complaint"))
-        name = _concise_complaint_name(original_name)
+    """Keep Chief Complaints limited to complaint and duration."""
+    del evidence_ledger  # Kept in the signature for the existing validation pipeline.
+    complaints: list[dict[str, Any]] = []
+    for item in (value or []):
+        if not isinstance(item, dict):
+            continue
+        name = _concise_complaint_name(item.get("complaint"))
         if not name:
             continue
-        complaint["complaint"] = name[:1].upper() + name[1:]
-        name_key = _evidence_text(name)
-        matching_text = " ".join(
-            _clean_text(entry.get("text")) or ""
-            for entry in patient_evidence
-            if name_key and name_key in _evidence_text(entry.get("text"))
-        ).strip()
-        if not matching_text:
-            if "severity" in complaint:
-                complaint["severity"] = None
-            if "course" in complaint:
-                complaint["course"] = None
-            continue
-
-        explicit_severity = next(
-            (canonical for pattern, canonical in _COMPLAINT_SEVERITY_PATTERNS if pattern.search(matching_text)),
-            None,
-        )
-        explicit_course = next(
-            (canonical for pattern, canonical in _COMPLAINT_COURSE_PATTERNS if pattern.search(matching_text)),
-            None,
-        )
-        if explicit_severity or "severity" in complaint:
-            complaint["severity"] = explicit_severity
-        if explicit_course or "course" in complaint:
-            complaint["course"] = explicit_course
+        complaints.append({
+            "complaint": name[:1].upper() + name[1:],
+            "duration": _clean_text(item.get("duration")),
+        })
     return complaints
 
 
@@ -1954,18 +1890,34 @@ def _validate_and_fix_soap_coverage(
                     flags=re.IGNORECASE,
                 )[-1].strip()
                 allergic_to = re.search(r"\ballergic\s+to\s+(.+?)(?:[.,;]|$)", allergy_clause, re.IGNORECASE)
-                has_allergy = re.search(
-                    r"\b(?:i\s+have|patient\s+has|has|have)\s+(?:a\s+|an\s+)?"
-                    r"(?:(?:slight|mild|moderate|severe)\s+)?(.+?)\s+allerg(?:y|ies)\b",
-                    allergy_clause,
-                    re.IGNORECASE,
-                )
+                allergy_from = re.search(r"\ballerg(?:y|ies)\s+(?:from|to)\s+(.+?)(?:[.,;]|$)", allergy_clause, re.IGNORECASE)
                 if allergic_to:
                     allergy = f"{allergic_to.group(1).strip().title()} allergy"
-                elif has_allergy:
-                    allergy = f"{has_allergy.group(1).strip().title()} allergy"
+                elif allergy_from:
+                    allergy = f"{allergy_from.group(1).strip().title()} allergy"
                 else:
-                    allergy = allergy_clause
+                    # The allergen is the phrase immediately before "allergy",
+                    # bounded by a comma/conjunction. This prevents unrelated
+                    # conditions earlier in the same sentence from becoming
+                    # part of the allergy (for example diabetes + BP + dust).
+                    allergy_match = re.search(r"\ballerg(?:y|ies)\b", allergy_clause, re.IGNORECASE)
+                    prefix = allergy_clause[:allergy_match.start()] if allergy_match else ""
+                    allergen = re.split(r"\s*(?:,|;|\band\b|\bbut\b)\s*", prefix, flags=re.IGNORECASE)[-1]
+                    allergen = re.sub(
+                        r"^(?:(?:i|the\s+patient|patient)\s+)?(?:have|has)\s+(?:a\s+|an\s+)?",
+                        "",
+                        allergen.strip(),
+                        flags=re.IGNORECASE,
+                    )
+                    allergen = re.sub(
+                        r"^(?:there\s+is\s+)?(?:a\s+|an\s+)?(?:slight|mild|moderate|severe)\s+",
+                        "",
+                        allergen,
+                        flags=re.IGNORECASE,
+                    ).strip(" ,.;")
+                    if not allergen:
+                        continue
+                    allergy = f"{allergen.title()} allergy"
             else:
                 # A bare "yes" does not state the allergen or reaction.
                 continue
@@ -2165,6 +2117,11 @@ def _validate_and_fix_soap_coverage(
                 text,
                 re.IGNORECASE,
             )
+            or re.match(
+                r"^(?:much|something|anything|worse)\s+(?:more|worse)(?:\s+than)?\b",
+                text,
+                re.IGNORECASE,
+            )
             or re.fullmatch(
                 r"(?:what\s+kind\s+of\s+thing|something\s+like\s+that|like\s+that|that|"
                 r"(?:some|any)\s+.+?\s+(?:issues?|problems?|symptoms?))",
@@ -2272,7 +2229,12 @@ def _validate_and_fix_soap_coverage(
     # "including", "like", "or", "versus", or "vs".
     main_diagnosis_patterns = (
         re.compile(
-            r"\b(?:seems?|looks?|sounds?|feels?)\s+(?:like|to\s+be)\s+(?:a\s+|an\s+)?"
+            r"\b(?:i\s+(?:think|believe)\s+)?(?:this|it)\s+is\s+(?:about\s+)?(?:a\s+|an\s+)?"
+            r"(.+?)(?=\s*,?\s*\b(?:but|however|although)\b|[.;]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:seems?|looks?|sounds?|feels?)\s+(?:(?:like|to\s+be)\s+)?(?:a\s+|an\s+)?"
             r"(.+?)(?=\s*,?\s*\b(?:but|however|although)\b|[.;]|$)",
             re.IGNORECASE,
         ),
@@ -2327,7 +2289,7 @@ def _validate_and_fix_soap_coverage(
                 ass["clinical_impression"] = main_diagnosis
             if (
                 "assessment.provisional_diagnosis" in fields
-                or re.search(r"\b(?:likely|probably|possibly|suspect\w*|might|may|could|looks?|sounds?|seems?|feels?|appears?)\b", spoken, re.IGNORECASE)
+                or re.search(r"\b(?:think|believe|likely|probably|possibly|suspect\w*|might|may|could|looks?|sounds?|seems?|feels?|appears?)\b", spoken, re.IGNORECASE)
             ):
                 add_assessment_item("provisional_diagnosis", main_diagnosis)
 
@@ -2361,6 +2323,14 @@ def _validate_and_fix_soap_coverage(
         )
         if explicit_choice:
             alternative_texts.append(explicit_choice.group(1))
+
+        possibility_of = re.search(
+            r"\b(?:possibility|possibilities|chance)\s+of\s+(.+?)(?=[.;]|$)",
+            spoken,
+            re.IGNORECASE,
+        )
+        if possibility_of:
+            alternative_texts.append(possibility_of.group(1))
 
         for alternatives in alternative_texts:
             for alternative in re.split(r"\s*(?:,|\bor\b|\bversus\b|\bvs\.?\b)\s*", alternatives, flags=re.IGNORECASE):
@@ -2430,10 +2400,17 @@ def _validate_and_fix_soap_coverage(
         timed = [item for item in followup_candidates if followup_extra.search(item)]
         plan["follow_up"] = (timed or followup_candidates)[-1]
 
-    if not plan.get("warning_signs") and warning_fragments:
-        # Keep exact warning fragments so neither the conditions nor the
-        # doctor's instructed urgent action is lost.
-        plan["warning_signs"] = list(dict.fromkeys(warning_fragments))
+    if warning_fragments:
+        # Add every exact warning fragment. A partially complete model result
+        # must not prevent other explicitly spoken warnings from being kept.
+        recovered_warnings = list(plan.get("warning_signs") or [])
+        recovered_keys = {_evidence_text(item) for item in recovered_warnings}
+        for warning in warning_fragments:
+            key = _evidence_text(warning)
+            if key and key not in recovered_keys:
+                recovered_warnings.append(warning)
+                recovered_keys.add(key)
+        plan["warning_signs"] = recovered_warnings
 
     # The historical RAG advice rule covers both treatment and diet/lifestyle.
     # Re-route only explicit, grounded advice containing clear diet/lifestyle
@@ -2449,9 +2426,23 @@ def _validate_and_fix_soap_coverage(
         else:
             retained_treatment.append(item)
     plan["treatment_advice"] = retained_treatment
+    warning_keys = [_evidence_text(item) for item in plan.get("warning_signs") or []]
     plan["diet_lifestyle_advice"] = [
         item for item in diet_items
-        if isinstance(item, str) and advice_instruction.search(item)
+        if isinstance(item, str)
+        and advice_instruction.search(item)
+        and not (
+            (_evidence_text(item) and any(
+                _evidence_text(item) == key
+                or _evidence_text(item) in key
+                or key in _evidence_text(item)
+                for key in warning_keys if key
+            ))
+            or (
+                warning_detail.search(item)
+                and (warning_action.search(item) or ws_pat.search(item) or re.search(r"\bwarning\s+sign", item, re.IGNORECASE))
+            )
+        )
     ]
 
     # Keep the clearest single copy when model output and exact RAG recovery
@@ -2487,10 +2478,6 @@ def _validate_and_fix_soap_coverage(
                 if isinstance(complaint, dict) and complaint.get("complaint"):
                     name = complaint["complaint"]
                     details = []
-                    if complaint.get("severity"):
-                        details.append(complaint["severity"])
-                    if complaint.get("course"):
-                        details.append(complaint["course"])
                     if complaint.get("duration"):
                         details.append(f"for {complaint['duration']}")
                     if details:
@@ -2698,7 +2685,7 @@ def _build_ehr_prompt(transcript: str, rag_context: str) -> str:
     return (
         "Extract structured SOAP facts from the transcript into JSON with key 'ehr' using the following structure:\n"
         "ehr.subjective:\n"
-        "  - chief_complaints: [{\"complaint\": \"...\", \"severity\": \"mild|moderate|severe|null\", \"course\": \"continuous|intermittent|recurrent|worsening|improving|stable|null\", \"duration\": \"...\"}]\n"
+        "  - chief_complaints: [{\"complaint\": \"...\", \"duration\": \"...\"}]\n"
         "  - history_of_present_illness: string or null\n"
         "  - relevant_negatives: [\"...\"]\n"
         "  - medical_conditions: [\"...\"]\n"
@@ -2733,7 +2720,7 @@ def _build_ehr_prompt(transcript: str, rag_context: str) -> str:
         "- Be concise. Short phrases, not full sentences, in string values.\n"
         "- Put every current patient-reported symptom or concern in chief_complaints as its own row. Fever, headache, sore throat/throat infection, cough, pain, and similar concerns must not be dropped when explicitly stated.\n"
         "- Do not output a separate symptoms field. chief_complaints is the single source of truth for current symptoms.\n"
-        "- For each chief complaint, extract severity, course/pattern, and duration only when supported by the transcript. Map 'slight/slightly/minor' to mild and 'serious/very bad' to severe. Map 'fluctuating/comes and goes/on and off' to intermittent and 'constant/persistent' to continuous. Use null when unstated. Never invent a missing symptom or detail.\n"
+        "- Chief complaints contain only the concise complaint name and its explicitly spoken duration. Do not include severity or course fields. Use null when duration was not stated.\n"
         "- Never infer diagnoses, doses, or frequencies not stated by the doctor.\n"
         "- Prescription mapping: medicine_name is the complete spoken medicine name; dose is the spoken quantity such as '1 tablet' or '5 ml'; specific_timing/schedule contains breakfast, lunch, dinner, morning, noon, or night timing; meal_timing contains before-food/after-food wording; duration stays separate.\n"
         "- Do not put meal timing in duration, do not put duration in timing, and do not invent a missing prescription value.\n"
@@ -2756,8 +2743,7 @@ SOAP_SECTION_RULES = {
     "subjective": (
         "Use patient/caregiver assertions. Doctor questions are context only and are never facts. "
         "Preserve explicit allergy denials and positive allergens. Current medicines are history, not prescriptions. "
-        "For every chief complaint, capture explicitly spoken severity and course/progression in their dedicated fields; "
-        "leave either field null when it was not spoken."
+        "Chief complaints contain only a concise complaint name and explicitly spoken duration."
     ),
     "objective": (
         "Use measurements, investigations, and clinician-observed examination findings only. "

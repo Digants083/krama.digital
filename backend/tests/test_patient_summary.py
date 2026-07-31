@@ -244,8 +244,10 @@ class PatientSummarySectionsTests(unittest.TestCase):
         )
         summary = build_patient_summary(soap)
         self.assertIn("diet_and_care", summary)
-        self.assertIn("Rest", summary["diet_and_care"])
-        self.assertIn("Drink warm fluids", summary["diet_and_care"])
+        self.assertEqual(summary["diet_and_care"], [
+            "Care instructions: Rest; Steam inhalation.",
+            "Diet and lifestyle: Drink warm fluids; Avoid spicy food.",
+        ])
 
     def test_empty_sections_are_omitted(self):
         soap = _make_soap(
