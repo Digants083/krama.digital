@@ -9,3 +9,10 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 requests==2.31.0
 aiohttp==3.9.1
+boto3==1.35.76
+jsonschema==4.23.0
+sarvamai==0.1.28
+reportlab==4.2.5
+playwright==1.48.0
+pydub==0.25.1
+numpy==1.26.2

@@ -522,6 +522,8 @@ const ClinicProfile = () => {
     localStorage.removeItem("krama_active_appointment");
     localStorage.removeItem("krama_visit_history");
     localStorage.removeItem("user");
+    localStorage.removeItem("clinic_id");
+    sessionStorage.removeItem("clinic_access_token");
     navigate("/");
   };
 

@@ -63,51 +63,54 @@ const PatientReviews = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur">
+    <div className="krama-ambient min-h-screen">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-white/75 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-2xl items-center gap-3 px-4">
           <Link
             to="/patient"
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground -ml-2"
+            className="-ml-2 flex items-center gap-2 rounded-full px-3 py-2 text-primary transition hover:bg-white/80"
           >
             <ArrowLeft className="h-5 w-5" />
-            <span className="text-sm font-medium">Dashboard</span>
+            <span className="text-sm font-bold">Dashboard</span>
           </Link>
-          <span className="font-semibold text-foreground">My Reviews</span>
+          <span className="font-display font-black text-[#17312d]">My Reviews</span>
         </div>
       </header>
 
       <main className="mx-auto max-w-2xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-foreground">Clinics you visited</h1>
-        <p className="mt-1 text-muted-foreground">
-          Leave a review for clinics you&apos;ve been to.
-        </p>
+        <section className="motion-rise rounded-[32px] border border-white/70 bg-white/80 p-5 shadow-[0_22px_70px_-46px_rgba(19,55,50,0.65)] backdrop-blur sm:p-6">
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-primary/70">Visit feedback</p>
+          <h1 className="mt-2 font-display text-3xl font-black text-[#17312d]">Clinics you visited</h1>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            Leave a review for clinics you&apos;ve been to.
+          </p>
+        </section>
 
         {loading ? (
           <div className="mt-10 flex justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
           </div>
         ) : visits.length === 0 ? (
-          <div className="mt-10 rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center">
-            <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground" />
-            <p className="mt-3 font-medium text-foreground">No visits yet</p>
+          <div className="motion-rise-delayed mt-6 rounded-[30px] border border-dashed border-primary/20 bg-white/70 p-8 text-center shadow-[0_18px_54px_-42px_rgba(19,55,50,0.55)] backdrop-blur">
+            <MessageSquare className="mx-auto h-12 w-12 text-primary" />
+            <p className="mt-3 font-black text-[#17312d]">No visits yet</p>
             <p className="mt-1 text-sm text-muted-foreground">
               Book and complete an appointment to see clinics here and write a
               review.
             </p>
           </div>
         ) : (
-          <ul className="mt-6 space-y-4">
+          <ul className="motion-rise-delayed mt-6 space-y-4">
             {visits.map((v) => {
               const review = reviews[v.clinic_id];
               return (
                 <li
                   key={v.clinic_id}
-                  className="rounded-xl border border-border bg-card p-4 shadow-sm"
+                  className="rounded-[28px] border border-white/70 bg-white/85 p-4 shadow-[0_18px_54px_-42px_rgba(19,55,50,0.75)] backdrop-blur"
                 >
                   <div className="flex items-start justify-between">
                     <div>
-                      <p className="font-semibold text-foreground">{v.clinic_name}</p>
+                      <p className="font-black text-[#17312d]">{v.clinic_name}</p>
                       <p className="text-sm text-muted-foreground">{v.date} at {v.time}</p>
                     </div>
                     {!v.has_reviewed ? (
@@ -115,11 +118,12 @@ const PatientReviews = () => {
                         size="sm"
                         variant="outline"
                         onClick={() => navigate(`/patient/reviews/${v.clinic_id}`, { state: { visit: v } })}
+                        className="rounded-full font-bold"
                       >
                         Write review
                       </Button>
                     ) : (
-                      <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <span className="flex items-center gap-1 rounded-full bg-[#f6f1e8] px-3 py-1 text-sm font-bold text-primary">
                         <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
                         Reviewed
                       </span>
@@ -128,7 +132,7 @@ const PatientReviews = () => {
                   
                   {/* Show existing review if available */}
                   {review && (
-                    <div className="mt-3 pt-3 border-t border-border">
+                    <div className="mt-3 border-t border-[#eadfce] pt-3">
                       <div className="flex items-center gap-1">
                         {[1, 2, 3, 4, 5].map((star) => (
                           <Star

@@ -30,7 +30,7 @@ from app.database.models import (
 
     Review, ReviewReaction, ClinicImage, QRAppointment, PendingClinicRegistration,
 
-    RejectedClinic, ClinicTimeSlot
+    RejectedClinic, ClinicTimeSlot, ClinicalEncounter
 
 )
 
@@ -304,7 +304,15 @@ from app.schemas import (
 
 )
 
-from app.security import hash_password, verify_password
+from app.security import (
+    CLINIC_TOKEN_LIFETIME_SECONDS,
+    ClinicPrincipal,
+    create_clinic_access_token,
+    hash_password,
+    require_clinic_principal,
+    require_matching_clinic,
+    verify_password,
+)
 
 from app.services.otp_service import OTPService
 
@@ -1396,7 +1404,13 @@ async def clinic_login(login_data: ClinicLogin, db: AsyncSession = Depends(get_d
 
             admin_pinned_longitude=clinic.admin_pinned_longitude,
 
-            has_pinned_location=clinic.has_pinned_location
+            has_pinned_location=clinic.has_pinned_location,
+
+            access_token=create_clinic_access_token(clinic.clinic_id, clinic.password),
+
+            token_type="bearer",
+
+            expires_in=CLINIC_TOKEN_LIFETIME_SECONDS,
 
         )
 
@@ -6140,11 +6154,15 @@ async def search_clinic_patients(
 
     phone: str = Query(None, description="Patient phone"),
 
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
+
     db: AsyncSession = Depends(get_db)
 
 ):
 
     """Search patients by date range, patient ID, email, or phone in both appointments and completed_appointments"""
+
+    clinic_id = require_matching_clinic(principal, clinic_id)
 
     try:
 
@@ -6204,6 +6222,30 @@ async def search_clinic_patients(
 
 
 
+        # Search stored EHR encounters as well. Historical encounters can
+        # outlive their live/completed appointment row, so appointment tables
+        # alone are not a complete patient-record index.
+        encounter_query = select(ClinicalEncounter).where(
+            ClinicalEncounter.clinic_id == clinic_id,
+            ClinicalEncounter.status == "approved",
+        )
+
+        if patient_id:
+            encounter_query = encounter_query.where(ClinicalEncounter.patient_id == patient_id)
+        if email:
+            encounter_query = encounter_query.where(ClinicalEncounter.patient_email.ilike(f"%{email}%"))
+        if phone:
+            encounter_query = encounter_query.where(ClinicalEncounter.patient_phone.ilike(f"%{phone}%"))
+
+        encounter_result = await db.execute(
+            encounter_query.order_by(
+                ClinicalEncounter.approved_at.desc().nullslast(),
+                ClinicalEncounter.created_at.desc(),
+                ClinicalEncounter.id.desc(),
+            )
+        )
+        encounters = encounter_result.scalars().all()
+
         # Combine and format results
 
         patients = []
@@ -6232,7 +6274,9 @@ async def search_clinic_patients(
 
                 "status": apt.status,
 
-                "source": "appointment"
+                "source": getattr(apt, "source", "online"),
+
+                "encounter_id": None,
 
             })
 
@@ -6260,27 +6304,78 @@ async def search_clinic_patients(
 
                 "status": "completed",
 
-                "source": "completed"
+                "source": "completed",
 
+                "encounter_id": None,
+
+            })
+
+        appointments_by_id = {apt.id: apt for apt in appointments}
+        seen_encounter_sessions = set()
+        for encounter in encounters:
+            ehr_data = encounter.ehr_data if isinstance(encounter.ehr_data, dict) else {}
+            visit_details = ehr_data.get("visit_details") if isinstance(ehr_data.get("visit_details"), dict) else {}
+            visit_datetime = str(visit_details.get("visit_datetime") or "")
+            visit_date = visit_datetime[:10] if len(visit_datetime) >= 10 else ""
+            visit_time = visit_datetime[11:16] if len(visit_datetime) >= 16 else ""
+            if not visit_date and encounter.created_at:
+                created_at = _sort_datetime(encounter.created_at).astimezone(CLINIC_TIMEZONE)
+                visit_date = created_at.strftime("%Y-%m-%d")
+                visit_time = created_at.strftime("%H:%M")
+
+            if from_date and visit_date < from_date:
+                continue
+            if to_date and visit_date > to_date:
+                continue
+
+            session_key = (
+                ("appointment", encounter.appointment_id)
+                if encounter.appointment_id is not None
+                else ("visit", encounter.patient_id, visit_date, visit_time)
+            )
+            if session_key in seen_encounter_sessions:
+                continue
+            seen_encounter_sessions.add(session_key)
+
+            linked_appointment = appointments_by_id.get(encounter.appointment_id)
+            patients.append({
+                "appointment_token": linked_appointment.appointment_token if linked_appointment else "",
+                "patient_name": encounter.patient_name,
+                "patient_phone": encounter.patient_phone or "",
+                "patient_id": encounter.patient_id,
+                "patient_email": encounter.patient_email or "",
+                "date": visit_date,
+                "time": visit_time,
+                "status": "completed",
+                "source": "ehr",
+                "encounter_id": encounter.encounter_id,
             })
 
 
 
         # Remove duplicates by patient_id + date + time
 
-        seen = set()
-
-        unique_patients = []
+        unique_by_visit = {}
 
         for p in patients:
+            normalized_time = str(p.get("time") or "")[:5]
+            key = (p["patient_id"], p["date"], normalized_time)
+            existing = unique_by_visit.get(key)
+            if existing is None:
+                unique_by_visit[key] = {**p, "time": normalized_time}
+            elif p.get("encounter_id") and not existing.get("encounter_id"):
+                # Keep appointment metadata but attach the stable EHR identity.
+                existing["encounter_id"] = p["encounter_id"]
+            elif p.get("encounter_id") and p.get("encounter_id") != existing.get("encounter_id"):
+                # Distinct stored encounters must never be collapsed merely
+                # because they share a visit timestamp.
+                unique_by_visit[(*key, p["encounter_id"])] = {**p, "time": normalized_time}
 
-            key = (p["patient_id"], p["date"], p["time"])
-
-            if key not in seen:
-
-                seen.add(key)
-
-                unique_patients.append(p)
+        unique_patients = sorted(
+            unique_by_visit.values(),
+            key=lambda item: (str(item.get("date") or ""), str(item.get("time") or "")),
+            reverse=True,
+        )
 
 
 

@@ -24,6 +24,26 @@ declare global {
 }
 
 const MAP_ID = "clinic-location-picker";
+export const INDIA_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
+
+export const buildIndiaAddressQuery = (address: string): string => {
+  const trimmedAddress = address.trim();
+  if (!trimmedAddress) return "";
+  return /\bindia\b/i.test(trimmedAddress) ? trimmedAddress : `${trimmedAddress}, India`;
+};
+
+export const parseMapCoordinates = (
+  latitude?: string | number | null,
+  longitude?: string | number | null,
+): { lat: number; lng: number } | null => {
+  const hasLatitude = latitude !== null && latitude !== undefined && String(latitude).trim() !== "";
+  const hasLongitude = longitude !== null && longitude !== undefined && String(longitude).trim() !== "";
+  if (!hasLatitude || !hasLongitude) return null;
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+};
 
 export default function LocationPickerModal({
   isOpen,
@@ -32,7 +52,7 @@ export default function LocationPickerModal({
   clinicAddress = "",
   initialLatitude,
   initialLongitude,
-  defaultCenter = { lat: 20.5937, lng: 78.9629 },
+  defaultCenter = INDIA_MAP_CENTER,
   defaultZoom = 5,
   title = "Pin Your Clinic Location",
   description = "Pan/zoom the map to your clinic area, then click to drop the pin on the exact location.",
@@ -43,6 +63,8 @@ export default function LocationPickerModal({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [addressLookupMessage, setAddressLookupMessage] = useState("");
   
   const mapRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -60,23 +82,31 @@ export default function LocationPickerModal({
       setSelectedLocation(null);
       setSavedAddress("");
       setSearchQuery("");
+      setSaveError("");
+      setAddressLookupMessage("");
       return;
     }
     setSavedAddress("");
-    setSearchQuery("");
+    setSearchQuery(clinicAddress);
+    setSaveError("");
+    setAddressLookupMessage("");
   }, [isOpen, clinicAddress]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     const loadGoogleMaps = () => {
+      if (!apiKey) {
+        setMapError(true);
+        return;
+      }
       if (window.google) {
         setMapLoaded(true);
         return;
       }
 
       const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initMap`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&region=IN&language=en&callback=initMap`;
       script.async = true;
       script.defer = true;
       
@@ -100,13 +130,12 @@ export default function LocationPickerModal({
 
     const initMap = async () => {
       let center = defaultCenter;
-      const initialLat = Number(initialLatitude);
-      const initialLng = Number(initialLongitude);
-      const hasInitialLocation = Number.isFinite(initialLat) && Number.isFinite(initialLng);
-      if (hasInitialLocation) {
-        center = { lat: initialLat, lng: initialLng };
+      const initialLocation = parseMapCoordinates(initialLatitude, initialLongitude);
+      const hasInitialLocation = initialLocation !== null;
+      if (initialLocation) {
+        center = initialLocation;
         setSelectedLocation(center);
-        setSavedAddress(`${initialLat.toFixed(6)}, ${initialLng.toFixed(6)}`);
+        setSavedAddress(`${initialLocation.lat.toFixed(6)}, ${initialLocation.lng.toFixed(6)}`);
       }
 
       mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
@@ -179,18 +208,13 @@ export default function LocationPickerModal({
       }
 
       if (searchInputRef.current && window.google.maps.places) {
-        const searchBox = new window.google.maps.places.SearchBox(searchInputRef.current);
-
-        mapInstanceRef.current.addListener("bounds_changed", () => {
-          const bounds = mapInstanceRef.current?.getBounds();
-          if (bounds) {
-            searchBox.setBounds(bounds);
-          }
+        const autocomplete = new window.google.maps.places.Autocomplete(searchInputRef.current, {
+          componentRestrictions: { country: "in" },
+          fields: ["formatted_address", "geometry", "name"],
         });
 
-        searchBox.addListener("places_changed", () => {
-          const places = searchBox.getPlaces();
-          const place = places?.[0];
+        autocomplete.addListener("place_changed", () => {
+          const place = autocomplete.getPlace();
           const location = place?.geometry?.location;
           if (!place || !location) {
             return;
@@ -202,6 +226,34 @@ export default function LocationPickerModal({
           );
           mapInstanceRef.current?.setZoom(17);
         });
+      }
+
+      if (!hasInitialLocation && clinicAddress.trim()) {
+        const addressQuery = buildIndiaAddressQuery(clinicAddress);
+        setAddressLookupMessage("Finding the clinic address on the map...");
+
+        const geocoder = new window.google.maps.Geocoder();
+        geocoder.geocode(
+          {
+            address: addressQuery,
+            componentRestrictions: { country: "IN" },
+            region: "IN",
+          },
+          (results, status) => {
+            const result = results?.[0];
+            const location = result?.geometry?.location;
+            if (status === window.google.maps.GeocoderStatus.OK && location) {
+              const formattedAddress = result.formatted_address || clinicAddress;
+              setMarkerLocation(location, formattedAddress);
+              setSearchQuery(formattedAddress);
+              mapInstanceRef.current?.setZoom(17);
+              setAddressLookupMessage("Suggested pin placed from the registered address. Please verify it before saving.");
+              return;
+            }
+
+            setAddressLookupMessage("The address could not be located automatically. Search the area or click the map to place the pin.");
+          },
+        );
       }
 
       const clickListener = mapInstanceRef.current.addListener("click", (e: google.maps.MapMouseEvent) => {
@@ -221,6 +273,7 @@ export default function LocationPickerModal({
   const handleSave = async () => {
     if (!selectedLocation) return;
     setSaving(true);
+    setSaveError("");
     try {
       await onSave(
         selectedLocation.lat.toString(),
@@ -230,6 +283,7 @@ export default function LocationPickerModal({
       onClose();
     } catch (error) {
       console.error("Error saving location:", error);
+      setSaveError(error instanceof Error ? error.message : "Could not save the clinic location. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -293,6 +347,12 @@ export default function LocationPickerModal({
 
         <div ref={mapRef} className="mb-4 h-[400px] w-full overflow-hidden rounded-lg border" />
 
+        {addressLookupMessage && (
+          <p className="mb-4 rounded-lg border border-teal-100 bg-teal-50 px-3 py-2 text-sm text-teal-800">
+            {addressLookupMessage}
+          </p>
+        )}
+
         {selectedLocation && (
           <div className="mb-4 flex items-start gap-2 rounded-lg bg-secondary p-3">
             <MapPin className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
@@ -303,6 +363,10 @@ export default function LocationPickerModal({
               </p>
             </div>
           </div>
+        )}
+
+        {saveError && (
+          <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{saveError}</p>
         )}
 
         <div className="flex justify-end gap-3">

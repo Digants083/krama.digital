@@ -447,7 +447,35 @@ const ClinicBilling = () => {
     }
   };
 
-  const printBill = () => window.print();
+  const printBill = () => {
+    const el = document.querySelector(".billing-print-sheet");
+    if (!el) return;
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.removeAttribute("style");
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument!;
+    doc.open();
+    doc.write(`<!DOCTYPE html><html><head>
+<base href="${location.origin}/">
+<title>Print Bill</title>
+<meta charset="UTF-8">
+${Array.from(document.querySelectorAll("style, link[rel='stylesheet']")).map((s) => s.outerHTML).join("\n")}
+<style>
+@page { size: A4 portrait; margin: 0; }
+body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+* { overflow: visible !important; }
+.billing-print-sheet { max-width: none !important; border: 0 !important; box-shadow: none !important; border-radius: 0 !important; margin: 0 !important; padding: 10mm 12mm !important; }
+.billing-print-sheet footer { margin-top: 8mm !important; }
+</style></head><body>${clone.outerHTML}</body></html>`);
+    doc.close();
+    iframe.contentWindow?.focus();
+    setTimeout(() => {
+      iframe.contentWindow?.print();
+      setTimeout(() => document.body.removeChild(iframe), 1000);
+    }, 600);
+  };
 
   const viewSavedBill = (bill: SavedBill) => {
     setViewedBill(bill);
@@ -457,7 +485,7 @@ const ClinicBilling = () => {
   const printSavedBill = (bill: SavedBill) => {
     setViewedBill(bill);
     setActivePanel("history");
-    window.setTimeout(() => window.print(), 100);
+    window.setTimeout(() => printBill(), 200);
   };
 
   const createBillForViewedPatient = () => {
@@ -591,51 +619,9 @@ const ClinicBilling = () => {
             }
           }
           @media print {
-            @page {
-              size: A4 portrait;
-              margin: 0;
-            }
-            html,
-            body {
-              width: 210mm;
-              height: 297mm;
-              margin: 0 !important;
-              padding: 0 !important;
-              overflow: hidden !important;
-              background: #ffffff !important;
-            }
-            body * {
-              visibility: hidden !important;
-            }
-            .billing-print-sheet,
-            .billing-print-sheet * {
-              visibility: visible !important;
-            }
-            .billing-print-sheet {
-              position: fixed !important;
-              inset: 0 !important;
-              box-sizing: border-box !important;
-              width: 210mm !important;
-              max-width: 210mm !important;
-              height: 297mm !important;
-              min-height: 297mm !important;
-              max-height: 297mm !important;
-              margin: 0 !important;
-              border: 1px solid #d8d2c8 !important;
-              box-shadow: none !important;
-              padding: 12mm !important;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-              overflow: hidden !important;
-              color: #0f172a !important;
-            }
-            .billing-print-sheet table {
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-            .billing-print-sheet footer {
-              margin-top: 26mm !important;
-            }
+            @page { size: A4 portrait; margin: 0; }
+            body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+            * { overflow: visible !important; }
           }
         `}
       </style>

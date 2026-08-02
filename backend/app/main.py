@@ -10,6 +10,7 @@ from app.compat import install_starlette_router_compat
 from app.config import (
     admin_seeds,
     background_jobs_enabled,
+    cors_allowed_origins,
     scheduler_active_poll_seconds,
     scheduler_idle_poll_seconds,
 )
@@ -19,9 +20,10 @@ from app.database.schema_checks import ensure_required_schema
 
 install_starlette_router_compat()
 
-from app.routers import auth, queue_endpoints, password_reset, admin, feedback, patient_reports, patient_history, sessions, billing, patient_reminders
+from app.routers import ai_transcription, auth, queue_endpoints, password_reset, admin, feedback, patient_reports, patient_history, patient_health, sessions, billing, patient_reminders, ehr
 from app.services.appointment_maintenance import cleanup_old_appointments
 from app.services.delay_jobs import scheduled_delay_jobs
+from app.services.gpu_instance import monitor_gpu_idle_shutdown
 from app.services import realtime
 import json
 
@@ -545,10 +547,11 @@ async def lifespan(app: FastAPI):
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_revisit_reminders_revisit_date ON patient_revisit_reminders(revisit_date)")
         await safe_exec("CREATE INDEX IF NOT EXISTS idx_revisit_reminders_status ON patient_revisit_reminders(status)")
 
-        # Recreate admin table with double OTP structure
-        await safe_exec("DROP TABLE IF EXISTS admins CASCADE")
+        # Keep admin accounts and in-flight OTPs across reloads/restarts. Older
+        # code recreated this table on every startup, invalidating otherwise
+        # correct OTPs and admin sessions.
         await safe_exec("""
-            CREATE TABLE admins (
+            CREATE TABLE IF NOT EXISTS admins (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(255) UNIQUE NOT NULL,
                 email VARCHAR(255) NOT NULL,
@@ -559,43 +562,50 @@ async def lifespan(app: FastAPI):
                 confirmation_otp_expires_at TIMESTAMP
             )
         """)
+        await safe_exec("ALTER TABLE admins ADD COLUMN IF NOT EXISTS confirmation_email VARCHAR(255)")
+        await safe_exec("ALTER TABLE admins ADD COLUMN IF NOT EXISTS otp_code VARCHAR(10)")
+        await safe_exec("ALTER TABLE admins ADD COLUMN IF NOT EXISTS confirmation_otp_code VARCHAR(10)")
+        await safe_exec("ALTER TABLE admins ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP")
+        await safe_exec("ALTER TABLE admins ADD COLUMN IF NOT EXISTS confirmation_otp_expires_at TIMESTAMP")
 
-        # Check if admins already exist
-        admin_check = await conn.execute(text("SELECT COUNT(*) FROM admins"))
-        admin_count = admin_check.scalar()
-
-        if admin_count == 0:
-            # Insert admin accounts using raw SQL
-            for admin in admin_seeds():
-                if not admin.email or not admin.confirmation_email:
-                    logger.warning("Skipping %s seed: admin email env vars are not fully configured", admin.username)
-                    continue
-                await conn.execute(
-                    text(
-                        "INSERT INTO admins (username, email, confirmation_email) "
-                        "VALUES (:username, :email, :confirmation_email)"
-                    ),
-                    {
-                        "username": admin.username,
-                        "email": admin.email,
-                        "confirmation_email": admin.confirmation_email,
-                    },
-                )
-            logger.info("Created admin accounts: %s", ", ".join(admin.username for admin in admin_seeds()))
+        # Insert missing admins and keep their configured inboxes synchronized
+        # without deleting OTP state or changing account IDs.
+        for admin in admin_seeds():
+            if not admin.email or not admin.confirmation_email:
+                logger.warning("Skipping %s seed: admin email env vars are not fully configured", admin.username)
+                continue
+            await conn.execute(
+                text(
+                    "INSERT INTO admins (username, email, confirmation_email) "
+                    "VALUES (:username, :email, :confirmation_email) "
+                    "ON CONFLICT (username) DO UPDATE SET "
+                    "email = EXCLUDED.email, confirmation_email = EXCLUDED.confirmation_email"
+                ),
+                {
+                    "username": admin.username,
+                    "email": admin.email,
+                    "confirmation_email": admin.confirmation_email,
+                },
+            )
+        logger.info("Admin accounts synchronized: %s", ", ".join(admin.username for admin in admin_seeds()))
 
         await ensure_required_schema(conn)
 
     # Start background scheduled tasks
-    background_tasks = []
+    # EHR generation is a core request worker, not optional maintenance.
+    background_tasks = [
+        asyncio.create_task(ehr.run_ehr_generation_queue()),
+        asyncio.create_task(monitor_gpu_idle_shutdown()),
+    ]
     if background_jobs_enabled():
-        background_tasks = [
+        background_tasks.extend([
             asyncio.create_task(scheduled_midnight_cleanup()),
             asyncio.create_task(scheduled_auto_stop_clinics()),
             asyncio.create_task(scheduled_delay_jobs()),
-        ]
-        logger.info("Started scheduled background tasks (midnight cleanup + auto-stop + delay jobs)")
+        ])
+        logger.info("Started scheduled background tasks (midnight cleanup + auto-stop + delay jobs + EHR generation queue)")
     else:
-        logger.warning("Background scheduled tasks are disabled by BACKGROUND_JOBS_ENABLED=false")
+        logger.warning("Background maintenance tasks are disabled; the EHR generation queue remains active")
 
     # Run appointment maintenance on startup/restart
     try:
@@ -618,11 +628,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Krama API", version="1.0.0", lifespan=lifespan)
 
-# CORS middleware - allow all origins for development
+# Only configured Krama frontends may call the API from a browser.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
-    allow_credentials=True,
+    allow_origins=cors_allowed_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -634,10 +644,13 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(patient_reports.router, prefix="/api")
 app.include_router(patient_history.router, prefix="/api")
+app.include_router(patient_health.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(billing.router, prefix="/api")
 app.include_router(patient_reminders.router, prefix="/api")
 app.include_router(realtime.router, prefix="/api")
+app.include_router(ai_transcription.router, prefix="/api")
+app.include_router(ehr.router, prefix="/api")
 
 @app.get("/")
 async def root():

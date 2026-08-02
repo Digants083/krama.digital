@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, clinicAuthHeaders } from "@/lib/api";
 import { AlertCircle, CalendarDays, ChevronRight, Eye, MapPin, ReceiptText, Settings, User, Users } from "lucide-react";
 import LocationPickerModal from "@/components/clinic/LocationPickerModal";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ interface ClinicProfile {
   admin_pinned_latitude?: string | number | null;
   admin_pinned_longitude?: string | number | null;
   has_pinned_location?: boolean;
+  first_login?: boolean;
 }
 
 const CLINIC_FIRST_LOGIN_LOCATION_KEY = "clinic_first_login_location";
@@ -48,7 +49,7 @@ const loadFirstLoginLocation = (): ClinicProfile | null => {
     const suggestedLatitude = data.admin_pinned_latitude || (!data.has_pinned_location ? data.latitude : null);
     const suggestedLongitude = data.admin_pinned_longitude || (!data.has_pinned_location ? data.longitude : null);
 
-    if (!data.first_login || !suggestedLatitude || !suggestedLongitude || data.has_pinned_location) {
+    if (!data.first_login || data.has_pinned_location) {
       return null;
     }
 
@@ -80,6 +81,8 @@ const ClinicDashboardNew = () => {
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [showLocationConfirm, setShowLocationConfirm] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
+  const [confirmingLocation, setConfirmingLocation] = useState(false);
+  const [firstLoginLocationPending, setFirstLoginLocationPending] = useState(() => Boolean(loadFirstLoginLocation()));
   const clinicId = localStorage.getItem("clinic_id") || "";
   const pendingLatitude = clinicProfile?.admin_pinned_latitude || (!clinicProfile?.has_pinned_location ? clinicProfile?.latitude : null);
   const pendingLongitude = clinicProfile?.admin_pinned_longitude || (!clinicProfile?.has_pinned_location ? clinicProfile?.longitude : null);
@@ -98,14 +101,22 @@ const ClinicDashboardNew = () => {
     if (!clinicId) return;
 
     try {
-      const response = await fetch(apiUrl(`/api/auth/clinic/data?clinic_id=${encodeURIComponent(clinicId)}`));
+      const response = await fetch(
+        apiUrl(`/api/auth/clinic/data?clinic_id=${encodeURIComponent(clinicId)}`),
+        { headers: clinicAuthHeaders() },
+      );
       if (!response.ok) return;
       const data: ClinicProfile = await response.json();
-      setClinicProfile(data);
+      const firstLoginData = loadFirstLoginLocation();
+      setClinicProfile({ ...(firstLoginData || {}), ...data });
       setClinicName(data.clinic_name || data.name || clinicId);
       const suggestedLatitude = data.admin_pinned_latitude || (!data.has_pinned_location ? data.latitude : null);
       const suggestedLongitude = data.admin_pinned_longitude || (!data.has_pinned_location ? data.longitude : null);
-      setShowLocationConfirm(Boolean(suggestedLatitude && suggestedLongitude && data.has_pinned_location === false));
+      const shouldConfirmSuggestedPin = Boolean(suggestedLatitude && suggestedLongitude && data.has_pinned_location === false);
+      setShowLocationConfirm(shouldConfirmSuggestedPin);
+      if (!shouldConfirmSuggestedPin && firstLoginData?.first_login && !data.has_pinned_location) {
+        setShowLocationModal(true);
+      }
     } catch {
       setClinicName(clinicId);
     }
@@ -132,7 +143,7 @@ const ClinicDashboardNew = () => {
     try {
       const response = await fetch(apiUrl("/api/auth/clinic/update-location"), {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: clinicAuthHeaders(true),
         body: JSON.stringify({
           clinic_id: clinicId,
           latitude: lat,
@@ -142,8 +153,8 @@ const ClinicDashboardNew = () => {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setMessage({ text: data.detail || "Failed to save location", type: "error" });
-        return;
+        const detail = data.detail || "Failed to save location";
+        throw new Error(detail);
       }
       setClinicProfile((current) => ({
         ...(current || {}),
@@ -154,17 +165,27 @@ const ClinicDashboardNew = () => {
         has_pinned_location: true,
       }));
       localStorage.removeItem(CLINIC_FIRST_LOGIN_LOCATION_KEY);
+      setFirstLoginLocationPending(false);
       setShowLocationConfirm(false);
       setShowLocationModal(false);
       setMessage({ text: "Clinic location saved.", type: "success" });
-    } catch {
-      setMessage({ text: "Network error while saving location", type: "error" });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Could not save the clinic location. Check the connection and try again.";
+      setMessage({ text: detail, type: "error" });
+      throw new Error(detail);
     }
   };
 
   const acceptAdminPin = async () => {
     if (!pendingLatitude || !pendingLongitude) return;
-    await saveLocation(String(pendingLatitude), String(pendingLongitude), clinicAddress);
+    setConfirmingLocation(true);
+    try {
+      await saveLocation(String(pendingLatitude), String(pendingLongitude), clinicAddress);
+    } catch {
+      // The dialog remains open and saveLocation displays the error.
+    } finally {
+      setConfirmingLocation(false);
+    }
   };
 
   const actions: DashboardAction[] = [
@@ -229,12 +250,12 @@ const ClinicDashboardNew = () => {
               <div className="flex items-start gap-3">
                 <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-100" />
                 <div>
-                  <p className="text-sm font-bold text-white">Clinic location is not pinned</p>
-                  <p className="mt-1 text-sm text-white/78">Set the exact map pin so patients can reach the right place.</p>
+                  <p className="text-sm font-bold text-white">{firstLoginLocationPending ? "Complete your clinic location" : "Clinic location is not pinned"}</p>
+                  <p className="mt-1 text-sm text-white/78">The map opens over India. Search your area and pin the exact clinic entrance.</p>
                 </div>
               </div>
               <Button type="button" onClick={() => setShowLocationModal(true)} className="mt-3 rounded-full bg-white text-[#1d6758] hover:bg-white/90">
-                Set Location
+                Pin Clinic Location
               </Button>
             </div>
           )}
@@ -272,17 +293,21 @@ const ClinicDashboardNew = () => {
             />
           )}
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="grid gap-2 sm:grid-cols-2">
             <Button
               variant="outline"
+              disabled={confirmingLocation}
               onClick={() => {
                 setShowLocationConfirm(false);
                 setShowLocationModal(true);
               }}
+              className="w-full"
             >
-              No, I will adjust
+              Choose a different location
             </Button>
-            <Button onClick={acceptAdminPin}>Yes, save this pin</Button>
+            <Button onClick={acceptAdminPin} disabled={confirmingLocation} className="w-full">
+              {confirmingLocation ? "Saving location..." : "Confirm this location"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

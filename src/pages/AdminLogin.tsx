@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Shield, Mail, ArrowRight, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { ADMIN_CONFIRMATION_EMAIL_LABELS, ADMIN_EMAIL_LABELS } from "@/config/app";
+import { apiUrl } from "@/lib/api";
 
 type LocationState = {
   from?: {
@@ -32,13 +33,14 @@ const AdminLogin = () => {
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    const normalizedUsername = username.trim().toLowerCase();
 
-    if (!username.trim()) {
+    if (!normalizedUsername) {
       setError("Please enter a username");
       return;
     }
 
-    if (username !== "admin1") {
+    if (normalizedUsername !== "admin1") {
       setError("Invalid username. Use admin1");
       return;
     }
@@ -46,15 +48,16 @@ const AdminLogin = () => {
     setSendingOtp(true);
 
     try {
-      const response = await fetch("/api/admin/send-otp", {
+      const response = await fetch(apiUrl("/api/admin/send-otp"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username }),
+        body: JSON.stringify({ username: normalizedUsername }),
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
+        setUsername(normalizedUsername);
         setOtpSent(true);
         toast.success("OTP codes sent successfully!");
         setError("");
@@ -74,19 +77,21 @@ const AdminLogin = () => {
     setLoading(true);
 
     try {
-      if (!otpCode.trim() || !confirmationOtpCode.trim()) {
+      const normalizedOtp = otpCode.replace(/\D/g, "");
+      const normalizedConfirmationOtp = confirmationOtpCode.replace(/\D/g, "");
+      if (normalizedOtp.length !== 6 || normalizedConfirmationOtp.length !== 6) {
         setError("Please enter both OTP codes");
         setLoading(false);
         return;
       }
 
-      const response = await fetch("/api/admin/verify-otp", {
+      const response = await fetch(apiUrl("/api/admin/verify-otp"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username,
-          otp_code: otpCode,
-          confirmation_otp_code: confirmationOtpCode,
+          username: username.trim().toLowerCase(),
+          otp_code: normalizedOtp,
+          confirmation_otp_code: normalizedConfirmationOtp,
         }),
       });
 
@@ -114,7 +119,7 @@ const AdminLogin = () => {
   const handleResendOtp = async () => {
     setSendingOtp(true);
     try {
-      const response = await fetch("/api/admin/send-otp", {
+      const response = await fetch(apiUrl("/api/admin/send-otp"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username }),
@@ -185,7 +190,7 @@ const AdminLogin = () => {
                   maxLength={6}
                   placeholder="Enter 6-digit OTP"
                   value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value)}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   className="text-center text-lg tracking-widest"
                   required
                 />
@@ -201,7 +206,7 @@ const AdminLogin = () => {
                   maxLength={6}
                   placeholder="Enter 6-digit confirmation OTP"
                   value={confirmationOtpCode}
-                  onChange={(e) => setConfirmationOtpCode(e.target.value)}
+                  onChange={(e) => setConfirmationOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   className="text-center text-lg tracking-widest"
                   required
                 />

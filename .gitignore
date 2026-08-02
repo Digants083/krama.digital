@@ -16,6 +16,9 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.claude/
+.agents/
+.codex/
 .DS_Store
 *.suo
 *.ntvs*
@@ -35,6 +38,7 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
+.venv*/
 
 # Django
 *.log
@@ -55,3 +59,7 @@ backend/graphify-out/
 
 # Runtime/local upload artifacts
 backend/patient_reports/
+.runtime/
+tmp/
+output/
+node-runtime.zip

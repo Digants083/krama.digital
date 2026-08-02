@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Search, Calendar, Mail, Phone, UserCircle, Eye } from "lucide-react";
+import { ArrowLeft, Calendar, Mail, Phone, UserCircle, Eye, FileText, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { apiUrl, clinicAuthHeaders } from "@/lib/api";
 
 interface PatientSearchResult {
   appointment_token: string;
+  encounter_id?: string | null;
   patient_name: string;
   patient_phone: string;
   patient_id: string;
@@ -13,9 +15,11 @@ interface PatientSearchResult {
   date: string;
   time: string;
   status: string;
+  source?: string;
 }
 
 const ClinicLook = () => {
+  const navigate = useNavigate();
   const [clinicProfile, setClinicProfile] = useState<any>(null);
   const [message, setMessage] = useState<{text: string; type: "success" | "error"} | null>(null);
   
@@ -29,6 +33,8 @@ const ClinicLook = () => {
   const [searchResults, setSearchResults] = useState<PatientSearchResult[]>([]);
   const [searchCount, setSearchCount] = useState(0);
   const [searching, setSearching] = useState(false);
+  const [expandedPatientId, setExpandedPatientId] = useState("");
+  const [ehrLoading, setEhrLoading] = useState(false);
 
   // Get clinic ID from localStorage
   const getClinicId = () => {
@@ -79,7 +85,7 @@ const ClinicLook = () => {
         url += `&phone=${phone}`;
       }
 
-      const response = await fetch(url);
+      const response = await fetch(apiUrl(url), { headers: clinicAuthHeaders() });
       if (response.ok) {
         const data = await response.json();
         setSearchResults(data.patients || []);
@@ -89,6 +95,104 @@ const ClinicLook = () => {
       setMessage({text: "Error searching patients", type: "error"});
     } finally {
       setSearching(false);
+    }
+  };
+
+  // Group search results by patient_id
+  const groupedPatients = useMemo(() => {
+    const map = new Map<string, { name: string; phone: string; email: string; patient_id: string; visits: PatientSearchResult[] }>();
+    for (const r of searchResults) {
+      const key = r.patient_id;
+      if (!map.has(key)) {
+        map.set(key, { name: r.patient_name, phone: r.patient_phone, email: r.patient_email, patient_id: r.patient_id, visits: [] });
+      }
+      map.get(key)!.visits.push(r);
+    }
+    return Array.from(map.values()).sort((a, b) => b.visits.length - a.visits.length);
+  }, [searchResults]);
+
+  const togglePatient = (patientId: string) => {
+    if (expandedPatientId === patientId) {
+      setExpandedPatientId("");
+      return;
+    }
+    setExpandedPatientId(patientId);
+  };
+
+  const saveSearchState = () => {
+    try {
+      sessionStorage.setItem("clinicLookState", JSON.stringify({
+        searchType, fromDate, toDate, patientId, email, phone,
+        searchResults, searchCount, expandedPatientId,
+      }));
+    } catch { /* sessionStorage may be full */ }
+  };
+
+  // Restore search state on mount
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("clinicLookState");
+      if (saved) {
+        const state = JSON.parse(saved);
+        if (state.searchType) setSearchType(state.searchType);
+        if (state.fromDate) setFromDate(state.fromDate);
+        if (state.toDate) setToDate(state.toDate);
+        if (state.patientId) setPatientId(state.patientId);
+        if (state.email) setEmail(state.email);
+        if (state.phone) setPhone(state.phone);
+        if (state.searchResults) setSearchResults(state.searchResults);
+        if (state.searchCount !== undefined) setSearchCount(state.searchCount);
+        if (state.expandedPatientId) setExpandedPatientId(state.expandedPatientId);
+        sessionStorage.removeItem("clinicLookState");
+      }
+    } catch { /* ignore parse errors */ }
+  }, []);
+
+  const viewEhr = async (visit: PatientSearchResult) => {
+    const clinicId = getClinicId();
+    if (!clinicId) return;
+    if (visit.encounter_id) {
+      saveSearchState();
+      navigate(`/clinic/patients/${encodeURIComponent(visit.patient_id)}/encounters/${encodeURIComponent(visit.encounter_id)}/ehr`);
+      return;
+    }
+    setEhrLoading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(
+        apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(visit.patient_id)}`),
+        { headers: clinicAuthHeaders() },
+      );
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || "Could not load this patient's EHR");
+      }
+      const payload = await response.json();
+      const encounters = Array.isArray(payload.encounters) ? payload.encounters : [];
+      const normalizedTime = (value: unknown) => String(value || "").slice(0, 5);
+      // Match the stable token first. Historical appointments are removed from
+      // the live table, so their EHR falls back to the stored visit date/time.
+      const enc = encounters.find((e: any) =>
+        e.visit?.appointment_token && e.visit.appointment_token === visit.appointment_token
+      ) || encounters.find((e: any) =>
+        e.visit?.date === visit.date && normalizedTime(e.visit?.time) === normalizedTime(visit.time)
+      ) || encounters.find((e: any) => {
+        const storedDateTime = e.ehr_data?.visit_details?.visit_datetime;
+        return typeof storedDateTime === "string" &&
+          storedDateTime.slice(0, 10) === visit.date &&
+          normalizedTime(storedDateTime.split("T")[1]) === normalizedTime(visit.time);
+      });
+      if (!enc) {
+        setMessage({ text: "No EHR recorded for this visit.", type: "error" });
+        setEhrLoading(false);
+        return;
+      }
+      saveSearchState();
+      navigate(`/clinic/patients/${encodeURIComponent(visit.patient_id)}/encounters/${encodeURIComponent(enc.encounter_id)}/ehr`);
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "Could not load this patient's EHR", type: "error" });
+    } finally {
+      setEhrLoading(false);
     }
   };
 
@@ -110,6 +214,8 @@ const ClinicLook = () => {
 
       <main className="mx-auto max-w-4xl px-4 py-6 sm:py-8">
         <h1 className="mb-5 text-2xl font-bold text-foreground sm:mb-6">Search Patients</h1>
+
+        {message ? <div className={`mb-4 rounded-2xl p-4 text-sm font-semibold ${message.type === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{message.text}</div> : null}
 
         {/* Search Type Buttons */}
         <div className="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:gap-3">
@@ -225,42 +331,74 @@ const ClinicLook = () => {
         {searchCount > 0 && (
           <div className="rounded-[24px] border border-white/70 bg-white/80 backdrop-blur p-4 shadow-sm sm:p-6">
             <h2 className="text-lg font-semibold mb-4">
-              Found <span className="text-[#00555A]">{searchCount}</span> patients
+              Found <span className="text-[#00555A]">{groupedPatients.length}</span> patient{groupedPatients.length !== 1 ? "s" : ""} · <span className="text-sm font-normal text-muted-foreground">{searchCount} total visit{searchCount !== 1 ? "s" : ""}</span>
             </h2>
             <div className="space-y-3">
-              {searchResults.map((patient, idx) => (
-                <div key={idx} className="rounded-2xl border border-[#e6ded3] bg-[#f6f1e8] p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <span className="block truncate text-lg font-semibold">{patient.patient_name}</span>
-                      <p className="text-muted-foreground text-sm mt-1">
-                        ID: {patient.patient_id}
-                      </p>
-                      <p className="mt-1 flex min-w-0 flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
-                        <span className="truncate">{patient.patient_email}</span>
-                        <span className="hidden sm:inline">-</span>
-                        <span className="truncate">{patient.patient_phone}</span>
-                      </p>
+              {groupedPatients.map((group) => {
+                const isExpanded = expandedPatientId === group.patient_id;
+                return (
+                  <div key={group.patient_id} className="rounded-2xl border border-[#e6ded3] bg-[#f6f1e8] overflow-hidden">
+                    <button type="button" onClick={() => togglePatient(group.patient_id)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-lg font-semibold">{group.name}</span>
+                        <p className="text-muted-foreground text-sm mt-1">
+                          ID: {group.patient_id}
+                        </p>
+                        <p className="mt-1 flex min-w-0 flex-col gap-1 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+                          <span className="truncate">{group.email}</span>
+                          <span className="hidden sm:inline">-</span>
+                          <span className="truncate">{group.phone}</span>
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span className="rounded-2xl bg-[#00555A]/10 px-3 py-1 text-sm font-bold text-[#00555A]">{group.visits.length} visit{group.visits.length !== 1 ? "s" : ""}</span>
+                        {isExpanded ? <ChevronDown className="h-5 w-5 text-[#68736f]" /> : <ChevronRight className="h-5 w-5 text-[#68736f]" />}
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-[#e6ded3] bg-white">
+                        <div className="divide-y divide-[#e6ded3]">
+                          {group.visits.map((visit, idx) => {
+                            return (
+                            <div key={visit.encounter_id || `${visit.appointment_token}-${visit.date}-${visit.time}-${idx}`} className="p-4">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="text-sm text-muted-foreground">
+                                  <span className="font-medium text-[#202825]">{visit.date}</span> at <span className="font-medium text-[#202825]">{visit.time}</span>
+                                  <span className="mx-2 text-[#c5beb2]">·</span>
+                                  <span className="rounded-2xl bg-[#00555A]/10 px-2.5 py-0.5 font-bold text-[#00555A]">{visit.appointment_token || "EHR"}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                                    visit.source === 'online' ? 'bg-blue-100 text-blue-700' :
+                                    visit.source === 'walkin' ? 'bg-purple-100 text-purple-700' :
+                                    'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {visit.source || "appointment"}
+                                  </span>
+                                  <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-medium ${
+                                    visit.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                    visit.status === 'waiting' ? 'bg-amber-100 text-amber-700' :
+                                    visit.status === 'booked' ? 'bg-blue-100 text-blue-700' :
+                                    'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {visit.status}
+                                  </span>
+                                </div>
+                              </div>
+                              <Button variant="outline" onClick={() => viewEhr(visit)} className="mt-2 w-full border-[#a9cfc0] bg-white text-[#1a5c4a] hover:bg-[#edf8f3] sm:w-auto">
+                                {ehrLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                                View EHR
+                              </Button>
+                            </div>
+                            );
+                          })}
+                      </div>
                     </div>
-                    <span className="shrink-0 self-start rounded-2xl bg-[#00555A]/10 px-3 py-1 text-lg font-bold text-[#00555A]">
-                      {patient.appointment_token}
-                    </span>
+                  )}
                   </div>
-                  <div className="mt-3 flex flex-col gap-3 border-t border-[#e6ded3] pt-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="text-sm text-muted-foreground">
-                      <span className="font-medium">{patient.date}</span> at <span className="font-medium">{patient.time}</span>
-                    </div>
-                    <span className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-medium ${
-                      patient.status === 'completed' ? 'bg-green-100 text-green-700' :
-                      patient.status === 'waiting' ? 'bg-amber-100 text-amber-700' :
-                      patient.status === 'booked' ? 'bg-blue-100 text-blue-700' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>
-                      {patient.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

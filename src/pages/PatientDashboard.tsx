@@ -6,7 +6,9 @@ import {
   ChevronRight,
   Clock,
   ClipboardList,
+  FileHeart,
   Hash,
+  Upload,
   Star,
   type LucideIcon,
   User,
@@ -202,6 +204,20 @@ const PatientDashboard = () => {
       icon: Star,
       to: "/patient/reviews",
       tone: "bg-[#ffc247] text-slate-950",
+    },
+    {
+      title: "Health records",
+      text: "Upload and view medical reports.",
+      icon: Upload,
+      to: "/patient/health-records",
+      tone: "bg-[#dceeff] text-[#174b7a]",
+    },
+    {
+      title: "Your summary",
+      text: "See every clinic visit in one place.",
+      icon: FileHeart,
+      to: "/patient/health-summary",
+      tone: "bg-[#e1f5ee] text-[#1a5c4a]",
     },
   ];
 

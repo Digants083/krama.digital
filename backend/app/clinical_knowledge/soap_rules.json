@@ -1,0 +1,1088 @@
+{
+  "version": "1.1.0",
+  "documents": [
+    {
+      "id": "core.transcript_only",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Use only facts explicitly spoken in the consultation transcript. Never add information that was not said.",
+      "include": [
+        "Exact spoken facts",
+        "Exact numbers and units as spoken",
+        "Explicit negations verbatim",
+        "Stated durations and timeframes"
+      ],
+      "exclude": [
+        "Medical inference from symptoms",
+        "Generic or default clinical advice",
+        "Completed or guessed missing information",
+        "Assumed normal values"
+      ],
+      "keywords": [],
+      "examples": [
+        "Fever for two days remains fever for two days.",
+        "Temperature 98.6 F remains 98.6 F.",
+        "No diabetes remains no diabetes."
+      ],
+      "counterexamples": [
+        "Do not diagnose viral fever from fever alone.",
+        "Do not write blood pressure 120/80 when it was not said."
+      ]
+    },
+    {
+      "id": "core.speaker_routing",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Route facts to SOAP sections based on who supplied the information, never on what the system infers.",
+      "include": [
+        "Patient or caregiver reports of symptoms, history, and concerns go to Subjective",
+        "Measured or clinically observed facts go to Objective",
+        "Doctor diagnostic opinions and assessments go to Assessment",
+        "Doctor orders, prescriptions, and advice go to Plan"
+      ],
+      "exclude": [
+        "Doctor questions treated as patient answers",
+        "Patient guesses or self-diagnoses treated as doctor assessments",
+        "Unknown speaker assigned default routing"
+      ],
+      "keywords": [],
+      "examples": [
+        "Doctor: Are you taking tablets? is a question, not current medication.",
+        "Patient: I think it might be dengue is patient speculation, not Assessment."
+      ],
+      "counterexamples": [
+        "Do not treat a medicine named only in a doctor question as patient history.",
+        "Do not route patient speculation to assessment."
+      ]
+    },
+    {
+      "id": "core.blank_fields",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Leave undiscussed fields absent from the output. Never generate placeholder text for unspoken information.",
+      "include": [
+        "Null or empty schema value internally",
+        "Omitted field when topic never raised"
+      ],
+      "exclude": [
+        "Not discussed",
+        "Not mentioned",
+        "Unknown",
+        "Assumed normal",
+        "Not recorded",
+        "No complaints",
+        "Unremarkable"
+      ],
+      "keywords": [],
+      "examples": [
+        "No blood pressure statement means an empty blood-pressure value.",
+        "No family history discussed means family_history remains absent."
+      ],
+      "counterexamples": [
+        "Do not write blood pressure not recorded.",
+        "Do not write family history not available.",
+        "Do not generate normal examination findings."
+      ]
+    },
+    {
+      "id": "core.negation",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Preserve explicit negation exactly as spoken. Never convert a denied finding into a positive one.",
+      "include": [
+        "No",
+        "Not",
+        "Denies",
+        "Without",
+        "Never had",
+        "None"
+      ],
+      "exclude": [
+        "A positive condition created from a denied condition",
+        "Double negative interpreted as positive",
+        "Silence interpreted as negation"
+      ],
+      "keywords": ["no", "not", "denies", "denied", "without", "never", "none", "nope", "nahi", "illa"],
+      "examples": [
+        "No chest pain",
+        "Never had asthma",
+        "Mujhe diabetes nahi hai (I do not have diabetes)",
+        "Nange asthma illa (I have no asthma)"
+      ],
+      "counterexamples": [
+        "Do not record asthma when patient said no asthma.",
+        "Do not record chest pain when patient denied it."
+      ]
+    },
+    {
+      "id": "core.provenance",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Preserve the source of every fact. Patient-reported measurements must be distinguishable from clinic-measured values.",
+      "include": [
+        "Patient said",
+        "Caregiver reported",
+        "Doctor measured",
+        "Source attribution for every value"
+      ],
+      "exclude": [
+        "Source stripped from measurement",
+        "Patient-reported values treated as clinical measurements"
+      ],
+      "keywords": ["patient said", "reported", "measured", "clinic", "home", "at home"],
+      "examples": [
+        "Temperature 100 F (patient reported at home)",
+        "BP 130/80 (measured in clinic)"
+      ],
+      "counterexamples": [
+        "Do not mark home glucose reading as clinic-verified."
+      ]
+    },
+    {
+      "id": "core.correction",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "When a speaker explicitly corrects or clarifies an earlier statement, the later statement overrides the earlier one.",
+      "include": [
+        "Correction overrides prior statement",
+        "Clarification refines prior statement"
+      ],
+      "exclude": [
+        "Contradiction without explicit correction treated as confusion",
+        "Doctor question as correction"
+      ],
+      "keywords": ["actually", "correction", "I meant", "sorry", "revise", "update", "wait", "no no", "not that", "instead"],
+      "examples": [
+        "Patient: I said fever since five days, actually it is three days."
+      ],
+      "counterexamples": [
+        "Do not treat I have cough and I have cold as a correction."
+      ]
+    },
+    {
+      "id": "core.history_vs_plan",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Strictly separate patient-reported history from doctor-ordered plan.",
+      "include": [
+        "Patient or caregiver past and current health information stays in Subjective",
+        "Doctor instructions, prescriptions, and orders stay in Plan"
+      ],
+      "exclude": [
+        "Patient coping strategy as doctor plan",
+        "Doctor plan routed to patient history"
+      ],
+      "keywords": [],
+      "examples": [
+        "Patient: I took paracetamol yesterday is history, not prescription.",
+        "Doctor: Take paracetamol now is plan, not medication history."
+      ],
+      "counterexamples": [
+        "Do not route doctor prescription to current_medications.",
+        "Do not route patient OTC use to plan.prescriptions."
+      ]
+    },
+    {
+      "id": "core.no_diagnosis_inference",
+      "section": "CORE",
+      "field": "all",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Never infer a diagnosis from a symptom or combination of symptoms. Only the doctor can supply assessment content.",
+      "include": [
+        "Explicit doctor diagnostic statements only"
+      ],
+      "exclude": [
+        "Symptom converted to diagnosis",
+        "Symptom combination interpreted as syndrome",
+        "Patient self-diagnosis",
+        "Statistical or knowledge-base inference"
+      ],
+      "keywords": [],
+      "examples": [
+        "Fever and cough remain symptoms in Subjective, not a viral diagnosis.",
+        "Doctor: This looks like viral fever is an Assessment statement."
+      ],
+      "counterexamples": [
+        "Do not write viral fever because patient has fever and cough.",
+        "Do not write UTI because patient has burning urination."
+      ]
+    },
+    {
+      "id": "subjective.chief_concerns",
+      "section": "S",
+      "field": "subjective.chief_concerns",
+      "speaker": ["patient", "caregiver"],
+      "purpose": "Capture each main reason for the visit as a concise complaint with its explicitly stated duration.",
+      "include": [
+        "Concern or symptom name",
+        "Duration when stated"
+      ],
+      "exclude": [
+        "Diagnosis label",
+        "Doctor advice or plan",
+        "Severity or course details, which belong in history of present illness",
+        "Full HPI narrative",
+        "Repeated duration inside the concern name"
+      ],
+      "keywords": [
+        "pain", "fever", "bukhar", "jvara", "cough", "khasi", "kempu", "headache",
+        "tale novu", "sir dard", "dizziness", "breathing", "breathlessness",
+        "vomiting", "diarrhea", "swelling", "rash", "weakness",
+        "worse", "worsening", "improving", "days", "weeks", "months", "hours",
+        "since", "for", "severe", "mild", "moderate", "slight", "slightly",
+        "fluctuating", "intermittent", "continuous", "constant", "on and off"
+      ],
+      "examples": [
+        "Cough for one week, worsening for three days.",
+        "Fever since yesterday.",
+        "Mujhe bukhar hai do din se (I have fever for two days).",
+        "Thale novu, mild since one week (Headache, mild since one week).",
+        "Slight headache which is fluctuating (Headache, mild, intermittent)."
+      ],
+      "counterexamples": [
+        "Do not include diagnoses like viral fever.",
+        "Do not duplicate full illness narrative here."
+      ]
+    },
+    {
+      "id": "subjective.history_of_present_illness",
+      "section": "S",
+      "field": "subjective.history_of_present_illness",
+      "speaker": ["patient", "caregiver"],
+      "purpose": "Capture the chronological story of the current illness using only patient-reported facts.",
+      "include": [
+        "Onset and duration",
+        "Course and progression",
+        "Associated symptoms",
+        "Explicit relevant negatives",
+        "Triggers and aggravating factors",
+        "Relieving factors and self-care attempted",
+        "Pattern (continuous, intermittent, diurnal variation)",
+        "Home treatment or OTC medicines tried",
+        "Relevant patient-reported measurements"
+      ],
+      "exclude": [
+        "Doctor diagnosis or impression",
+        "Prescription or treatment advice",
+        "Invented narrative links between events",
+        "Duplicate negative symptom section"
+      ],
+      "keywords": [
+        "started", "since", "for", "ago", "worse", "better", "relief", "relieved",
+        "after", "before", "during", "night", "morning", "evening", "continuous",
+        "intermittent", "on and off", "travel", "contact", "tried", "took",
+        "shuru", "se", "pahle", "bad mein", "subah", "raat"
+      ],
+      "examples": [
+        "Patient reports headache for two days and denies vomiting.",
+        "Fever started three days ago, on and off. Took paracetamol at home.",
+        "Khansi shuru hui ek hafte pahle, raat mein zyada hoti hai (Cough started one week ago, worse at night).",
+        "Kempu jaaste illa, nange tale novu matti dizzines ide (No fever, I have headache and dizziness)."
+      ],
+      "counterexamples": [
+        "Likely viral illness unless the doctor explicitly said it.",
+        "Do not create a separate negative-symptom section."
+      ]
+    },
+    {
+      "id": "subjective.past_medical_history",
+      "section": "S",
+      "field": "subjective.past_medical_history",
+      "speaker": ["patient", "caregiver"],
+      "purpose": "Capture existing or previous diagnoses, chronic diseases, major illnesses, hospitalizations, surgeries, and explicit denials.",
+      "include": [
+        "Past or chronic diagnoses",
+        "Hospitalizations",
+        "Surgeries and procedures",
+        "Explicit historical negatives or denials",
+        "Major illnesses"
+      ],
+      "exclude": [
+        "Current symptom converted into a diagnosis",
+        "Doctor question without an answer",
+        "Doctor prescription history"
+      ],
+      "keywords": [
+        "diabetes", "sugar", "madhumeha", "hypertension", "blood pressure", "bp",
+        "asthma", "dama", "heart", "kidney", "thyroid", "diagnosed", "history",
+        "surgery", "operation", "hospitalized", "hospitalisation", "admitted",
+        "chronic", "since", "no history", "denies", "never had"
+      ],
+      "examples": [
+        "Type 2 diabetes for five years.",
+        "No history of asthma.",
+        "Appendectomy done in 2018.",
+        "Mujhe diabetes hai (I have diabetes)."
+      ],
+      "counterexamples": [
+        "Do not record asthma when the patient said no asthma.",
+        "Do not list current complaints as past medical history."
+      ]
+    },
+    {
+      "id": "subjective.current_medications",
+      "section": "S",
+      "field": "subjective.current_medications",
+      "speaker": ["patient", "caregiver"],
+      "purpose": "Capture medicines the patient was already taking before this consultation, including those prescribed by other doctors. Never capture the doctor's newly prescribed medicines.",
+      "include": [
+        "Medicine name",
+        "Strength when stated",
+        "Dose when stated",
+        "Route when stated",
+        "Frequency when stated",
+        "Timing when stated",
+        "Duration or length of use when stated",
+        "Indication when stated",
+        "Explicit statement of no current medicines"
+      ],
+      "exclude": [
+        "Today's new prescription from this doctor",
+        "Medicine appearing only in a doctor question",
+        "Doctor's newly prescribed medication"
+      ],
+      "keywords": [
+        "taking", "take", "tablets", "medicine", "medication", "daily", "regular",
+        "morning", "night", "current", "ongoing", "already", "continuing",
+        "le raha hun", "taking", "thumbuthidini", "se dal rahe hain"
+      ],
+      "examples": [
+        "Metformin 500 mg, one tablet every morning.",
+        "Patient takes amlodipine 5 mg daily for BP.",
+        "Naan daily thyroid tablet thagothini (I take thyroid tablet daily).",
+        "Currently on no medications."
+      ],
+      "counterexamples": [
+        "Do not place a newly prescribed medicine from today here.",
+        "Do not capture a medicine that only appeared in a doctor question."
+      ]
+    },
+    {
+      "id": "subjective.allergies",
+      "section": "S",
+      "field": "subjective.allergies",
+      "speaker": ["patient", "caregiver"],
+      "purpose": "Capture explicitly stated drug, food, or other allergies including allergen, type, reaction, severity, and explicit denial.",
+      "include": [
+        "Allergen name",
+        "Allergy type (drug, food, environmental)",
+        "Reaction when stated",
+        "Severity when stated",
+        "Explicit allergy denial"
+      ],
+      "exclude": [
+        "Assumed no allergies",
+        "Doctor question without an answer",
+        "Side effects confused with allergies"
+      ],
+      "keywords": [
+        "allergy", "allergic", "allergies", "reaction", "rash", "swelling", "itching",
+        "drug allergy", "medicine allergy", "food allergy", "penicillin",
+        "known allergies",
+        "elli", "se allergy hai", "allergy ide"
+      ],
+      "examples": [
+        "No known drug allergies.",
+        "Penicillin causes rash.",
+        "Mujhe penicillin se allergy hai (I am allergic to penicillin).",
+        "Nange yavude medicine allergy illa (I have no medicine allergies)."
+      ],
+      "counterexamples": [
+        "Do not write no allergies when allergies were not discussed.",
+        "Do not record stomach upset as an allergy."
+      ]
+    },
+    {
+      "id": "subjective.family_history",
+      "section": "S",
+      "field": "subjective.family_history",
+      "speaker": ["patient", "caregiver"],
+      "purpose": "Capture only explicitly reported health conditions among relatives or an explicit denial of relevant family history.",
+      "include": [
+        "Relative and explicitly stated condition",
+        "Explicit family-history denial"
+      ],
+      "exclude": [
+        "Patient's own medical condition",
+        "Doctor question without a patient or caregiver answer",
+        "Inferred hereditary risk"
+      ],
+      "keywords": [
+        "family history", "father", "mother", "parents", "brother", "sister",
+        "sibling", "grandfather", "grandmother", "uncle", "aunt", "runs in family"
+      ],
+      "examples": [
+        "My father has diabetes.",
+        "Mother has hypertension.",
+        "No family history of heart disease."
+      ],
+      "counterexamples": [
+        "Do not infer family history from the patient's diagnosis.",
+        "Do not populate this field when family history was not discussed."
+      ]
+    },
+    {
+      "id": "subjective.social_history",
+      "section": "S",
+      "field": "subjective.social_history",
+      "speaker": ["patient", "caregiver"],
+      "purpose": "Capture only explicitly reported smoking, tobacco, alcohol, substance use, occupation, exposure, activity, or relevant living conditions.",
+      "include": [
+        "Smoking or tobacco use",
+        "Alcohol or substance use",
+        "Occupation or occupational exposure",
+        "Relevant living conditions or physical activity",
+        "Explicit denial of a social-history behavior"
+      ],
+      "exclude": [
+        "Generic lifestyle advice from the doctor",
+        "Doctor question without a patient or caregiver answer",
+        "Assumed habits or occupation"
+      ],
+      "keywords": [
+        "smoke", "smoking", "smoker", "cigarette", "cigarettes", "tobacco", "alcohol", "drink", "drinking",
+        "substance", "occupation", "work", "job", "exposure", "living", "live with",
+        "exercise", "physical activity"
+      ],
+      "examples": [
+        "I do not smoke or drink alcohol.",
+        "I work in a textile factory.",
+        "Patient lives with family."
+      ],
+      "counterexamples": [
+        "Do not copy stop smoking advice into social history.",
+        "Do not populate this field when social history was not discussed."
+      ]
+    },
+
+    {
+      "id": "objective.vitals",
+      "section": "O",
+      "field": "objective.vitals",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Capture explicitly supplied measurements with their source. Support individual vital parameters and distinguish patient-reported from clinic-measured values.",
+      "include": [
+        "Temperature with value, unit, and source",
+        "Blood pressure with systolic/diastolic, unit, and source",
+        "Pulse or heart rate with value and unit",
+        "Respiratory rate with value and unit",
+        "SpO2 or oxygen saturation with value and unit",
+        "Height with value and unit",
+        "Weight with value and unit",
+        "BMI with value",
+        "Glucose with value, unit, and source"
+      ],
+      "exclude": [
+        "Unmeasured vital",
+        "Assumed normal value",
+        "Symptom without a numerical measurement",
+        "Generated or inferred values"
+      ],
+      "keywords": [
+        "temperature", "temp", "degree", "fahrenheit", "celsius",
+        "blood pressure", "bp", "systolic", "diastolic", "mmhg",
+        "pulse", "heart rate", "bpm",
+        "respiratory rate", "rr", "breaths",
+        "spo2", "oxygen", "saturation", "percent",
+        "weight", "kg", "kgs", "height", "cm", "bmi",
+        "glucose", "sugar", "blood sugar", "mgdl",
+        "clinic", "home", "measured", "patient said"
+      ],
+      "examples": [
+        "Temperature 98.6 F, clinic measured.",
+        "BP 130/80 mmHg.",
+        "Patient reports home glucose 140 mg/dL.",
+        "SpO2 98% on room air."
+      ],
+      "counterexamples": [
+        "Fever for two days is not a temperature measurement.",
+        "Do not write BP 120/80 when it was not measured.",
+        "Do not generate weight or BMI from patient appearance."
+      ]
+    },
+    {
+      "id": "objective.physical_examination",
+      "section": "O",
+      "field": "objective.physical_examination",
+      "speaker": ["doctor"],
+      "purpose": "Capture only examination findings the doctor explicitly states or observes. Never generate normal findings.",
+      "include": [
+        "Stated physical examination finding",
+        "Doctor-observed sign",
+        "Auscultation, palpation, percussion findings"
+      ],
+      "exclude": [
+        "Generated normal examination text",
+        "Patient-reported symptom",
+        "Planned or scheduled examination",
+        "Normal unless stated"
+      ],
+      "keywords": [
+        "examination", "exam", "on examination", "observed", "auscultation",
+        "palpation", "percussion", "chest clear", "tender", "swelling",
+        "appearance", "throat", "ears", "abdomen", "lungs", "heart sounds",
+        "jaundice", "pallor", "edema", "lymph nodes"
+      ],
+      "examples": [
+        "Chest clear on auscultation.",
+        "Throat congested.",
+        "Mild tenderness in right lower quadrant."
+      ],
+      "counterexamples": [
+        "Do not write normal examination when no examination occurred.",
+        "Do not write chest clear unless the doctor said it.",
+        "Do not generate lung fields are clear as default."
+      ]
+    },
+    {
+      "id": "objective.investigations",
+      "section": "O",
+      "field": "objective.investigations",
+      "speaker": ["patient", "caregiver", "doctor"],
+      "purpose": "Capture investigation results that already exist before or during this consultation. Future ordered tests belong in Plan.",
+      "include": [
+        "Laboratory results",
+        "Imaging results",
+        "ECG results",
+        "Other investigation results",
+        "Result value when stated",
+        "Unit when stated",
+        "Explicit interpretation when stated",
+        "Date or source when stated"
+      ],
+      "exclude": [
+        "Test ordered today or for future",
+        "Invented reference range",
+        "AI interpretation"
+      ],
+      "keywords": [
+        "result", "report", "test showed", "cbc", "x-ray", "xray", "scan",
+        "ultrasound", "usg", "ecg", "ekg", "mri", "ct scan",
+        "positive", "negative", "normal", "abnormal", "level", "value",
+        "blood test", "urine test", "stool test", "lab", "laboratory",
+        "report says", "result came"
+      ],
+      "examples": [
+        "Dengue test negative.",
+        "CBC shows Hb 13.2 g/dL.",
+        "Chest X-ray normal per doctor."
+      ],
+      "counterexamples": [
+        "Order CBC belongs in Plan, not Objective.",
+        "Do not generate reference ranges."
+      ]
+    },
+    {
+      "id": "assessment.clinical_impression",
+      "section": "A",
+      "field": "assessment.clinical_impression",
+      "speaker": ["doctor"],
+      "purpose": "Capture the doctor's explicitly stated overall clinical opinion or interpretation.",
+      "include": [
+        "Doctor's overall interpretation",
+        "Doctor's summary of the case"
+      ],
+      "exclude": [
+        "AI-generated synthesis",
+        "Patient self-diagnosis",
+        "Symptom alone",
+        "No doctor statement"
+      ],
+      "keywords": [
+        "impression", "looks like", "sounds like", "appears", "seems",
+        "overall", "in my opinion", "I think", "judging by",
+        "lagta hai", "ansta", "thatha"
+      ],
+      "examples": [
+        "Likely simple viral illness.",
+        "Overall impression is gastritis.",
+        "Mera impression hai ki ye viral hai (My impression is this is viral)."
+      ],
+      "counterexamples": [
+        "Do not infer viral illness from fever and cough alone.",
+        "Do not generate impression when doctor gave none."
+      ]
+    },
+    {
+      "id": "assessment.provisional_diagnosis",
+      "section": "A",
+      "field": "assessment.provisional_diagnosis",
+      "speaker": ["doctor"],
+      "purpose": "Capture each diagnosis the doctor explicitly states as likely, suspected, probable, or possible.",
+      "include": [
+        "Likely diagnosis with uncertainty qualifier",
+        "Suspected condition",
+        "Probable diagnosis",
+        "Possible condition",
+        "Provisional label"
+      ],
+      "exclude": [
+        "AI diagnosis",
+        "Confirmed diagnosis without qualifications",
+        "Patient speculation"
+      ],
+      "keywords": [
+        "likely", "probably", "suspect", "suspected", "could be", "looks like",
+        "provisional", "possible", "chance of", "might be",
+        "sandeha", "sambhav", "shaayad"
+      ],
+      "examples": [
+        "Viral fever, provisional.",
+        "Suspected dengue.",
+        "Ye shayad viral infection hai (This is probably a viral infection)."
+      ],
+      "counterexamples": [
+        "Do not upgrade suspected dengue to confirmed dengue.",
+        "Do not list symptom alone as provisional diagnosis."
+      ]
+    },
+    {
+      "id": "assessment.confirmed_diagnosis",
+      "section": "A",
+      "field": "assessment.confirmed_diagnosis",
+      "speaker": ["doctor"],
+      "purpose": "Capture only diagnoses the doctor explicitly establishes as confirmed or definite.",
+      "include": [
+        "Confirmed diagnosis",
+        "Diagnosed with",
+        "Established condition",
+        "Definitive statement by doctor"
+      ],
+      "exclude": [
+        "Likely or suspected diagnosis",
+        "Patient symptom",
+        "AI conclusion",
+        "Provisional diagnosis"
+      ],
+      "keywords": [
+        "confirmed", "diagnosed", "diagnosis is", "this is",
+        "definitely", "established", "known case of", "definite",
+        "nischi", "pakka", "confirm"
+      ],
+      "examples": [
+        "Type 2 diabetes, confirmed.",
+        "Known case of hypertension.",
+        "Ye confirmed diabetes hai (This is confirmed diabetes)."
+      ],
+      "counterexamples": [
+        "Do not upgrade a suspected condition to confirmed.",
+        "Do not infer confirmed status from treatment."
+      ]
+    },
+    {
+      "id": "assessment.differential_diagnoses",
+      "section": "A",
+      "field": "assessment.differential_diagnoses",
+      "speaker": ["doctor"],
+      "purpose": "Capture alternative diagnoses the doctor explicitly considers during the consultation.",
+      "include": [
+        "Named alternatives",
+        "Conditions being ruled out",
+        "Considered possibilities"
+      ],
+      "exclude": [
+        "Medical-knowledge-generated possibilities",
+        "Symptom-based automatic differential",
+        "Patient suggestion"
+      ],
+      "keywords": [
+        "versus", "vs", "differential", "alternatively", "rule out",
+        "possibility", "possibilities", "consider", "could also be", "may also be",
+        "might also be", "either",
+        "ya phir", "athava"
+      ],
+      "examples": [
+        "Viral fever versus dengue.",
+        "Rule out typhoid.",
+        "Either gastritis or acid reflux."
+      ],
+      "counterexamples": [
+        "Do not create a differential from symptoms alone.",
+        "Do not list every possible condition the system knows.",
+        "Do not store vague comparison words such as much more as a diagnosis."
+      ]
+    },
+    {
+      "id": "assessment.problems_being_managed",
+      "section": "A",
+      "field": "assessment.problems_being_managed",
+      "speaker": ["doctor"],
+      "purpose": "Capture active problems the doctor explicitly addresses or monitors in this consultation.",
+      "include": [
+        "Active problem",
+        "Management status when stated (improving, worsening, stable, uncontrolled)"
+      ],
+      "exclude": [
+        "Automatic copy of every symptom",
+        "Inferred status",
+        "Patient-reported complaint without doctor acknowledgement"
+      ],
+      "keywords": [
+        "manage", "monitor", "problem", "address", "control", "active",
+        "stable", "worsening", "improving", "uncontrolled", "under control",
+        "being managed", "managing", "on treatment", "follow up"
+      ],
+      "examples": [
+        "Diabetes requiring monitoring.",
+        "Hypertension stable on current medications.",
+        "Asthma well controlled."
+      ],
+      "counterexamples": [
+        "Do not list every patient complaint automatically.",
+        "Do not infer worsening status unless the doctor said it."
+      ]
+    },
+    {
+      "id": "plan.medications",
+      "section": "P",
+      "field": "plan.medications",
+      "speaker": ["doctor"],
+      "purpose": "Capture each newly prescribed or modified medication with every explicitly spoken detail. Do not copy patient-reported current medications here.",
+      "include": [
+        "Exact medicine name",
+        "Strength when stated",
+        "Dosage form when stated (tablet, capsule, syrup, injection)",
+        "Dose when stated",
+        "Route when stated",
+        "Frequency when stated",
+        "Schedule when stated",
+        "Specific timing when stated (breakfast, lunch, dinner, morning, noon, night)",
+        "Meal relation when stated",
+        "Duration when stated",
+        "PRN condition when stated",
+        "Indication when stated",
+        "Special instructions when stated",
+        "Action when stated (START, CONTINUE, CHANGE, STOP, PRN)"
+      ],
+      "exclude": [
+        "Current medicine reported by patient",
+        "Guessed dose or frequency",
+        "Normalized or renamed medicine",
+        "Invented missing properties"
+      ],
+      "keywords": [
+        "take", "prescribe", "prescription", "tablet", "tab", "capsule", "cap",
+        "syrup", "injection", "medicine", "dawai",
+        "mg", "ml", "gm", "dose",
+        "oral", "topical", "iv", "intravenous", "subcutaneous",
+        "breakfast", "morning", "subah", "lunch", "noon", "afternoon", "dinner", "night", "raat",
+        "before food", "after food", "empty stomach", "with food", "khane se pahle", "khane ke baad",
+        "every", "daily", "twice", "thrice", "once", "hourly", "hours",
+        "days", "weeks", "for", "as needed", "prn", "when required",
+        "start", "continue", "change", "stop", "increase", "decrease",
+        "jari rakhein", "band karein", "shuru karein"
+      ],
+      "examples": [
+        "Dolo 650 | one tablet | every eight hours | after food | three days | START",
+        "Alex syrup | 5 ml | after dinner | five days | START",
+        "Continue metformin 500 mg twice daily | CONTINUE",
+        "Change amlodipine to 10 mg daily | CHANGE",
+        "Paracetamol 500 mg SOS for fever | PRN"
+      ],
+      "counterexamples": [
+        "Do not fill duration when the doctor did not state it.",
+        "Do not copy Metformin from current medications into plan.medications.",
+        "Do not invent tablet, capsule, or route."
+      ]
+    },
+    {
+      "id": "plan.investigations_ordered",
+      "section": "P",
+      "field": "plan.investigations_ordered",
+      "speaker": ["doctor"],
+      "purpose": "Capture tests the doctor orders during this consultation for future completion.",
+      "include": [
+        "Investigation name",
+        "Reason when stated",
+        "Timing when stated",
+        "Instructions when stated"
+      ],
+      "exclude": [
+        "Existing test result",
+        "AI-recommended test",
+        "Patient request"
+      ],
+      "keywords": [
+        "order", "get a", "do a", "test", "investigation", "jaanch",
+        "cbc", "x-ray", "xray", "scan", "ultrasound", "usg",
+        "ecg", "ekg", "blood test", "urine test", "stool test",
+        "lab", "laboratory", "check", "get done"
+      ],
+      "examples": [
+        "Get a CBC tomorrow.",
+        "X-ray chest to rule out pneumonia.",
+        "Blood sugar fasting and PP."
+      ],
+      "counterexamples": [
+        "Do not place existing results here.",
+        "Do not suggest tests the doctor did not order."
+      ]
+    },
+    {
+      "id": "plan.procedures",
+      "section": "P",
+      "field": "plan.procedures",
+      "speaker": ["doctor"],
+      "purpose": "Capture a procedure performed during or planned after this consultation when explicitly stated.",
+      "include": [
+        "Procedure name",
+        "Timing or status when stated",
+        "Performed or planned"
+      ],
+      "exclude": [
+        "Unperformed inferred procedure",
+        "Medication",
+        "Test"
+      ],
+      "keywords": [
+        "procedure", "dressing", "injection", "nebulization", "nebulisation",
+        "stitch", "suture", "cleaning", "debridement", "aspiration",
+        "cautery", "removal", "biopsy", "iv line", "catheter"
+      ],
+      "examples": [
+        "Nebulization given.",
+        "Wound dressing done.",
+        "IV fluids started."
+      ],
+      "counterexamples": [
+        "Do not suggest a procedure the doctor did not mention.",
+        "Do not list oral medication prescription as a procedure."
+      ]
+    },
+    {
+      "id": "plan.treatment_advice",
+      "section": "P",
+      "field": "plan.advice",
+      "speaker": ["doctor"],
+      "purpose": "Capture explicit non-medication treatment instructions the doctor gives.",
+      "include": [
+        "Rest advice",
+        "Steam inhalation",
+        "Gargling",
+        "Wound care",
+        "Activity instruction",
+        "Physiotherapy"
+      ],
+      "exclude": [
+        "Medicine prescription",
+        "Diet advice",
+        "Generic generated advice"
+      ],
+      "keywords": [
+        "rest", "aaram", "steam", "inhalation", "bhap", "gargle", "gargling",
+        "clean", "wound", "activity", "avoid exercise", "care",
+        "physiotherapy", "exercise", "stretch"
+      ],
+      "examples": [
+        "Take adequate rest.",
+        "Do warm water gargling.",
+        "Steam inhalation twice daily."
+      ],
+      "counterexamples": [
+        "Do not add rest unless the doctor advised it.",
+        "Do not place dietary advice here."
+      ]
+    },
+    {
+      "id": "plan.diet_lifestyle_advice",
+      "section": "P",
+      "field": "plan.advice",
+      "speaker": ["doctor"],
+      "purpose": "Capture explicit diet, hydration, and lifestyle advice the doctor gives.",
+      "include": [
+        "Hydration and fluid advice",
+        "Diet and food recommendations",
+        "Food restrictions",
+        "Sugar advice",
+        "Smoking cessation advice",
+        "Alcohol advice",
+        "Activity and lifestyle advice"
+      ],
+      "exclude": [
+        "Medicine",
+        "Non-diet treatment advice",
+        "Patient's existing diet unless advised"
+      ],
+      "keywords": [
+        "drink", "fluids", "water", "paani", "hydrate", "hydration",
+        "food", "diet", "khichdi", "soup", "daal", "rice",
+        "sugar", "mithai", "alcohol", "sharab", "smoking", "sigaret",
+        "eat", "avoid spicy", "light food", "halka khana",
+        "rest", "exercise", "lifestyle"
+      ],
+      "examples": [
+        "Drink warm fluids.",
+        "Eat light food.",
+        "Avoid spicy and oily food.",
+        "Avoid smoking and alcohol.",
+        "Khichdi khaayein aur paani zyada piyein (Eat khichdi and drink more water)."
+      ],
+      "counterexamples": [
+        "Do not generate hydration advice when not given.",
+        "Do not place medication instructions here."
+      ]
+    },
+    {
+      "id": "plan.monitoring",
+      "section": "P",
+      "field": "plan.monitoring",
+      "speaker": ["doctor"],
+      "purpose": "Capture what the doctor explicitly asks the patient to monitor or track at home.",
+      "include": [
+        "Parameter to monitor",
+        "Frequency when stated",
+        "Threshold or target when stated"
+      ],
+      "exclude": [
+        "Unrequested monitoring",
+        "Warning signs",
+        "Follow-up timing"
+      ],
+      "keywords": [
+        "monitor", "check", "measure", "track", "record", "watch",
+        "temperature", "sugar", "glucose", "bp", "blood pressure",
+        "weight", "daily", "twice", "regularly",
+        "nireekshane", "dekhna", "check karna"
+      ],
+      "examples": [
+        "Monitor temperature twice daily.",
+        "Check blood sugar fasting every morning.",
+        "Track BP at home daily."
+      ],
+      "counterexamples": [
+        "Do not add monitoring based on diagnosis alone.",
+        "Do not place follow-up or warning signs here."
+      ]
+    },
+    {
+      "id": "plan.referral",
+      "section": "P",
+      "field": "plan.referral",
+      "speaker": ["doctor"],
+      "purpose": "Capture an explicit referral to another specialty, service, or facility.",
+      "include": [
+        "Specialty or service",
+        "Reason when stated",
+        "Urgency when stated"
+      ],
+      "exclude": [
+        "AI-suggested referral",
+        "Warning sign escalation"
+      ],
+      "keywords": [
+        "refer", "referral", "specialist", "cardiology", "dermatology",
+        "neurology", "orthopedics", "hospital", "consult", "opinion",
+        "reffer", "bhejna", "refer madi"
+      ],
+      "examples": [
+        "Refer to cardiology for evaluation of chest pain.",
+        "Consult ENT specialist.",
+        "Refer to higher centre for further management."
+      ],
+      "counterexamples": [
+        "Do not create a referral from warning sign instructions.",
+        "Do not refer based on symptoms alone."
+      ]
+    },
+    {
+      "id": "plan.follow_up",
+      "section": "P",
+      "field": "plan.follow_up",
+      "speaker": ["doctor"],
+      "purpose": "Capture when and under what condition the patient should return for review.",
+      "include": [
+        "Time interval or date",
+        "Condition triggering return",
+        "Required action at follow-up"
+      ],
+      "exclude": [
+        "Emergency warning sign",
+        "Treatment advice",
+        "Referral"
+      ],
+      "keywords": [
+        "follow up", "come back", "return", "review in", "review after",
+        "visit again", "recheck", "next visit", "phir se aana",
+        "matti banni", "after", "in", "days", "weeks"
+      ],
+      "examples": [
+        "Come back in three days if not improving.",
+        "Review after five days.",
+        "Agar aaram nahi hai to do din mein phir se aayein (If not better, come again in two days).",
+        "Return earlier if the fever worsens."
+      ],
+      "counterexamples": [
+        "Go to emergency for breathing difficulty is a warning sign, not follow-up.",
+        "Do not place treatment advice in follow-up."
+      ]
+    },
+    {
+      "id": "plan.warning_signs",
+      "section": "P",
+      "field": "plan.warning_signs",
+      "speaker": ["doctor"],
+      "purpose": "Capture the exact warning condition and the required action for seeking earlier or urgent care. Both parts must be preserved independently.",
+      "include": [
+        "Warning sign or condition",
+        "Doctor's stated required action",
+        "Urgency when stated"
+      ],
+      "exclude": [
+        "Routine follow-up",
+        "Inferred danger sign",
+        "Changed or summarized clinical meaning"
+      ],
+      "keywords": [
+        "urgent", "emergency", "immediately", "turant", "seek care",
+        "go to hospital", "aspatal", "doctor ko dikhayein",
+        "if you develop", "if it worsens", "if not better",
+        "breathing difficulty", "chest pain", "drowsiness",
+        "vomiting", "high fever", "tez bukhar", "severe",
+        "convulsions", "fit", "unconscious", "bleeding"
+      ],
+      "examples": [
+        "If breathing difficulty develops, go to the hospital immediately.",
+        "Agar tez bukhar ho to turant doctor se milein (If high fever develops, see the doctor immediately).",
+        "Return earlier if the fever worsens."
+      ],
+      "counterexamples": [
+        "Do not rewrite breathing difficulty, go to hospital as just breathing difficulty.",
+        "Do not merge warning signs with follow-up."
+      ]
+    },
+    {
+      "id": "plan.other_instructions",
+      "section": "P",
+      "field": "plan.advice",
+      "speaker": ["doctor"],
+      "purpose": "Capture explicit doctor instructions that genuinely do not fit any other Plan field. This is not a catch-all dumping ground.",
+      "include": [
+        "Unclassified explicit doctor instruction"
+      ],
+      "exclude": [
+        "Dumping ground for unmatched text",
+        "Repeated advice from other Plan fields",
+        "Clinical interpretation"
+      ],
+      "keywords": [
+        "instruction", "remember", "bring", "continue", "avoid",
+        "noted", "you should", "please", "make sure", "dhyaan rakhein"
+      ],
+      "examples": [
+        "Bring previous reports at the next visit.",
+        "Carry your prescription whenever you travel."
+      ],
+      "counterexamples": [
+        "Do not duplicate diet advice here.",
+        "Do not duplicate follow-up or prescriptions here."
+      ]
+    }
+  ]
+}

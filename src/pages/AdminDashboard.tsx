@@ -17,11 +17,14 @@ import {
   MapPin,
   Mail,
   Phone,
-  User
+  User,
+  Database,
+  FileHeart
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { apiUrl } from "@/lib/api";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +34,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import LocationPickerModal from "@/components/clinic/LocationPickerModal";
+import AdminDataView from "@/components/admin/AdminDataView";
+import AdminEmrRecordsView from "@/components/admin/AdminEmrRecordsView";
 
 interface ClinicData {
   id: number;
@@ -86,7 +91,7 @@ const AdminDashboard = () => {
   const adminUsername = sessionStorage.getItem("admin_username") || "Admin";
 
   // View state: 'dashboard' (main menu), 'approvals', or 'feedback'
-  const [currentView, setCurrentView] = useState<"dashboard" | "approvals" | "feedback">("dashboard");
+  const [currentView, setCurrentView] = useState<"dashboard" | "approvals" | "feedback" | "data" | "emr">("dashboard");
 
   // Secure session validation
   useEffect(() => {
@@ -134,7 +139,7 @@ const AdminDashboard = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [locationReg, setLocationReg] = useState<ClinicData | null>(null);
 
-  const API_BASE = "/api/admin";
+  const API_BASE = apiUrl("/api/admin");
 
   const fetchRegistrations = async (tab: string) => {
     try {
@@ -390,7 +395,7 @@ const AdminDashboard = () => {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Main Options */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             {/* Approval Card */}
             <Card
               className="cursor-pointer hover:shadow-xl transition-all duration-300 border-2 hover:border-[#00555A] group"
@@ -452,9 +457,77 @@ const AdminDashboard = () => {
                 </div>
               </CardContent>
             </Card>
+
+            {/* EMR Records Card */}
+            <Card
+              className="cursor-pointer hover:shadow-xl transition-all duration-300 border-2 hover:border-[#00555A] group"
+              onClick={() => setCurrentView("emr")}
+            >
+              <CardContent className="p-8">
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="p-4 bg-gradient-to-br from-rose-500 to-orange-600 rounded-xl group-hover:scale-110 transition-transform">
+                    <FileHeart className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-800">EMR Records</h2>
+                    <p className="text-sm text-slate-500">Final EMRs & Learning</p>
+                  </div>
+                </div>
+                <p className="text-slate-600 mb-4">
+                  View approved EMRs, original AI drafts, transcripts, and doctor corrections for model improvement.
+                </p>
+                <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-1 text-sm text-rose-700">
+                  Loads only when opened
+                </span>
+              </CardContent>
+            </Card>
+
+            {/* Protected Data Card */}
+            <Card
+              className="cursor-pointer hover:shadow-xl transition-all duration-300 border-2 hover:border-[#00555A] group"
+              onClick={() => setCurrentView("data")}
+            >
+              <CardContent className="p-8">
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="p-4 bg-gradient-to-br from-emerald-500 to-teal-700 rounded-xl group-hover:scale-110 transition-transform">
+                    <Database className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-800">Data</h2>
+                    <p className="text-sm text-slate-500">Protected Records</p>
+                  </div>
+                </div>
+                <p className="text-slate-600 mb-4">
+                  View clinic information, patient information, and clinic visit history after password verification.
+                </p>
+                <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-1 text-sm text-emerald-700">
+                  Password protected
+                </span>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (currentView === "data") {
+    return (
+      <AdminDataView
+        adminToken={adminToken || ""}
+        onBack={() => setCurrentView("dashboard")}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (currentView === "emr") {
+    return (
+      <AdminEmrRecordsView
+        adminToken={adminToken || ""}
+        onBack={() => setCurrentView("dashboard")}
+        onLogout={handleLogout}
+      />
     );
   }
 

@@ -5,18 +5,25 @@ Provides endpoints for viewing, approving, and rejecting pending clinic registra
 import random
 import string
 import secrets
+import base64
+import hashlib
+import hmac
+import json
+import time
+import bcrypt
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Union
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, or_
 
-from app.config import admin_usernames
+from app.config import admin_data_password_hash, admin_usernames, auth_token_secret
 from app.database.db import get_db
 from app.database.models import (
-    PendingClinicRegistration, Clinic, Admin, ClinicImage, Doctor
+    PendingClinicRegistration, Clinic, Admin, ClinicImage, Doctor, Patient,
+    CompletedAppointment, ClinicalEncounter, EhrAuditEvent,
 )
 from app.services.email_service import (
     send_clinic_approval_email,
@@ -26,7 +33,7 @@ from app.services.email_service import (
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_SESSION_HOURS = 24
-admin_sessions: dict[str, dict[str, Union[str, datetime]]] = {}
+ADMIN_DATA_SESSION_MINUTES = 15
 
 
 def valid_admin_usernames() -> set[str]:
@@ -91,19 +98,39 @@ class RegistrationLocationRequest(BaseModel):
     longitude: str
 
 
+class AdminDataUnlockRequest(BaseModel):
+    password: str
+
+
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
 def create_admin_session(admin_id: str, username: str) -> tuple[str, datetime]:
-    token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=ADMIN_SESSION_HOURS)
-    admin_sessions[token] = {
-        "admin_id": admin_id,
+    now = int(time.time())
+    expires_epoch = now + ADMIN_SESSION_HOURS * 60 * 60
+    payload = {
+        "sub": str(admin_id),
         "username": username,
-        "expires_at": expires_at,
+        "type": "admin",
+        "iat": now,
+        "exp": expires_epoch,
+        "nonce": secrets.token_urlsafe(12),
     }
-    return token, expires_at
+    payload_part = _b64url_encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    signature = hmac.new(auth_token_secret().encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).digest()
+    token = f"{payload_part}.{_b64url_encode(signature)}"
+    return token, datetime.fromtimestamp(expires_epoch, timezone.utc)
 
 
 def invalidate_admin_session(token: str) -> None:
-    admin_sessions.pop(token, None)
+    # Admin tokens are stateless. The browser discards the token on logout and
+    # the short, signed expiry is always enforced by require_admin_session.
+    return None
 
 
 def get_bearer_token(authorization: Optional[str]) -> str:
@@ -122,30 +149,399 @@ def get_bearer_token(authorization: Optional[str]) -> str:
     return token
 
 
-async def require_admin_session(authorization: Optional[str] = Header(None)) -> dict:
+async def require_admin_session(
+    authorization: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     token = get_bearer_token(authorization)
-    session = admin_sessions.get(token)
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Admin session is invalid or expired. Please login again.",
+    )
+    try:
+        payload_part, supplied_signature = token.split(".", 1)
+        expected_signature = hmac.new(
+            auth_token_secret().encode("utf-8"),
+            payload_part.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(_b64url_decode(supplied_signature), expected_signature):
+            raise unauthorized
+        payload = json.loads(_b64url_decode(payload_part))
+        admin_id = str(payload.get("sub") or "")
+        username = str(payload.get("username") or "")
+        issued_at = int(payload.get("iat") or 0)
+        expires_epoch = int(payload.get("exp") or 0)
+    except HTTPException:
+        raise
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise unauthorized
 
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Admin session not found. Please login again."
-        )
+    now = int(time.time())
+    if payload.get("type") != "admin" or not admin_id or not username or issued_at > now + 60 or expires_epoch <= now:
+        raise unauthorized
 
-    expires_at = session["expires_at"]
-    if not isinstance(expires_at, datetime) or datetime.now(timezone.utc) > expires_at:
-        invalidate_admin_session(token)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Admin session expired. Please login again."
-        )
+    result = await db.execute(select(Admin).where(Admin.id == int(admin_id), Admin.username == username))
+    if result.scalar_one_or_none() is None:
+        raise unauthorized
 
+    expires_at = datetime.fromtimestamp(expires_epoch, timezone.utc)
     return {
         "token": token,
-        "admin_id": session["admin_id"],
-        "username": session["username"],
+        "admin_id": admin_id,
+        "username": username,
         "expires_at": expires_at,
     }
+
+
+def create_admin_data_token(admin_session: dict) -> tuple[str, datetime]:
+    now = int(time.time())
+    expires_epoch = now + ADMIN_DATA_SESSION_MINUTES * 60
+    payload = {
+        "sub": str(admin_session["admin_id"]),
+        "type": "admin_data",
+        "iat": now,
+        "exp": expires_epoch,
+        "nonce": secrets.token_urlsafe(12),
+    }
+    payload_part = _b64url_encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    signature = hmac.new(
+        auth_token_secret().encode("utf-8"),
+        f"admin-data:{payload_part}".encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return f"{payload_part}.{_b64url_encode(signature)}", datetime.fromtimestamp(expires_epoch, timezone.utc)
+
+
+async def require_admin_data_session(
+    x_admin_data_token: Optional[str] = Header(None, alias="X-Admin-Data-Token"),
+    admin_session: dict = Depends(require_admin_session),
+) -> dict:
+    forbidden = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Unlock the admin data area again",
+    )
+    if not x_admin_data_token:
+        raise forbidden
+    try:
+        payload_part, supplied_signature = x_admin_data_token.split(".", 1)
+        expected_signature = hmac.new(
+            auth_token_secret().encode("utf-8"),
+            f"admin-data:{payload_part}".encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(_b64url_decode(supplied_signature), expected_signature):
+            raise forbidden
+        payload = json.loads(_b64url_decode(payload_part))
+        now = int(time.time())
+        if (
+            payload.get("type") != "admin_data"
+            or str(payload.get("sub") or "") != str(admin_session["admin_id"])
+            or int(payload.get("iat") or 0) > now + 60
+            or int(payload.get("exp") or 0) <= now
+        ):
+            raise forbidden
+    except HTTPException:
+        raise
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise forbidden
+    return admin_session
+
+
+def _iso(value) -> Optional[str]:
+    return value.isoformat() if value is not None else None
+
+
+def _flatten_learning_json(value, prefix: str = "") -> dict[str, object]:
+    flattened: dict[str, object] = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if path == "approval" or path.startswith("approval."):
+                continue
+            flattened.update(_flatten_learning_json(item, path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            path = f"{prefix}[{index}]"
+            flattened.update(_flatten_learning_json(item, path))
+        if not value and prefix:
+            flattened[prefix] = []
+    elif prefix:
+        flattened[prefix] = value
+    return flattened
+
+
+def _build_learning_changes(generated: dict, approved: dict, limit: int = 250) -> list[dict]:
+    generated_fields = _flatten_learning_json(generated)
+    approved_fields = _flatten_learning_json(approved)
+    changes = []
+    for path in sorted(set(generated_fields) | set(approved_fields)):
+        before = generated_fields.get(path)
+        after = approved_fields.get(path)
+        if before != after:
+            changes.append({"field": path, "generated": before, "approved": after})
+            if len(changes) >= limit:
+                break
+    return changes
+
+
+@router.post("/data/unlock")
+async def unlock_admin_data(
+    request: AdminDataUnlockRequest,
+    admin_session: dict = Depends(require_admin_session),
+):
+    try:
+        password_matches = bcrypt.checkpw(
+            request.password.encode("utf-8")[:72],
+            admin_data_password_hash().encode("utf-8"),
+        )
+    except (ValueError, TypeError):
+        password_matches = False
+    if not password_matches:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Incorrect data-access password")
+    token, expires_at = create_admin_data_token(admin_session)
+    return {"data_token": token, "expires_at": expires_at.isoformat()}
+
+
+@router.get("/data/clinics")
+async def get_admin_clinic_data(
+    search: str = Query("", max_length=120),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: dict = Depends(require_admin_data_session),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = []
+    term = search.strip()
+    if term:
+        pattern = f"%{term}%"
+        filters.append(or_(Clinic.clinic_name.ilike(pattern), Clinic.clinic_id.ilike(pattern), Clinic.city.ilike(pattern), Clinic.phone.ilike(pattern)))
+    total = await db.scalar(select(func.count()).select_from(Clinic).where(*filters))
+    result = await db.execute(select(Clinic).where(*filters).order_by(Clinic.created_at.desc()).offset(offset).limit(limit))
+    clinics = list(result.scalars().all())
+    clinic_ids = [clinic.clinic_id for clinic in clinics]
+    doctors_by_clinic: dict[str, list[dict]] = {clinic_id: [] for clinic_id in clinic_ids}
+    if clinic_ids:
+        doctor_result = await db.execute(select(Doctor).where(Doctor.clinic_id.in_(clinic_ids)).order_by(Doctor.name))
+        for doctor in doctor_result.scalars().all():
+            doctors_by_clinic.setdefault(doctor.clinic_id, []).append({
+                "doctor_id": doctor.doctor_id,
+                "name": doctor.name,
+                "specialization": doctor.specialization,
+                "experience": doctor.experience,
+                "qualifications": doctor.qualifications,
+                "available": doctor.available,
+            })
+    return {
+        "total": total or 0,
+        "items": [{
+            "clinic_id": clinic.clinic_id,
+            "clinic_name": clinic.clinic_name,
+            "email": clinic.email,
+            "phone": clinic.phone,
+            "category": clinic.category,
+            "categories": clinic.categories or [],
+            "address": clinic.address,
+            "city": clinic.city,
+            "pincode": clinic.pincode,
+            "latitude": clinic.latitude,
+            "longitude": clinic.longitude,
+            "available": clinic.available,
+            "is_active": clinic.is_active,
+            "created_at": _iso(clinic.created_at),
+            "doctors": doctors_by_clinic.get(clinic.clinic_id, []),
+        } for clinic in clinics],
+    }
+
+
+@router.get("/data/patients")
+async def get_admin_patient_data(
+    search: str = Query("", max_length=120),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: dict = Depends(require_admin_data_session),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = []
+    term = search.strip()
+    if term:
+        pattern = f"%{term}%"
+        filters.append(or_(Patient.name.ilike(pattern), Patient.patient_id.ilike(pattern), Patient.email.ilike(pattern), Patient.phone.ilike(pattern)))
+    total = await db.scalar(select(func.count()).select_from(Patient).where(*filters))
+    result = await db.execute(select(Patient).where(*filters).order_by(Patient.created_at.desc()).offset(offset).limit(limit))
+    patients = list(result.scalars().all())
+    patient_ids = [patient.patient_id for patient in patients]
+    visit_counts: dict[str, int] = {}
+    ehr_counts: dict[str, int] = {}
+    if patient_ids:
+        visit_result = await db.execute(
+            select(CompletedAppointment.patient_id, func.count(CompletedAppointment.id))
+            .where(CompletedAppointment.patient_id.in_(patient_ids))
+            .group_by(CompletedAppointment.patient_id)
+        )
+        visit_counts = {patient_id: count for patient_id, count in visit_result.all()}
+        ehr_result = await db.execute(
+            select(ClinicalEncounter.patient_id, func.count(ClinicalEncounter.id))
+            .where(ClinicalEncounter.patient_id.in_(patient_ids), ClinicalEncounter.status == "approved")
+            .group_by(ClinicalEncounter.patient_id)
+        )
+        ehr_counts = {patient_id: count for patient_id, count in ehr_result.all()}
+    return {
+        "total": total or 0,
+        "items": [{
+            "patient_id": patient.patient_id,
+            "name": patient.name,
+            "email": patient.email,
+            "phone": patient.phone,
+            "blood_group": patient.blood_group,
+            "visit_count": visit_counts.get(patient.patient_id, 0),
+            "approved_emr_count": ehr_counts.get(patient.patient_id, 0),
+            "created_at": _iso(patient.created_at),
+        } for patient in patients],
+    }
+
+
+@router.get("/data/visits")
+async def get_admin_visit_data(
+    clinic_id: Optional[str] = Query(None, max_length=80),
+    search: str = Query("", max_length=120),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: dict = Depends(require_admin_data_session),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = []
+    if clinic_id:
+        filters.append(CompletedAppointment.clinic_id == clinic_id.strip())
+    term = search.strip()
+    if term:
+        pattern = f"%{term}%"
+        filters.append(or_(
+            CompletedAppointment.patient_name.ilike(pattern),
+            CompletedAppointment.patient_id.ilike(pattern),
+            CompletedAppointment.patient_phone.ilike(pattern),
+            Clinic.clinic_name.ilike(pattern),
+            CompletedAppointment.clinic_id.ilike(pattern),
+        ))
+    base = CompletedAppointment.__table__.outerjoin(Clinic, CompletedAppointment.clinic_id == Clinic.clinic_id)
+    total = await db.scalar(select(func.count()).select_from(base).where(*filters))
+    result = await db.execute(
+        select(CompletedAppointment, Clinic.clinic_name)
+        .select_from(base)
+        .where(*filters)
+        .order_by(CompletedAppointment.served_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = result.all()
+    appointment_ids = [visit.id for visit, _clinic_name in rows]
+    encounters_by_appointment = {}
+    if appointment_ids:
+        encounter_result = await db.execute(
+            select(ClinicalEncounter)
+            .where(ClinicalEncounter.appointment_id.in_(appointment_ids))
+            .order_by(ClinicalEncounter.created_at.desc())
+        )
+        for encounter in encounter_result.scalars().all():
+            encounters_by_appointment.setdefault(encounter.appointment_id, encounter)
+    return {
+        "total": total or 0,
+        "items": [{
+            "appointment_id": visit.id,
+            "appointment_token": visit.appointment_token,
+            "clinic_id": visit.clinic_id,
+            "clinic_name": clinic_name or visit.clinic_id,
+            "patient_id": visit.patient_id,
+            "patient_name": visit.patient_name,
+            "patient_email": visit.patient_email,
+            "patient_phone": visit.patient_phone,
+            "doctor_name": visit.doctor_name,
+            "date": visit.date,
+            "time": visit.time,
+            "status": visit.status,
+            "outcome": visit.outcome,
+            "wait_time_minutes": visit.wait_time_minutes,
+            "consultation_duration_minutes": visit.consultation_duration_minutes,
+            "served_at": _iso(visit.served_at),
+            "encounter_id": getattr(encounters_by_appointment.get(visit.id), "encounter_id", None),
+            "emr_status": getattr(encounters_by_appointment.get(visit.id), "status", None),
+        } for visit, clinic_name in rows],
+    }
+
+
+@router.get("/emr-records")
+async def get_admin_emr_learning_data(
+    search: str = Query("", max_length=120),
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    _: dict = Depends(require_admin_session),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = [ClinicalEncounter.status == "approved"]
+    term = search.strip()
+    if term:
+        pattern = f"%{term}%"
+        filters.append(or_(
+            ClinicalEncounter.encounter_id.ilike(pattern),
+            ClinicalEncounter.patient_name.ilike(pattern),
+            ClinicalEncounter.patient_id.ilike(pattern),
+            ClinicalEncounter.clinic_id.ilike(pattern),
+            Clinic.clinic_name.ilike(pattern),
+        ))
+    base = ClinicalEncounter.__table__.outerjoin(Clinic, ClinicalEncounter.clinic_id == Clinic.clinic_id)
+    total = await db.scalar(select(func.count()).select_from(base).where(*filters))
+    result = await db.execute(
+        select(ClinicalEncounter, Clinic.clinic_name)
+        .select_from(base)
+        .where(*filters)
+        .order_by(ClinicalEncounter.approved_at.desc().nullslast(), ClinicalEncounter.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = result.all()
+    encounter_ids = [encounter.encounter_id for encounter, _clinic_name in rows]
+    events_by_encounter: dict[str, list[EhrAuditEvent]] = {encounter_id: [] for encounter_id in encounter_ids}
+    if encounter_ids:
+        event_result = await db.execute(
+            select(EhrAuditEvent)
+            .where(EhrAuditEvent.encounter_id.in_(encounter_ids))
+            .order_by(EhrAuditEvent.created_at.asc(), EhrAuditEvent.id.asc())
+        )
+        for event in event_result.scalars().all():
+            events_by_encounter.setdefault(event.encounter_id, []).append(event)
+
+    items = []
+    for encounter, clinic_name in rows:
+        events = events_by_encounter.get(encounter.encounter_id, [])
+        generated_event = next((event for event in events if event.action == "draft_generated"), None)
+        approved_event = next((event for event in reversed(events) if event.action == "approved"), None)
+        generated_snapshot = generated_event.snapshot if generated_event and isinstance(generated_event.snapshot, dict) else {}
+        approved_snapshot = approved_event.snapshot if approved_event and isinstance(approved_event.snapshot, dict) else {}
+        generated_emr = generated_snapshot.get("ehr_data") if isinstance(generated_snapshot.get("ehr_data"), dict) else {}
+        approved_emr = approved_snapshot.get("ehr_data") if isinstance(approved_snapshot.get("ehr_data"), dict) else (encounter.ehr_data or {})
+        approved_summary = approved_snapshot.get("patient_summary") if isinstance(approved_snapshot.get("patient_summary"), dict) else (encounter.patient_summary or {})
+        changes = _build_learning_changes(generated_emr, approved_emr)
+        items.append({
+            "encounter_id": encounter.encounter_id,
+            "clinic_id": encounter.clinic_id,
+            "clinic_name": clinic_name or encounter.clinic_id,
+            "patient_id": encounter.patient_id,
+            "patient_name": encounter.patient_name,
+            "doctor_id": encounter.doctor_id,
+            "model_name": encounter.model_name,
+            "transcript": encounter.transcript_text,
+            "generated_emr": generated_emr,
+            "approved_emr": approved_emr,
+            "approved_patient_summary": approved_summary,
+            "changes": changes,
+            "changed_field_count": len(changes),
+            "doctor_edit_events": sum(1 for event in events if event.action == "draft_edited"),
+            "generated_at": _iso(getattr(generated_event, "created_at", None)),
+            "approved_at": _iso(encounter.approved_at),
+            "approved_by": encounter.approved_by,
+            "has_original_draft": bool(generated_event),
+        })
+    return {"total": total or 0, "items": items}
 
 
 @router.post("/send-otp")
@@ -177,9 +573,12 @@ async def send_admin_otp(
             detail="Admin account not found"
         )
 
-    # Generate two different OTPs
+    # When both configured destinations are the same inbox, one code is less
+    # ambiguous and can be entered in both existing OTP fields. Distinct
+    # inboxes continue to receive two independent codes.
     otp_code = generate_otp()
-    confirmation_otp_code = generate_otp()
+    same_inbox = admin.email.strip().casefold() == admin.confirmation_email.strip().casefold()
+    confirmation_otp_code = otp_code if same_inbox else generate_otp()
 
     # Set expiration time (10 minutes)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
@@ -201,11 +600,14 @@ async def send_admin_otp(
     except Exception as e:
         print(f"Failed to send OTP to {admin.email}: {str(e)}")
 
-    # Send confirmation OTP to confirmation email
-    try:
-        confirmation_email_sent = send_admin_otp_email(admin.confirmation_email, confirmation_otp_code, f"{username} (confirmation)")
-    except Exception as e:
-        print(f"Failed to send confirmation OTP to {admin.confirmation_email}: {str(e)}")
+    # Do not send an indistinguishable duplicate email to the same inbox.
+    if same_inbox:
+        confirmation_email_sent = primary_email_sent
+    else:
+        try:
+            confirmation_email_sent = send_admin_otp_email(admin.confirmation_email, confirmation_otp_code, f"{username} (confirmation)")
+        except Exception as e:
+            print(f"Failed to send confirmation OTP to {admin.confirmation_email}: {str(e)}")
 
     if not primary_email_sent or not confirmation_email_sent:
         raise HTTPException(

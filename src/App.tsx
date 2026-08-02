@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { lazy, Suspense } from "react";
 
 import MainLayout from "./layouts/MainLayout";
 import NoHeaderLayout from "./layouts/NoHeaderLayout";
@@ -7,44 +8,56 @@ import { PatientProvider } from "./context/PatientContext";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
 import SeoManager from "./components/SeoManager";
 
-import Index from "./pages/Index";
-import PatientDashboard from "./pages/PatientDashboard";
-import PatientFindClinics from "./pages/PatientFindClinics";
-import PatientReviews from "./pages/PatientReviews";
-import PatientWriteReview from "./pages/PatientWriteReview";
-import PatientProfile from "./pages/PatientProfile";
-import ClinicDashboard from "./pages/ClinicDashboardNew";
-import DoctorDashboard from "./pages/DoctorDashboard";
-import ClinicControlQueue from "./pages/ClinicControlQueue";
-import ClinicManageTime from "./pages/ClinicManageTime";
-import ClinicLook from "./pages/ClinicLook";
-import ClinicProfile from "./pages/ClinicProfile";
-import ClinicBilling from "./pages/ClinicBilling";
-import ClinicDetails from "./pages/ClinicDetails";
-import BookAppointment from "./pages/BookAppointment";
-import AppointmentConfirmation from "./pages/AppointmentConfirmation";
-import JoinQueue from "./pages/JoinQueue";
-import WalkinQueue from "./pages/WalkinQueue";
-import LiveQueue from "./pages/LiveQueue";
-import PatientLogin from "./pages/PatientLogin";
-import PatientSignup from "./pages/PatientSignup";
-import OTPVerification from "./pages/OTPVerification";
-import PatientForgotPassword from "./pages/PatientForgotPassword";
-import PatientVerifyResetOTP from "./pages/PatientVerifyResetOTP";
-import PatientResetPassword from "./pages/PatientResetPassword";
-import ClinicLogin from "./pages/ClinicLogin";
-import ClinicSignup from "./pages/ClinicSignup";
-import ClinicRegistrationSuccess from "./pages/ClinicRegistrationSuccess";
-import ClinicPatientReports from "./pages/ClinicPatientReports";
-import AdminLogin from "./pages/AdminLogin";
-import AdminDashboard from "./pages/AdminDashboard";
-import AdminFeedbackPage from "./pages/AdminFeedbackPage";
-import FeedbackPage from "./pages/FeedbackPage";
-import AboutUs from "./pages/AboutUs";
-import FAQ from "./pages/FAQ";
-import YourDetails from "./pages/YourDetails";
-import NotFound from "./pages/NotFound";
-import SeoLandingPage from "./pages/SeoLandingPage";
+const Index = lazy(() => import("./pages/Index"));
+const PatientDashboard = lazy(() => import("./pages/PatientDashboard"));
+const PatientFindClinics = lazy(() => import("./pages/PatientFindClinics"));
+const PatientReviews = lazy(() => import("./pages/PatientReviews"));
+const PatientWriteReview = lazy(() => import("./pages/PatientWriteReview"));
+const PatientProfile = lazy(() => import("./pages/PatientProfile"));
+const PatientHealthRecords = lazy(() => import("./pages/PatientHealthRecords"));
+const PatientHealthSummary = lazy(() => import("./pages/PatientHealthSummary"));
+const PatientSummaryDetail = lazy(() => import("./pages/PatientSummaryDetail"));
+const ClinicDashboard = lazy(() => import("./pages/ClinicDashboardNew"));
+const DoctorDashboard = lazy(() => import("./pages/DoctorDashboard"));
+const ConsultationTranscript = lazy(() => import("./pages/ConsultationTranscript"));
+const ClinicControlQueue = lazy(() => import("./pages/ClinicControlQueue"));
+const ClinicManageTime = lazy(() => import("./pages/ClinicManageTime"));
+const ClinicLook = lazy(() => import("./pages/ClinicLook"));
+const ClinicProfile = lazy(() => import("./pages/ClinicProfile"));
+const ClinicBilling = lazy(() => import("./pages/ClinicBilling"));
+
+const EhrDocumentPage = lazy(() => import("./pages/EhrDocumentPage"));
+const ClinicDetails = lazy(() => import("./pages/ClinicDetails"));
+const BookAppointment = lazy(() => import("./pages/BookAppointment"));
+const AppointmentConfirmation = lazy(() => import("./pages/AppointmentConfirmation"));
+const JoinQueue = lazy(() => import("./pages/JoinQueue"));
+const WalkinQueue = lazy(() => import("./pages/WalkinQueue"));
+const LiveQueue = lazy(() => import("./pages/LiveQueue"));
+const PatientLogin = lazy(() => import("./pages/PatientLogin"));
+const PatientSignup = lazy(() => import("./pages/PatientSignup"));
+const OTPVerification = lazy(() => import("./pages/OTPVerification"));
+const PatientForgotPassword = lazy(() => import("./pages/PatientForgotPassword"));
+const PatientVerifyResetOTP = lazy(() => import("./pages/PatientVerifyResetOTP"));
+const PatientResetPassword = lazy(() => import("./pages/PatientResetPassword"));
+const ClinicLogin = lazy(() => import("./pages/ClinicLogin"));
+const ClinicSignup = lazy(() => import("./pages/ClinicSignup"));
+const ClinicRegistrationSuccess = lazy(() => import("./pages/ClinicRegistrationSuccess"));
+const ClinicPatientReports = lazy(() => import("./pages/ClinicPatientReports"));
+const AdminLogin = lazy(() => import("./pages/AdminLogin"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const AdminFeedbackPage = lazy(() => import("./pages/AdminFeedbackPage"));
+const FeedbackPage = lazy(() => import("./pages/FeedbackPage"));
+const AboutUs = lazy(() => import("./pages/AboutUs"));
+const FAQ = lazy(() => import("./pages/FAQ"));
+const YourDetails = lazy(() => import("./pages/YourDetails"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const SeoLandingPage = lazy(() => import("./pages/SeoLandingPage"));
+
+const PageLoader = () => (
+  <div className="min-h-[40vh] flex items-center justify-center bg-background text-foreground">
+    <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" aria-label="Loading page" />
+  </div>
+);
 
 function App() {
   return (
@@ -52,6 +65,7 @@ function App() {
       <PatientProvider>
         <BrowserRouter>
           <SeoManager />
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* Public Routes with Header */}
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
@@ -96,6 +110,9 @@ function App() {
             <Route path="/patient/reviews" element={<NoHeaderLayout><PatientReviews /></NoHeaderLayout>} />
             <Route path="/patient/reviews/:clinicId" element={<NoHeaderLayout><PatientWriteReview /></NoHeaderLayout>} />
             <Route path="/patient/profile" element={<NoHeaderLayout><PatientProfile /></NoHeaderLayout>} />
+            <Route path="/patient/health-records" element={<NoHeaderLayout><PatientHealthRecords /></NoHeaderLayout>} />
+            <Route path="/patient/health-summary" element={<NoHeaderLayout><PatientHealthSummary /></NoHeaderLayout>} />
+            <Route path="/patient/summary/:encounterId" element={<NoHeaderLayout><PatientSummaryDetail /></NoHeaderLayout>} />
             <Route path="/clinic-details/:id" element={<NoHeaderLayout><ClinicDetails /></NoHeaderLayout>} />
             <Route path="/book/:clinicId/:doctorId" element={<NoHeaderLayout><BookAppointment /></NoHeaderLayout>} />
             <Route path="/confirmation" element={<NoHeaderLayout><AppointmentConfirmation /></NoHeaderLayout>} />
@@ -113,8 +130,10 @@ function App() {
             <Route path="/clinic/billing" element={<NoHeaderLayout><ClinicBilling /></NoHeaderLayout>} />
             <Route path="/clinic/profile" element={<NoHeaderLayout><ClinicProfile /></NoHeaderLayout>} />
             <Route path="/clinic/reports" element={<NoHeaderLayout><ClinicPatientReports /></NoHeaderLayout>} />
+            <Route path="/clinic/patients/:patientId/encounters/:encounterId/ehr" element={<NoHeaderLayout><EhrDocumentPage /></NoHeaderLayout>} />
             <Route
             path="/doctor-dashboard" element={<NoHeaderLayout><DoctorDashboard /></NoHeaderLayout>} />
+            <Route path="/doctor-dashboard/consultation-transcript" element={<NoHeaderLayout><ConsultationTranscript /></NoHeaderLayout>} />
 
             {/* Admin Area - Secure Routes */}
             <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
@@ -143,6 +162,7 @@ function App() {
             {/* 404 with Header */}
             <Route path="*" element={<MainLayout><NotFound /></MainLayout>} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </PatientProvider>
     </QueueProvider>

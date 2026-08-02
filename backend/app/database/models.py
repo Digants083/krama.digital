@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, ARRAY, LargeBinary
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, ARRAY, LargeBinary, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 
@@ -397,6 +397,82 @@ class CompletedReport(Base):
     report_pdf_data = Column(LargeBinary, nullable=True)
     report_type = Column(String, nullable=True)  # sent, collected, no_report
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PatientHealthDocument(Base):
+    """Patient-owned health document uploaded into the Karma V2 record area."""
+    __tablename__ = "patient_health_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    source = Column(String, default="patient_upload", nullable=False)
+    document_type = Column(String, default="medical_report", nullable=False)
+    filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    file_data = Column(LargeBinary, nullable=False)
+    processing_status = Column(String, default="uploaded", nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClinicalEncounter(Base):
+    """Doctor-reviewed EHR created from a consultation transcript or manual entry."""
+    __tablename__ = "clinical_encounters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    encounter_id = Column(String, unique=True, nullable=False, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    doctor_id = Column(String, nullable=True, index=True)
+    appointment_id = Column(Integer, nullable=True, index=True)
+    patient_name = Column(String, nullable=False)
+    patient_phone = Column(String, nullable=True)
+    patient_email = Column(String, nullable=True)
+    transcript_text = Column(Text, nullable=False)
+    transcript_segments = Column(JSON, default=list, nullable=False)
+    ehr_data = Column(JSON, default=dict, nullable=False)
+    patient_summary = Column(JSON, default=dict, nullable=False)
+    status = Column(String, default="draft", nullable=False, index=True)
+    model_name = Column(String, nullable=True)
+    generation_error = Column(Text, nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class EhrGenerationJob(Base):
+    """Durable FIFO job for GPU-backed SOAP EHR generation."""
+    __tablename__ = "ehr_generation_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(String, unique=True, nullable=False, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    doctor_id = Column(String, nullable=True, index=True)
+    appointment_id = Column(Integer, nullable=True, index=True)
+    request_payload = Column(JSON, default=dict, nullable=False)
+    request_hash = Column(String, nullable=False, index=True)
+    status = Column(String, default="queued", nullable=False, index=True)
+    encounter_id = Column(String, nullable=True, index=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class EhrAuditEvent(Base):
+    """Append-only audit trail for clinically meaningful EHR changes."""
+    __tablename__ = "ehr_audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    encounter_id = Column(String, nullable=False, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    actor_type = Column(String, nullable=False)
+    actor_id = Column(String, nullable=True)
+    action = Column(String, nullable=False, index=True)
+    snapshot = Column(JSON, default=dict, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Billing(Base):
