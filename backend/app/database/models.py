@@ -440,6 +440,26 @@ class ClinicalEncounter(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class EhrGenerationJob(Base):
+    """Durable FIFO job for GPU-backed SOAP EHR generation."""
+    __tablename__ = "ehr_generation_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(String, unique=True, nullable=False, index=True)
+    clinic_id = Column(String, nullable=False, index=True)
+    patient_id = Column(String, nullable=False, index=True)
+    doctor_id = Column(String, nullable=True, index=True)
+    appointment_id = Column(Integer, nullable=True, index=True)
+    request_payload = Column(JSON, default=dict, nullable=False)
+    request_hash = Column(String, nullable=False, index=True)
+    status = Column(String, default="queued", nullable=False, index=True)
+    encounter_id = Column(String, nullable=True, index=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class EhrAuditEvent(Base):
     """Append-only audit trail for clinically meaningful EHR changes."""
     __tablename__ = "ehr_audit_events"

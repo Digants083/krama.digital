@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import AuthCard from "@/components/auth/AuthCard";
+import { apiUrl } from "@/lib/api";
 
 import { Building2, Lock, ArrowRight } from "lucide-react";
 
@@ -38,7 +39,7 @@ const ClinicLogin = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/clinic/login", {
+      const response = await fetch(apiUrl("/api/auth/clinic/login"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -67,18 +68,21 @@ const ClinicLogin = () => {
       if (data.clinic_id) {
         localStorage.setItem("clinic_id", data.clinic_id);
       }
+      if (data.access_token) {
+        sessionStorage.setItem("clinic_access_token", data.access_token);
+      }
 
       const adminPinnedLatitude = data.admin_pinned_latitude || (data.first_login ? data.latitude : null);
       const adminPinnedLongitude = data.admin_pinned_longitude || (data.first_login ? data.longitude : null);
 
-      if (data.first_login && adminPinnedLatitude && adminPinnedLongitude) {
+      if (data.first_login) {
         localStorage.setItem(CLINIC_FIRST_LOGIN_LOCATION_KEY, JSON.stringify({
           clinic_id: data.clinic_id || "",
           address: data.address || "",
           latitude: data.latitude || null,
           longitude: data.longitude || null,
-          admin_pinned_latitude: adminPinnedLatitude,
-          admin_pinned_longitude: adminPinnedLongitude,
+          admin_pinned_latitude: adminPinnedLatitude || null,
+          admin_pinned_longitude: adminPinnedLongitude || null,
           has_pinned_location: Boolean(data.has_pinned_location),
           first_login: true,
         }));

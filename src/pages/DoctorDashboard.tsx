@@ -1,10 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ArrowRightCircle, CalendarDays, CheckCircle2, Clock, FileText, Languages, Megaphone, Mic, RefreshCw, Sparkles, Stethoscope, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useQueue } from "@/context/QueueContext";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, clinicAuthHeaders } from "@/lib/api";
 import { formatDelayedStartTime, formatDelayLabel } from "@/lib/timeFormat";
 import { useQueueRealtime } from "@/hooks/useQueueRealtime";
 import { ConsultationPatient, saveConsultationRecording } from "@/lib/consultationRecording";
@@ -61,8 +62,11 @@ const SourceBadge = memo(function SourceBadge({ source }: { source?: string }) {
 });
 
 interface PreviousVisit {
-  id: number;
+  id: number | null;
   date: string;
+  time?: string;
+  appointment_token?: string | null;
+  encounter_id?: string | null;
 }
 
 interface PatientHistory {
@@ -201,25 +205,27 @@ function VisitHistoryBadge({ isReturning }: { isReturning: boolean }) {
   );
 }
 
-function VisitHistoryDetails({ history, onViewEhr }: { history: PatientHistory; onViewEhr?: (visitId: number, visitDate: string) => void }) {
+function VisitHistoryDetails({ history, onViewEhr }: { history: PatientHistory; onViewEhr?: (visit: PreviousVisit) => void }) {
   const allVisits = history.previous_visits || [];
   const previousVisits = allVisits
     .slice()
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 5);
+    .sort((a, b) => new Date(`${b.date}T${b.time || "00:00"}`).getTime() - new Date(`${a.date}T${a.time || "00:00"}`).getTime());
   if (!previousVisits.length) return null;
 
   return (
     <div className="mt-4 rounded-2xl bg-white/45 px-3 py-3 text-left">
       <p className="mb-3 text-[11px] font-bold uppercase tracking-wide text-[#77756f]">Previous Visits</p>
-      <div className="space-y-2">
+      <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
         {previousVisits.map((visit) => (
-          <div key={visit.id} className="flex items-center justify-between border-t border-[#e6ded3] pt-2 first:border-t-0 first:pt-0">
-            <p className="text-xs font-semibold text-[#58645f]">{formatVisitDate(visit.date)}</p>
+          <div key={visit.encounter_id || `${visit.id}-${visit.date}-${visit.time || ""}`} className="flex items-center justify-between border-t border-[#e6ded3] pt-2 first:border-t-0 first:pt-0">
+            <div>
+              <p className="text-xs font-semibold text-[#58645f]">{formatVisitDate(visit.date)}</p>
+              {visit.time ? <p className="mt-0.5 text-[10px] text-[#77756f]">{visit.time}</p> : null}
+            </div>
             {onViewEhr && (
               <button
                 type="button"
-                onClick={() => onViewEhr(visit.id, visit.date)}
+                onClick={() => onViewEhr(visit)}
                 className="flex items-center gap-1 rounded-full bg-[#1a5c4a] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#144d3e]"
               >
                 <FileText className="h-3 w-3" /> View EHR
@@ -232,7 +238,7 @@ function VisitHistoryDetails({ history, onViewEhr }: { history: PatientHistory; 
   );
 }
 
-const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history, isLoading, error, onViewEhr }: { history: PatientHistory | null; isLoading: boolean; error: string | null; onViewEhr?: (visitId: number, visitDate: string) => void }) {
+const VisitHistorySidebarCard = memo(function VisitHistorySidebarCard({ history, isLoading, error, onViewEhr }: { history: PatientHistory | null; isLoading: boolean; error: string | null; onViewEhr?: (visit: PreviousVisit) => void }) {
   const isReturning = Boolean(history?.is_returning);
 
   return (
@@ -356,7 +362,6 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-bold">Voice Assistant</p>
-          <p className="text-[11px] text-white/55">Sarvam voice-to-text · Doctor + patient</p>
         </div>
         <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${isRecording ? "bg-red-400/20 text-red-200" : "bg-white/10 text-white/70"}`}>{isRecording ? formatElapsed(elapsedSeconds) : "Ready"}</span>
       </div>
@@ -369,7 +374,7 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
 
       <div className="mt-3 flex items-center gap-1.5 overflow-hidden">
         <Languages className="h-3.5 w-3.5 shrink-0 text-[#9de1ca]" />
-        <p className="truncate text-[11px] font-semibold text-white/65">Hindi · Kannada · Tamil · English</p>
+        <p className="truncate text-[11px] font-semibold text-white/65">Multiple languages supported</p>
       </div>
 
       {isRecording ? (
@@ -388,18 +393,19 @@ function VoiceAssistantCard({ enabled = true, patient }: { enabled?: boolean; pa
         type="button"
         onClick={isRecording ? stopRecording : startRecording}
         disabled={!enabled}
+        title={!enabled ? "Reception must call the next patient before recording can start." : undefined}
         className={`mt-3 w-full rounded-xl px-3 py-2.5 text-xs font-black transition disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 ${isRecording ? "bg-red-400 text-[#421b1b]" : "bg-[#9de1ca] text-[#17312d]"}`}
       >
-        {!enabled ? "Select patient to begin" : isRecording ? "Stop and generate SOAP EHR" : "Start consultation recording"}
+        {!enabled ? "Waiting for reception to call patient" : isRecording ? "Stop and generate SOAP EHR" : "Start consultation recording"}
       </button>
     </div>
   );
 }
 
-const PatientAiPanel = memo(function PatientAiPanel({ history, isLoading, error, patient }: { history: PatientHistory | null; isLoading: boolean; error: string | null; patient: ConsultationPatient }) {
+const PatientAiPanel = memo(function PatientAiPanel({ history, isLoading, error, patient, enabled }: { history: PatientHistory | null; isLoading: boolean; error: string | null; patient: ConsultationPatient; enabled: boolean }) {
   return (
     <div className="grid gap-3">
-      <VoiceAssistantCard patient={patient} />
+      <VoiceAssistantCard patient={patient} enabled={enabled} />
     </div>
   );
 });
@@ -407,7 +413,7 @@ const PatientAiPanel = memo(function PatientAiPanel({ history, isLoading, error,
 const EmptyPatientAiPanel = memo(function EmptyPatientAiPanel() {
   return (
     <div className="mt-4 grid gap-3 text-left">
-      <VoiceAssistantCard patient={{ name: "Voice transcription test" }} />
+      <VoiceAssistantCard enabled={false} />
     </div>
   );
 });
@@ -743,51 +749,37 @@ export default function KramaDoctorDashboard() {
         appointmentId: displayCurrentServing.appointmentId,
         status: "Serving",
       }
-    : selectedQueuePatient
-      ? {
-          token: selectedQueuePatient.token,
-          name: selectedQueuePatient.name,
-          phone: selectedQueuePatient.phone || "",
-          patient_id: selectedQueuePatient.patient_id || "",
-          patient_email: selectedQueuePatient.patient_email || "",
-          blood_group: selectedQueuePatient.blood_group || "N/A",
-          doctor_delay: selectedQueuePatient.doctor_delay,
-          estimated_wait_minutes: selectedQueuePatient.estimated_wait_minutes,
-          latest_estimated_wait_minutes: selectedQueuePatient.latest_estimated_wait_minutes,
-          earliest_eta: selectedQueuePatient.earliest_eta,
-          predicted_eta: selectedQueuePatient.predicted_eta,
-          latest_eta: selectedQueuePatient.latest_eta,
-          rolling_average_minutes: selectedQueuePatient.rolling_average_minutes,
-          consultation_window: selectedQueuePatient.consultation_window,
-          estimated_window_text: selectedQueuePatient.estimated_window_text,
-          active_delay_minutes: selectedQueuePatient.active_delay_minutes,
-          queue_adjusted_time: selectedQueuePatient.queue_adjusted_time,
-          session_status: selectedQueuePatient.session_status,
-          source: selectedQueuePatient.source,
-          appointmentId: selectedQueuePatient.appointment_id,
-          status: "Waiting",
-        }
-      : null;
+    : null;
 
   const activePatientId = activePatient?.patient_id || "";
 
-  const viewEhr = useCallback(async (visitId: number, visitDate?: string) => {
+  const viewEhr = useCallback(async (visit: PreviousVisit) => {
     const pid = activePatient?.patient_id;
     if (!clinicId || !pid) return;
+    if (visit.encounter_id) {
+      navigate(`/clinic/patients/${encodeURIComponent(pid)}/encounters/${encodeURIComponent(visit.encounter_id)}/ehr?return=${encodeURIComponent("/doctor-dashboard")}`);
+      return;
+    }
     try {
-      const response = await fetch(apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(pid)}`));
-      if (!response.ok) return;
+      const response = await fetch(
+        apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(pid)}`),
+        { headers: clinicAuthHeaders() },
+      );
+      if (!response.ok) throw new Error("Could not load this patient's EHR history.");
       const payload = await response.json();
       const encounters = Array.isArray(payload.encounters) ? payload.encounters : [];
+      const normalizedTime = (value: unknown) => String(value || "").slice(0, 5);
       const enc = encounters.find((e: any) =>
-        e.visit?.appointment_id === visitId || e.visit?.appointment_token === String(visitId)
+        visit.id !== null && e.visit?.appointment_id === visit.id
       ) || encounters.find((e: any) =>
-        visitDate && e.visit?.date === visitDate
+        visit.appointment_token && e.visit?.appointment_token === visit.appointment_token
+      ) || encounters.find((e: any) =>
+        e.visit?.date === visit.date && (!visit.time || normalizedTime(e.visit?.time) === normalizedTime(visit.time))
       );
-      if (!enc) return;
+      if (!enc) throw new Error("No EHR is stored for this visit.");
       navigate(`/clinic/patients/${encodeURIComponent(pid)}/encounters/${encodeURIComponent(enc.encounter_id)}/ehr?return=${encodeURIComponent("/doctor-dashboard")}`);
-    } catch {
-      // silently fail
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "Could not open this EHR.", type: "error" });
     }
   }, [clinicId, activePatient?.patient_id, navigate]);
 
@@ -811,6 +803,7 @@ export default function KramaDoctorDashboard() {
         const query = historyParams.toString();
         const lookupId = activePatientId || "lookup";
         const response = await fetch(apiUrl(`/api/patient/history/${encodeURIComponent(clinicId)}/${encodeURIComponent(lookupId)}${query ? `?${query}` : ""}`), {
+          headers: clinicAuthHeaders(),
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("Failed to fetch patient history");
@@ -1171,7 +1164,7 @@ export default function KramaDoctorDashboard() {
         </div>
       )}
 
-      <header className="border-b border-white/60 bg-[#fbfaf7]/85 backdrop-blur-xl">
+      <header className="relative z-[80] overflow-visible border-b border-white/60 bg-[#fbfaf7]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 sm:min-h-[72px] sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 sm:py-0 md:px-8">
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <Link to="/clinic" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1efe8] text-[#4f5b56] transition hover:bg-[#e5e1d7] sm:h-10 sm:w-10" aria-label="Back to clinic dashboard">
@@ -1202,50 +1195,83 @@ export default function KramaDoctorDashboard() {
                   {activeDelay ? `Delay active: ${activeDelay}` : "Announce Delay"}
                 </span>
               </Button>
-              {isDelayOpen && (
-                <div className="fixed inset-x-4 top-[92px] z-40 rounded-2xl border border-[#f59e0b] bg-[#fffbeb] p-4 shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+12px)] sm:w-[min(90vw,520px)] sm:p-5">
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-[#92400e]">How long will you be delayed?</p>
-                      {activeSession && <p className="mt-1 text-xs text-[#92400e]">{activeSession.session_name.replace("Time ", "Session ")}</p>}
-                      {activeDelay && <p className="mt-1 text-xs text-[#92400e]">Live delay: {activeDelay}</p>}
-                    </div>
-                    <button type="button" onClick={() => setIsDelayOpen(false)} className="rounded-full border border-[#f59e0b]/70 px-3 py-1 text-xs font-semibold text-[#92400e] hover:bg-white">
-                      Close
-                    </button>
-                  </div>
-                  {activeDelay && (
-                    <div className="mb-4 rounded-xl border border-orange-200 bg-white/75 px-4 py-3 text-sm font-semibold text-[#92400e] transition-all duration-300">
-                      {activeOriginalStartTime && activeUpdatedStartTime && (
-                        <>
-                          <p>Original Time: <span className="line-through decoration-red-500/70 decoration-2">{activeOriginalStartTime}</span></p>
-                          <p>New Time: <span className="text-[#c2410c]">{activeUpdatedStartTime}</span></p>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  <div className="mb-4 flex flex-wrap gap-2">
-                    {delayOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setSelectedDelay(option.value)}
-                        className={`rounded-full border px-4 py-2 text-sm transition ${selectedDelay === option.value ? "border-[#f59e0b] bg-white text-[#92400e] shadow-sm" : "border-[#f59e0b]/60 bg-transparent text-[#92400e] hover:bg-white"}`}
-                      >
-                        {option.label}
+              {isDelayOpen && typeof document !== "undefined" && createPortal(
+                <div
+                  className="fixed inset-0 z-[200] flex items-end justify-center bg-[#10251f]/55 backdrop-blur-[2px] sm:items-center sm:p-6"
+                  onMouseDown={() => setIsDelayOpen(false)}
+                >
+                  <section
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="delay-dialog-title"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    className="max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-[#f3d49a] bg-[#fffdf8] shadow-[0_30px_90px_-20px_rgba(0,0,0,0.55)] sm:max-w-lg sm:rounded-[28px]"
+                  >
+                    <div className="flex items-start justify-between gap-4 border-b border-[#f3dfb8] bg-[#fff7e6] px-5 py-5 sm:px-6">
+                      <div className="flex min-w-0 gap-3">
+                        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#f59e0b] text-white">
+                          <Megaphone className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <h2 id="delay-dialog-title" className="text-lg font-black text-[#5f3708]">Announce a delay</h2>
+                          <p className="mt-1 text-sm text-[#8a5a1f]">
+                            {activeSession ? `${activeSession.session_name.replace("Time ", "Session ")} · Choose the expected delay` : "Choose the expected delay"}
+                          </p>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => setIsDelayOpen(false)} className="shrink-0 rounded-full border border-[#e6c27e] bg-white px-3 py-1.5 text-xs font-bold text-[#704514] hover:bg-[#fff8e8]">
+                        Close
                       </button>
-                    ))}
-                  </div>
-                  <Button onClick={announceDelay} disabled={isSendingDelay || !canAnnounceDelay} className="bg-green-600 hover:bg-green-700 text-white disabled:cursor-not-allowed disabled:bg-[#9ca3af]">
-                    {isSendingDelay ? "Saving delay..." : activeDelay ? "Add delay" : "Save delay"}
-                  </Button>
-                  {activeDelay && (
-                    <Button onClick={cancelDelay} disabled={isSendingDelay} variant="outline" className="ml-2 border-red-300 text-red-700 hover:bg-red-50">
-                      Cancel delay
-                    </Button>
-                  )}
-                  {delayNotice && <p className="mt-3 text-sm font-medium text-[#92400e]">{delayNotice}</p>}
-                </div>
+                    </div>
+
+                    <div className="space-y-5 px-5 py-5 sm:px-6 sm:py-6">
+                      {activeDelay && (
+                        <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-[#7c4208]">
+                          <p className="font-black">Current delay: {activeDelay}</p>
+                          {activeOriginalStartTime && activeUpdatedStartTime && (
+                            <div className="mt-2 grid grid-cols-2 gap-3">
+                              <div><p className="text-xs text-[#9a6b36]">Original time</p><p className="mt-0.5 font-bold line-through decoration-red-500/70 decoration-2">{activeOriginalStartTime}</p></div>
+                              <div><p className="text-xs text-[#9a6b36]">Updated time</p><p className="mt-0.5 font-black text-[#c2410c]">{activeUpdatedStartTime}</p></div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div>
+                        <p className="text-sm font-black text-[#34281b]">How long will you be delayed?</p>
+                        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                          {delayOptions.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => setSelectedDelay(option.value)}
+                              className={`rounded-2xl border px-3 py-3 text-sm font-bold transition ${selectedDelay === option.value ? "border-[#d97706] bg-[#fff1cf] text-[#854d0e] ring-2 ring-[#f59e0b]/25" : "border-[#ddd5c8] bg-white text-[#4b443b] hover:border-[#e4ad4c] hover:bg-[#fffaf0]"}`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {delayNotice && <p className="rounded-xl bg-[#fff4d9] px-3 py-2 text-sm font-semibold text-[#8a4b08]">{delayNotice}</p>}
+
+                      <div className="flex flex-col-reverse gap-2 border-t border-[#eee7dc] pt-4 sm:flex-row sm:justify-end">
+                        {activeDelay && (
+                          <Button onClick={cancelDelay} disabled={isSendingDelay} variant="outline" className="border-red-300 text-red-700 hover:bg-red-50 sm:mr-auto">
+                            Cancel current delay
+                          </Button>
+                        )}
+                        <Button onClick={() => setIsDelayOpen(false)} variant="outline" className="border-[#d7cfc2] bg-white text-[#514a41] hover:bg-[#f7f3ed]">
+                          Keep unchanged
+                        </Button>
+                        <Button onClick={announceDelay} disabled={isSendingDelay || !canAnnounceDelay} className="bg-[#1a5c4a] text-white hover:bg-[#144d3e] disabled:cursor-not-allowed disabled:bg-[#9ca3af]">
+                          {isSendingDelay ? "Saving delay..." : activeDelay ? "Add selected delay" : "Announce selected delay"}
+                        </Button>
+                      </div>
+                    </div>
+                  </section>
+                </div>,
+                document.body,
               )}
             </div>
             <Button onClick={refreshQueue} variant="outline" className="h-9 w-full rounded-full border-[#d8d1c6] bg-white/80 px-2 text-xs text-[#40514b] hover:bg-[#f6f1e8] sm:h-10 sm:w-auto sm:px-5 sm:text-sm">
@@ -1399,6 +1425,7 @@ export default function KramaDoctorDashboard() {
               className="w-full rounded-xl bg-[#1a5c4a] py-6 text-base font-bold text-white shadow-sm hover:bg-[#144d3e]"
               onClick={handleNextPatient}
               disabled={queueAction !== null || isSessionSwitching || !displayCurrentServing}
+              title={!displayCurrentServing ? "Reception must call the next patient first." : undefined}
             >
               <ArrowRightCircle className={`mr-2 h-5 w-5 ${queueAction === "next" ? "animate-spin" : ""}`} />
               {queueAction === "next" ? "Updating..." : "Next"}
@@ -1477,11 +1504,11 @@ export default function KramaDoctorDashboard() {
                     <p className="text-sm text-[#77756f]">{activePatient.token}</p>
                   </div>
                 </div>
-                <PatientAiPanel history={patientHistory} isLoading={isHistoryLoading} error={historyError} patient={{ id: activePatient.patient_id || undefined, name: activePatient.name, token: activePatient.token, phone: activePatient.phone, email: activePatient.patient_email, clinicId, doctorId: selectedDoctorId, appointmentId: activePatient.appointmentId }} />
+                <PatientAiPanel history={patientHistory} isLoading={isHistoryLoading} error={historyError} enabled={Boolean(displayCurrentServing)} patient={{ id: activePatient.patient_id || undefined, name: activePatient.name, token: activePatient.token, phone: activePatient.phone, email: activePatient.patient_email, clinicId, doctorId: selectedDoctorId, appointmentId: activePatient.appointmentId }} />
               </div>
             ) : (
               <div>
-                <p className="text-sm text-[#77756f]">Select a patient from the waiting queue to view details.</p>
+                <p className="text-sm text-[#77756f]">Waiting for reception to call the next patient.</p>
                 <EmptyPatientAiPanel />
               </div>
             )}

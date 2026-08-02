@@ -2,7 +2,7 @@ import { isValidElement, useEffect, useState, useMemo, useRef, type ReactNode } 
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Printer, Download, Loader2, ShieldCheck, Stethoscope, AlertTriangle } from "lucide-react";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, clinicAuthHeaders } from "@/lib/api";
 import { medicationMealCode, medicationWhenToTake } from "@/lib/medicationDisplay";
 import { EMPTY_ASSESSMENT_MESSAGE, EMPTY_PLAN_MESSAGE, hasAssessmentContent as assessmentHasContent, hasPlanContent as planHasContent } from "@/lib/soapPresentation";
 
@@ -11,7 +11,6 @@ interface EhrEncounter {
   status: string;
   doctor_id?: string | null;
   ehr_data: Record<string, unknown>;
-  model_name?: string | null;
   approved_by?: string | null;
   approved_at?: string | null;
   created_at: string;
@@ -506,7 +505,10 @@ const EhrDocumentPage = () => {
       return;
     }
 
-    fetch(apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(patientId)}`))
+    fetch(
+      apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(patientId)}`),
+      { headers: clinicAuthHeaders() },
+    )
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load EHR data");
         return res.json();
@@ -553,7 +555,10 @@ const EhrDocumentPage = () => {
     setPdfDownloading(true);
     setPdfError("");
     try {
-      const response = await fetch(apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(patientId)}/encounters/${encodeURIComponent(encounterId)}/pdf`));
+      const response = await fetch(
+        apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(patientId)}/encounters/${encodeURIComponent(encounterId)}/pdf`),
+        { headers: clinicAuthHeaders() },
+      );
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.detail || "Could not generate the EHR PDF.");
@@ -881,7 +886,6 @@ const EhrDocumentPage = () => {
                   )}
                 </div>
                 <div className="text-left text-[10px] text-slate-500 sm:text-right">
-                  <p>Generated with {encounter.model_name || "clinical documentation system"}</p>
                   <p>This document is part of the patient\u2019s electronic health record.</p>
                 </div>
               </div>

@@ -5,7 +5,7 @@ import {
   Loader2, Pill, RotateCcw, Save, ShieldCheck, Sparkles, Stethoscope, UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, clinicAuthHeaders } from "@/lib/api";
 import { clearConsultationRecording, getConsultationRecording } from "@/lib/consultationRecording";
 import { medicationMealCode, medicationWhenToTake } from "@/lib/medicationDisplay";
 import { EMPTY_ASSESSMENT_MESSAGE, EMPTY_PATIENT_SUMMARY_MESSAGE, EMPTY_PLAN_MESSAGE, hasAssessmentContent, hasPlanContent } from "@/lib/soapPresentation";
@@ -23,7 +23,6 @@ type EhrEncounter = {
   ehr_data: Record<string, unknown>;
   patient_summary: Record<string, unknown>;
   patient_summary_preview?: Record<string, unknown>;
-  model_name?: string;
   approved_at?: string | null;
 };
 
@@ -240,12 +239,18 @@ export default function ConsultationTranscript() {
   const recording = useMemo(() => getConsultationRecording(), []);
   const [audioUrl, setAudioUrl] = useState("");
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
-  const [processingStage, setProcessingStage] = useState<"idle" | "transcribing" | "generating" | "complete">("idle");
+  const [processingStage, setProcessingStage] = useState<"idle" | "transcribing" | "queued" | "generating" | "complete">("idle");
   const [ehr, setEhr] = useState<EhrEncounter | null>(null);
   const [isSavingEhr, setIsSavingEhr] = useState(false);
   const [ehrNotice, setEhrNotice] = useState("");
   const [error, setError] = useState("");
   const autoProcessingStarted = useRef(false);
+  const queuePollingCancelled = useRef(false);
+
+  useEffect(() => {
+    queuePollingCancelled.current = false;
+    return () => { queuePollingCancelled.current = true; };
+  }, []);
 
   useEffect(() => {
     if (!recording) return;
@@ -292,6 +297,7 @@ export default function ConsultationTranscript() {
       formData.append("audio", recording.blob, `consultation-${Date.now()}.${extension}`);
       const response = await fetch(apiUrl("/api/ai/transcribe-consultation"), {
         method: "POST",
+        headers: clinicAuthHeaders(),
         body: formData,
       });
       const payload = await response.json().catch(() => ({}));
@@ -317,10 +323,11 @@ export default function ConsultationTranscript() {
     }
     setError("");
     setEhrNotice("");
+    queuePollingCancelled.current = false;
     try {
-      const response = await fetch(apiUrl("/api/ehr/drafts/generate"), {
+      const response = await fetch(apiUrl("/api/ehr/drafts/jobs"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: clinicAuthHeaders(true),
         body: JSON.stringify({
           clinic_id: recording.patient.clinicId,
           patient_id: recording.patient.id,
@@ -332,12 +339,40 @@ export default function ConsultationTranscript() {
           transcript_segments: segs,
         }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.detail || "The EHR draft could not be generated.");
-      setEhr(payload);
-      setProcessingStage("complete");
-      setEhrNotice("Local AI draft generated. Review every field before approval.");
+      let job = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(job.detail || "The EHR draft could not be queued.");
+
+      while (!queuePollingCancelled.current) {
+        if (job.status === "completed" && job.encounter) {
+          setEhr(job.encounter);
+          setProcessingStage("complete");
+          setEhrNotice("EHR draft generated. Review every field before approval.");
+          return;
+        }
+        if (job.status === "failed") {
+          throw new Error(job.error || "The EHR draft could not be generated.");
+        }
+
+        if (job.status === "processing") {
+          setProcessingStage("generating");
+          setEhrNotice("Your EMR is now being generated on the GPU.");
+        } else {
+          const position = Math.max(1, Number(job.position) || 1);
+          const minutes = Math.max(1, Number(job.estimated_wait_minutes) || 5);
+          setProcessingStage("queued");
+          setEhrNotice(`GPU queue position ${position}. Estimated wait: about ${minutes} minute${minutes === 1 ? "" : "s"}.`);
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        const statusResponse = await fetch(
+          apiUrl(`/api/ehr/drafts/jobs/${encodeURIComponent(job.job_id)}?clinic_id=${encodeURIComponent(recording.patient.clinicId)}`),
+          { headers: clinicAuthHeaders() },
+        );
+        job = await statusResponse.json().catch(() => ({}));
+        if (!statusResponse.ok) throw new Error(job.detail || "Could not check the EHR generation queue.");
+      }
     } catch (requestError) {
+      if (queuePollingCancelled.current) return;
       setError(requestError instanceof Error ? requestError.message : "The EHR draft could not be generated.");
       setProcessingStage("idle");
     }
@@ -355,7 +390,7 @@ export default function ConsultationTranscript() {
     try {
       const response = await fetch(apiUrl(`/api/ehr/encounters/${encodeURIComponent(ehr.encounter_id)}?clinic_id=${encodeURIComponent(recording.patient.clinicId)}`), {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: clinicAuthHeaders(true),
         body: JSON.stringify({ ehr_data: ehr.ehr_data, patient_summary: ehr.patient_summary, actor_id: recording.patient.doctorId || null }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -379,14 +414,14 @@ export default function ConsultationTranscript() {
     try {
       const saveResponse = await fetch(apiUrl(`/api/ehr/encounters/${encodeURIComponent(ehr.encounter_id)}?clinic_id=${encodeURIComponent(recording.patient.clinicId)}`), {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: clinicAuthHeaders(true),
         body: JSON.stringify({ ehr_data: ehr.ehr_data, patient_summary: ehr.patient_summary, actor_id: recording.patient.doctorId }),
       });
       const saved = await saveResponse.json().catch(() => ({}));
       if (!saveResponse.ok) throw new Error(saved.detail || "Could not save the reviewed EHR.");
       const response = await fetch(apiUrl(`/api/ehr/encounters/${encodeURIComponent(ehr.encounter_id)}/approve?clinic_id=${encodeURIComponent(recording.patient.clinicId)}`), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: clinicAuthHeaders(true),
         body: JSON.stringify({ approved_by: recording.patient.doctorId }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -460,7 +495,7 @@ export default function ConsultationTranscript() {
                 {audioUrl && <audio className="h-10 w-full max-w-xl" controls src={audioUrl} />}
               </div>
 
-              {processingStage === "transcribing" || processingStage === "generating" ? (
+              {processingStage === "transcribing" || processingStage === "queued" || processingStage === "generating" ? (
                 <div className="flex items-center gap-2 rounded-xl border border-[#e0e7e3] bg-white px-4 py-2.5">
                   <Loader2 className="h-5 w-5 animate-spin text-[#1a5c4a]" />
                   <p className="text-sm font-bold text-[#202825]">
@@ -488,9 +523,9 @@ export default function ConsultationTranscript() {
                   <div>
                     <Loader2 className="mx-auto h-10 w-10 animate-spin text-[#1a5c4a]" />
                     <p className="mt-4 font-bold text-[#202825]">
-                      {processingStage === "transcribing" ? "Transcribing consultation audio..." : "Generating EHR from transcript..."}
+                      {processingStage === "transcribing" ? "Processing consultation audio..." : processingStage === "queued" ? "Waiting for the EMR GPU..." : "Preparing EHR draft..."}
                     </p>
-                    <p className="mt-1 text-sm text-[#68736f]">The transcript and EHR are being prepared.</p>
+                    <p className="mt-1 text-sm text-[#68736f]">{ehrNotice || "Your consultation record is being prepared."}</p>
                   </div>
                 </div>
               ) : processingStage === "idle" && !ehr ? (

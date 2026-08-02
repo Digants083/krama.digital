@@ -59,6 +59,9 @@ class AuthResponse(BaseModel):
     admin_pinned_latitude: Optional[str] = None
     admin_pinned_longitude: Optional[str] = None
     has_pinned_location: Optional[bool] = None
+    access_token: Optional[str] = None
+    token_type: Optional[str] = None
+    expires_in: Optional[int] = None
 
 class ErrorResponse(BaseModel):
     error: str

@@ -4,8 +4,10 @@ import tempfile
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
+
+from app.security import ClinicPrincipal, require_clinic_principal
 
 router = APIRouter(prefix="/ai", tags=["ai-transcription"])
 
@@ -83,10 +85,13 @@ def _run_sarvam_batch(api_key: str, audio_bytes: bytes, suffix: str):
 
 
 @router.post("/transcribe-consultation")
-async def transcribe_consultation(audio: UploadFile = File(...)):
+async def transcribe_consultation(
+    audio: UploadFile = File(...),
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
+):
     api_key = os.getenv("SARVAM_API_KEY", "").strip()
     if not api_key:
-        raise HTTPException(status_code=503, detail="Sarvam transcription is not configured yet. Add SARVAM_API_KEY to the backend environment.")
+        raise HTTPException(status_code=503, detail="Voice processing is temporarily unavailable.")
 
     content_type = (audio.content_type or "").split(";")[0].lower()
     if content_type not in ALLOWED_CONTENT_TYPES:
@@ -106,9 +111,9 @@ async def transcribe_consultation(audio: UploadFile = File(...)):
             EXTENSIONS_BY_CONTENT_TYPE[content_type],
         )
     except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail="Sarvam is still processing the recording. Please try a shorter test recording.") from exc
+        raise HTTPException(status_code=504, detail="Voice processing is taking too long. Please try a shorter recording.") from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc) or "Sarvam could not transcribe this recording.") from exc
+        raise HTTPException(status_code=502, detail="The recording could not be processed. Please try again.") from exc
 
     entries = (payload.get("diarized_transcript") or {}).get("entries") or []
     speaker_names = {}
@@ -141,9 +146,6 @@ async def transcribe_consultation(audio: UploadFile = File(...)):
         segments = [{"speaker": "Speaker A", "start": 0, "end": 0, "text": payload["transcript"]}]
 
     return {
-        "model": "saaras:v3",
-        "provider": "sarvam",
         "language_code": payload.get("language_code"),
-        "text": payload.get("transcript", ""),
         "segments": segments,
     }

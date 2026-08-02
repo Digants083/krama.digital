@@ -1,37 +1,44 @@
 import asyncio
+import hashlib
 import json
 import logging
 import math
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     ehr_context_window_tokens,
+    ehr_generation_concurrency,
     ehr_generation_timeout_seconds,
     ehr_initial_output_tokens,
     ehr_max_output_tokens,
     ehr_model_name,
+    ehr_queue_estimated_minutes_per_job,
+    ehr_queue_poll_seconds,
     ollama_base_url,
 )
-from app.database.db import get_db
+from app.database.db import AsyncSessionLocal, engine, get_db
 from app.database.models import (
     Appointment,
     Clinic,
     ClinicalEncounter,
     Doctor,
     EhrAuditEvent,
+    EhrGenerationJob,
     Patient,
 )
 from app.services.patient_summary import build_patient_summary as _build_patient_summary
+from app.services.gpu_instance import gpu_generation_lease
+from app.security import ClinicPrincipal, require_clinic_principal, require_matching_clinic
 from app.services.speaker_correction import infer_consultation_speaker_roles
 from app.services.soap_rag import (
     build_completeness_review_flags,
@@ -2636,7 +2643,6 @@ def _encounter_payload(encounter: ClinicalEncounter, include_transcript: bool = 
         "status": encounter.status,
         "ehr_data": migrated_ehr,
         "patient_summary": migrated_summary,
-        "model_name": encounter.model_name,
         "approved_at": encounter.approved_at,
         "approved_by": encounter.approved_by,
         "created_at": encounter.created_at,
@@ -2967,10 +2973,11 @@ async def ehr_model_status():
     return {"provider": "ollama", "model": model, "available": available}
 
 
-@router.post("/drafts/generate", status_code=status.HTTP_201_CREATED)
-async def generate_ehr_draft(payload: GenerateEhrDraftRequest, db: AsyncSession = Depends(get_db)):
+async def _generate_ehr_draft(payload: GenerateEhrDraftRequest, db: AsyncSession):
     clinic = await _require_clinic(db, payload.clinic_id)
     patient = await _require_patient(db, payload.patient_id)
+    if payload.appointment_id is None:
+        raise HTTPException(status_code=400, detail="A clinic appointment is required to generate an EHR")
     doctor: Optional[Doctor] = None
     if payload.doctor_id:
         doctor_result = await db.execute(
@@ -2979,7 +2986,7 @@ async def generate_ehr_draft(payload: GenerateEhrDraftRequest, db: AsyncSession 
         doctor = doctor_result.scalar_one_or_none()
         if not doctor:
             raise HTTPException(status_code=400, detail="Doctor does not belong to this clinic")
-    if payload.appointment_id:
+    if payload.appointment_id is not None:
         appointment_result = await db.execute(
             select(Appointment).where(
                 Appointment.id == payload.appointment_id,
@@ -2989,6 +2996,21 @@ async def generate_ehr_draft(payload: GenerateEhrDraftRequest, db: AsyncSession 
         )
         if not appointment_result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Appointment does not match this clinic and patient")
+
+    existing_encounter_result = await db.execute(
+        select(ClinicalEncounter)
+        .where(
+            ClinicalEncounter.clinic_id == payload.clinic_id,
+            ClinicalEncounter.patient_id == payload.patient_id,
+            ClinicalEncounter.appointment_id == payload.appointment_id,
+            ClinicalEncounter.status.in_(("draft", "approved")),
+        )
+        .order_by(ClinicalEncounter.id.desc())
+        .limit(1)
+    )
+    existing_encounter = existing_encounter_result.scalar_one_or_none()
+    if existing_encounter:
+        return _encounter_payload(existing_encounter)
 
     # Sarvam diarization identifies voices (Speaker A/B), not clinical roles.
     # Resolve those stable identities before building the transcript and RAG
@@ -3006,13 +3028,14 @@ async def generate_ehr_draft(payload: GenerateEhrDraftRequest, db: AsyncSession 
         rag_bundle = {"knowledge_version": "fallback", "evidence": [], "rules": [], "coverage_expectations": []}
 
     try:
-        soap_ehr, model, completeness_flags = await _generate_with_ollama(transcript, rag_bundle)
+        async with gpu_generation_lease():
+            soap_ehr, model, completeness_flags = await _generate_with_ollama(transcript, rag_bundle)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     now = datetime.now(timezone.utc)
     visit_datetime = now.isoformat()
-    if payload.appointment_id:
+    if payload.appointment_id is not None:
         apt_result = await db.execute(select(Appointment).where(Appointment.id == payload.appointment_id))
         apt = apt_result.scalar_one_or_none()
         if apt and apt.date and apt.time:
@@ -3026,8 +3049,8 @@ async def generate_ehr_draft(payload: GenerateEhrDraftRequest, db: AsyncSession 
         if value
     )
     soap_ehr["visit_details"] = {
-        "patient_name": payload.patient_name or patient.name,
-        "phone_number": payload.patient_phone or patient.phone or "",
+        "patient_name": patient.name,
+        "phone_number": patient.phone or "",
         "patient_id": patient.patient_id,
         "clinic_name": clinic.clinic_name,
         "clinic_address": clinic_address or "",
@@ -3076,17 +3099,273 @@ async def generate_ehr_draft(payload: GenerateEhrDraftRequest, db: AsyncSession 
     return _encounter_payload(encounter)
 
 
+@router.post("/drafts/generate", status_code=status.HTTP_201_CREATED)
+async def generate_ehr_draft(
+    payload: GenerateEhrDraftRequest,
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    require_matching_clinic(principal, payload.clinic_id)
+    return await _generate_ehr_draft(payload, db)
+
+
+def _generation_request_dict(payload: GenerateEhrDraftRequest) -> dict[str, Any]:
+    return payload.model_dump(mode="json")
+
+
+def _generation_request_hash(payload_data: dict[str, Any]) -> str:
+    canonical = json.dumps(payload_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def _generation_job_payload(job: EhrGenerationJob, db: AsyncSession) -> dict[str, Any]:
+    queued_ahead = 0
+    processing_count = 0
+    if job.status == "queued":
+        queued_ahead_result = await db.execute(
+            select(func.count(EhrGenerationJob.id)).where(
+                EhrGenerationJob.status == "queued",
+                EhrGenerationJob.id < job.id,
+            )
+        )
+        queued_ahead = int(queued_ahead_result.scalar() or 0)
+        processing_result = await db.execute(
+            select(func.count(EhrGenerationJob.id)).where(EhrGenerationJob.status == "processing")
+        )
+        processing_count = int(processing_result.scalar() or 0)
+
+    concurrency = ehr_generation_concurrency()
+    jobs_ahead = processing_count + queued_ahead
+    position = jobs_ahead + 1 if job.status == "queued" else 0
+    wait_waves = max(1, math.ceil(jobs_ahead / concurrency)) if job.status == "queued" else 0
+    result: dict[str, Any] = {
+        "job_id": job.job_id,
+        "status": job.status,
+        "position": position,
+        "estimated_wait_minutes": wait_waves * ehr_queue_estimated_minutes_per_job(),
+        "parallel_capacity": concurrency,
+        "encounter_id": job.encounter_id,
+        "error": job.error,
+    }
+    if job.status == "completed" and job.encounter_id:
+        encounter_result = await db.execute(
+            select(ClinicalEncounter).where(ClinicalEncounter.encounter_id == job.encounter_id)
+        )
+        encounter = encounter_result.scalar_one_or_none()
+        if encounter:
+            result["encounter"] = _encounter_payload(encounter)
+    return result
+
+
+@router.post("/drafts/jobs", status_code=status.HTTP_202_ACCEPTED)
+async def enqueue_ehr_draft(
+    payload: GenerateEhrDraftRequest,
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    require_matching_clinic(principal, payload.clinic_id)
+    # Validate ownership before accepting work into the shared GPU queue.
+    await _require_clinic(db, payload.clinic_id)
+    await _require_patient(db, payload.patient_id)
+    if payload.appointment_id is None:
+        raise HTTPException(status_code=400, detail="A clinic appointment is required to generate an EHR")
+    if payload.doctor_id:
+        doctor_result = await db.execute(
+            select(Doctor).where(Doctor.doctor_id == payload.doctor_id, Doctor.clinic_id == payload.clinic_id)
+        )
+        if not doctor_result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Doctor does not belong to this clinic")
+    if payload.appointment_id is not None:
+        appointment_result = await db.execute(
+            select(Appointment).where(
+                Appointment.id == payload.appointment_id,
+                Appointment.clinic_id == payload.clinic_id,
+                Appointment.patient_id == payload.patient_id,
+            )
+        )
+        if not appointment_result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Appointment does not match this clinic and patient")
+
+    request_payload = _generation_request_dict(payload)
+    request_hash = _generation_request_hash(request_payload)
+    existing_result = await db.execute(
+        select(EhrGenerationJob).where(
+            EhrGenerationJob.request_hash == request_hash,
+            EhrGenerationJob.status.in_(("queued", "processing", "completed")),
+        ).order_by(EhrGenerationJob.id.desc()).limit(1)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        return await _generation_job_payload(existing, db)
+
+    job = EhrGenerationJob(
+        job_id=f"EHRJOB-{uuid.uuid4().hex.upper()[:16]}",
+        clinic_id=payload.clinic_id.strip(),
+        patient_id=payload.patient_id.strip(),
+        doctor_id=payload.doctor_id,
+        appointment_id=payload.appointment_id,
+        request_payload=request_payload,
+        request_hash=request_hash,
+        status="queued",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return await _generation_job_payload(job, db)
+
+
+@router.get("/drafts/jobs/{job_id}")
+async def get_ehr_generation_job(
+    job_id: str,
+    clinic_id: str = Query(...),
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    clinic_id = require_matching_clinic(principal, clinic_id)
+    result = await db.execute(
+        select(EhrGenerationJob).where(
+            EhrGenerationJob.job_id == job_id,
+            EhrGenerationJob.clinic_id == clinic_id,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="EHR generation job not found")
+    return await _generation_job_payload(job, db)
+
+
+async def _claim_next_generation_job() -> Optional[str]:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(EhrGenerationJob)
+            .where(EhrGenerationJob.status == "queued")
+            .order_by(EhrGenerationJob.id.asc())
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        job = result.scalar_one_or_none()
+        if not job:
+            return None
+        job.status = "processing"
+        job.started_at = datetime.now(timezone.utc)
+        job.error = None
+        await db.commit()
+        return job.job_id
+
+
+async def _process_generation_job(job_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(EhrGenerationJob).where(EhrGenerationJob.job_id == job_id))
+        job = result.scalar_one_or_none()
+        if not job:
+            return
+        try:
+            payload = GenerateEhrDraftRequest.model_validate(job.request_payload)
+            encounter = await _generate_ehr_draft(payload, db)
+            job.encounter_id = str(encounter["encounter_id"])
+            job.status = "completed"
+            job.completed_at = datetime.now(timezone.utc)
+            job.error = None
+            job.request_payload = {}
+        except asyncio.CancelledError:
+            job.status = "queued"
+            job.started_at = None
+            await db.commit()
+            raise
+        except Exception as exc:
+            logger.exception("Queued EHR generation failed for %s", job_id)
+            job.status = "failed"
+            job.completed_at = datetime.now(timezone.utc)
+            job.error = str(exc.detail if isinstance(exc, HTTPException) else exc)[:2000]
+            job.request_payload = {}
+        await db.commit()
+
+
+async def _run_generation_slot(slot_index: int) -> None:
+    poll_seconds = ehr_queue_poll_seconds()
+    advisory_lock_id = 4_872_616 + slot_index
+    while True:
+        lock_connection = None
+        has_lock = True
+        try:
+            if engine.dialect.name == "postgresql":
+                lock_connection = await engine.connect()
+                lock_result = await lock_connection.execute(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": advisory_lock_id},
+                )
+                has_lock = bool(lock_result.scalar())
+            if not has_lock:
+                await asyncio.sleep(poll_seconds)
+                continue
+
+            job_id = await _claim_next_generation_job()
+            if not job_id:
+                await asyncio.sleep(poll_seconds)
+                continue
+            await _process_generation_job(job_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("EHR generation queue worker error")
+            await asyncio.sleep(poll_seconds)
+        finally:
+            if lock_connection is not None:
+                if has_lock:
+                    try:
+                        await lock_connection.execute(
+                            text("SELECT pg_advisory_unlock(:lock_id)"),
+                            {"lock_id": advisory_lock_id},
+                        )
+                    except Exception:
+                        logger.exception("Could not release EHR generation worker lock")
+                await lock_connection.close()
+
+
+async def run_ehr_generation_queue() -> None:
+    """Run a durable queue with a globally bounded number of parallel GPU jobs."""
+    stale_before = datetime.now(timezone.utc) - timedelta(seconds=ehr_generation_timeout_seconds() + 60)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(EhrGenerationJob)
+            .where(EhrGenerationJob.status == "processing", EhrGenerationJob.started_at < stale_before)
+            .values(status="queued", started_at=None, error="Recovered after an interrupted worker")
+        )
+        await db.commit()
+
+    concurrency = ehr_generation_concurrency()
+    logger.info("Starting EHR generation queue with %d parallel GPU slot(s)", concurrency)
+    workers = [asyncio.create_task(_run_generation_slot(slot)) for slot in range(concurrency)]
+    try:
+        await asyncio.gather(*workers)
+    finally:
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+
+
 @router.put("/encounters/{encounter_id}")
 async def update_ehr_draft(
     encounter_id: str,
     payload: UpdateEhrDraftRequest,
     clinic_id: str = Query(...),
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
     db: AsyncSession = Depends(get_db),
 ):
+    clinic_id = require_matching_clinic(principal, clinic_id)
     await _require_clinic(db, clinic_id)
     encounter = await _require_encounter_for_clinic(db, encounter_id, clinic_id)
     if encounter.status != "draft":
         raise HTTPException(status_code=409, detail="Approved EHR records cannot be edited")
+    if payload.actor_id:
+        doctor_result = await db.execute(
+            select(Doctor).where(
+                Doctor.doctor_id == payload.actor_id,
+                Doctor.clinic_id == clinic_id,
+            )
+        )
+        if not doctor_result.scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="Editing doctor does not belong to this clinic")
 
     ehr_data = payload.ehr_data or {}
     if ehr_data.get("schema_version") in SOAP_SCHEMA_VERSIONS:
@@ -3119,8 +3398,10 @@ async def approve_ehr(
     encounter_id: str,
     payload: ApproveEhrRequest,
     clinic_id: str = Query(...),
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
     db: AsyncSession = Depends(get_db),
 ):
+    clinic_id = require_matching_clinic(principal, clinic_id)
     await _require_clinic(db, clinic_id)
     encounter = await _require_encounter_for_clinic(db, encounter_id, clinic_id)
     if encounter.status == "approved":
@@ -3158,6 +3439,13 @@ async def approve_ehr(
     encounter.approved_by = approver
     encounter.approved_at = now
     encounter.updated_at = now
+    # The transcript is needed only while generating and reviewing the SOAP
+    # draft. Once the doctor approves the encounter, the structured EHR is the
+    # clinical source of truth, so do not retain the raw consultation text.
+    # Empty values preserve the existing NOT NULL database contract while
+    # removing the transcript contents in the same transaction as approval.
+    encounter.transcript_text = ""
+    encounter.transcript_segments = []
     _add_audit_event(db, encounter, "approved", approver)
     await db.commit()
     await db.refresh(encounter)
@@ -3165,15 +3453,45 @@ async def approve_ehr(
 
 
 @router.get("/clinic/{clinic_id}/patient/{patient_id}")
-async def get_clinic_patient_ehr(clinic_id: str, patient_id: str, db: AsyncSession = Depends(get_db)):
+async def get_clinic_patient_ehr(
+    clinic_id: str,
+    patient_id: str,
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    clinic_id = require_matching_clinic(principal, clinic_id)
     clinic = await _require_clinic(db, clinic_id)
     patient = await _require_patient(db, patient_id)
     result = await db.execute(
         select(ClinicalEncounter)
-        .where(ClinicalEncounter.clinic_id == clinic_id, ClinicalEncounter.patient_id == patient_id)
-        .order_by(ClinicalEncounter.created_at.desc(), ClinicalEncounter.id.desc())
+        .where(
+            ClinicalEncounter.clinic_id == clinic_id,
+            ClinicalEncounter.patient_id == patient_id,
+            ClinicalEncounter.status == "approved",
+        )
+        .order_by(
+            ClinicalEncounter.approved_at.desc().nullslast(),
+            ClinicalEncounter.created_at.desc(),
+            ClinicalEncounter.id.desc(),
+        )
     )
-    encounters = result.scalars().all()
+    all_approved_encounters = result.scalars().all()
+
+    encounters = []
+    seen_sessions = set()
+    for item in all_approved_encounters:
+        visit_details = item.ehr_data.get("visit_details") if isinstance(item.ehr_data, dict) else {}
+        visit_datetime = str(visit_details.get("visit_datetime") or "") if isinstance(visit_details, dict) else ""
+        visit_key = visit_datetime[:16] or (item.created_at.isoformat()[:16] if item.created_at else item.encounter_id)
+        session_key = (
+            ("appointment", item.appointment_id)
+            if item.appointment_id is not None
+            else ("visit", item.patient_id, visit_key)
+        )
+        if session_key in seen_sessions:
+            continue
+        seen_sessions.add(session_key)
+        encounters.append(item)
 
     doctor_ids = {item.doctor_id for item in encounters if item.doctor_id}
     doctors_by_id: dict[str, Doctor] = {}
@@ -3257,8 +3575,10 @@ async def download_clinic_patient_ehr_pdf(
     clinic_id: str,
     patient_id: str,
     encounter_id: str,
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
     db: AsyncSession = Depends(get_db),
 ):
+    clinic_id = require_matching_clinic(principal, clinic_id)
     clinic = await _require_clinic(db, clinic_id)
     patient = await _require_patient(db, patient_id)
     encounter = await _require_encounter_for_clinic(db, encounter_id, clinic_id)
@@ -3347,7 +3667,10 @@ class PrintPdfRequest(BaseModel):
 
 
 @router.post("/print-pdf")
-async def generate_print_pdf(request: PrintPdfRequest):
+async def generate_print_pdf(
+    request: PrintPdfRequest,
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
+):
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -3386,9 +3709,28 @@ async def get_approved_patient_ehr_summary(patient_id: str, db: AsyncSession = D
     result = await db.execute(
         select(ClinicalEncounter)
         .where(ClinicalEncounter.patient_id == patient_id, ClinicalEncounter.status == "approved")
-        .order_by(ClinicalEncounter.approved_at.desc(), ClinicalEncounter.id.desc())
+        .order_by(
+            ClinicalEncounter.approved_at.desc().nullslast(),
+            ClinicalEncounter.created_at.desc(),
+            ClinicalEncounter.id.desc(),
+        )
     )
-    encounters = result.scalars().all()
+    all_approved_encounters = result.scalars().all()
+    encounters = []
+    seen_sessions = set()
+    for item in all_approved_encounters:
+        visit_details = item.ehr_data.get("visit_details") if isinstance(item.ehr_data, dict) else {}
+        visit_datetime = str(visit_details.get("visit_datetime") or "") if isinstance(visit_details, dict) else ""
+        visit_key = visit_datetime[:16] or (item.created_at.isoformat()[:16] if item.created_at else item.encounter_id)
+        session_key = (
+            ("appointment", item.appointment_id)
+            if item.appointment_id is not None
+            else ("visit", item.clinic_id, item.patient_id, visit_key)
+        )
+        if session_key in seen_sessions:
+            continue
+        seen_sessions.add(session_key)
+        encounters.append(item)
     return {
         "patient": {"patient_id": patient.patient_id, "name": patient.name, "blood_group": patient.blood_group},
         "encounters": [_encounter_payload(item, include_transcript=False) for item in encounters],
@@ -3399,15 +3741,27 @@ async def get_approved_patient_ehr_summary(patient_id: str, db: AsyncSession = D
 async def get_ehr_completeness_review(
     encounter_id: str,
     clinic_id: str = Query(...),
+    principal: ClinicPrincipal = Depends(require_clinic_principal),
     db: AsyncSession = Depends(get_db),
 ):
+    clinic_id = require_matching_clinic(principal, clinic_id)
     await _require_clinic(db, clinic_id)
     encounter = await _require_encounter_for_clinic(db, encounter_id, clinic_id)
 
-    transcript = encounter.transcript_text or ""
     ehr_data = encounter.ehr_data or {}
     if not isinstance(ehr_data, dict):
         return {"completeness_flags": []}
+
+    if encounter.status == "approved":
+        review_metadata = ehr_data.get("review_metadata") or {}
+        flags = review_metadata.get("completeness_flags") or ehr_data.get("completeness_flags") or []
+        return {
+            "encounter_id": encounter.encounter_id,
+            "completeness_flags": flags,
+            "note": "Stored review flags from draft generation; the transcript was deleted after approval.",
+        }
+
+    transcript = encounter.transcript_text or ""
 
     from app.services.soap_rag import (
         build_completeness_review_flags,

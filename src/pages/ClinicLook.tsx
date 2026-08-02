@@ -3,10 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowLeft, Calendar, Mail, Phone, UserCircle, Eye, FileText, Loader2, ChevronDown, ChevronRight } from "lucide-react";
-import { apiUrl } from "@/lib/api";
+import { apiUrl, clinicAuthHeaders } from "@/lib/api";
 
 interface PatientSearchResult {
   appointment_token: string;
+  encounter_id?: string | null;
   patient_name: string;
   patient_phone: string;
   patient_id: string;
@@ -84,7 +85,7 @@ const ClinicLook = () => {
         url += `&phone=${phone}`;
       }
 
-      const response = await fetch(url);
+      const response = await fetch(apiUrl(url), { headers: clinicAuthHeaders() });
       if (response.ok) {
         const data = await response.json();
         setSearchResults(data.patients || []);
@@ -150,10 +151,18 @@ const ClinicLook = () => {
   const viewEhr = async (visit: PatientSearchResult) => {
     const clinicId = getClinicId();
     if (!clinicId) return;
+    if (visit.encounter_id) {
+      saveSearchState();
+      navigate(`/clinic/patients/${encodeURIComponent(visit.patient_id)}/encounters/${encodeURIComponent(visit.encounter_id)}/ehr`);
+      return;
+    }
     setEhrLoading(true);
     setMessage(null);
     try {
-      const response = await fetch(apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(visit.patient_id)}`));
+      const response = await fetch(
+        apiUrl(`/api/ehr/clinic/${encodeURIComponent(clinicId)}/patient/${encodeURIComponent(visit.patient_id)}`),
+        { headers: clinicAuthHeaders() },
+      );
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.detail || "Could not load this patient's EHR");
@@ -352,12 +361,12 @@ const ClinicLook = () => {
                         <div className="divide-y divide-[#e6ded3]">
                           {group.visits.map((visit, idx) => {
                             return (
-                            <div key={idx} className="p-4">
+                            <div key={visit.encounter_id || `${visit.appointment_token}-${visit.date}-${visit.time}-${idx}`} className="p-4">
                               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="text-sm text-muted-foreground">
                                   <span className="font-medium text-[#202825]">{visit.date}</span> at <span className="font-medium text-[#202825]">{visit.time}</span>
                                   <span className="mx-2 text-[#c5beb2]">·</span>
-                                  <span className="rounded-2xl bg-[#00555A]/10 px-2.5 py-0.5 font-bold text-[#00555A]">{visit.appointment_token}</span>
+                                  <span className="rounded-2xl bg-[#00555A]/10 px-2.5 py-0.5 font-bold text-[#00555A]">{visit.appointment_token || "EHR"}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
